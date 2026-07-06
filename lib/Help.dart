@@ -487,7 +487,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
 
                 // Message box with label
                 Text(
-                  "Support Message",
+                  "Message",
                   style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w500,
                     fontSize: 14,
@@ -497,7 +497,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                 TextField(
                   controller: _textEditingController,
                   decoration: InputDecoration(
-                    hintText: "Type your support message here...",
+                    hintText: "Type your message here...",
                     hintStyle: GoogleFonts.poppins(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -522,6 +522,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                   ),
                   keyboardType: TextInputType.multiline,
                   maxLines: 5,
+                  maxLength: 200,
                 ),
 
                 // Error message
