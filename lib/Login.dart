@@ -1420,7 +1420,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                             onPressed: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (context) => Help()),
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const Help(showBottomNavigation: false),
+                                ),
                               );
                             },
                           ),

@@ -11,7 +11,10 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 
 class Help extends StatefulWidget {
-  const Help({Key? key}) : super(key: key);
+  final bool showBottomNavigation;
+
+  const Help({Key? key, this.showBottomNavigation = true}) : super(key: key);
+
   @override
   _HelpPageState createState() => _HelpPageState();
 }
@@ -113,10 +116,12 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      bottomNavigationBar: const AppBottomNav(
-        activeTab: AppBottomNavTab.more,
-        activeMoreItem: AppMoreItem.help,
-      ),
+      bottomNavigationBar: widget.showBottomNavigation
+          ? const AppBottomNav(
+              activeTab: AppBottomNavTab.more,
+              activeMoreItem: AppMoreItem.help,
+            )
+          : null,
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
@@ -131,6 +136,11 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
           leading: IconButton(
             icon: Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () {
+              if (!widget.showBottomNavigation && Navigator.canPop(context)) {
+                Navigator.pop(context);
+                return;
+              }
+
               AppNavigation.backOrDashboard(context);
             },
           ),
