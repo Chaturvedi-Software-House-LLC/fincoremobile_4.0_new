@@ -74,8 +74,6 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-
   late SharedPreferences prefs;
 
   String? hostname = "",
@@ -294,7 +292,6 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
     _initSharedPreferences();
   }
 
