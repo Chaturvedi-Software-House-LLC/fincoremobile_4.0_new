@@ -1023,6 +1023,25 @@ class PendingEntryCard extends StatelessWidget {
                           ),
                         ],
                       ),
+                      const SizedBox(width: 8),
+                      AnimatedRotation(
+                        turns: isExpanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: app_color.withValues(alpha: 0.10),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: app_color,
+                            size: 22,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   if (errorMessage != null && errorMessage!.isNotEmpty) ...[

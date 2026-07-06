@@ -2642,7 +2642,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
             ),
-            automaticallyImplyLeading: true,
+            automaticallyImplyLeading: false,
             leadingWidth: kToolbarHeight,
             /*leading: IconButton(
                 icon: Icon(Icons.menu, color: Colors.white),

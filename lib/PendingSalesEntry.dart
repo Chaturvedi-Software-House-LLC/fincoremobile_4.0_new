@@ -61,6 +61,8 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
   String rolename_fetched = "";
 
   final List<SalesModel> salesentries = [];
+  DateTime? selectedSingleDate;
+  DateTimeRange? selectedDateRange;
 
   TextEditingController _searchController = TextEditingController();
 
@@ -384,8 +386,10 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
         );
 
         salesentries.sort((a, b) {
-          final vchA = int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          final vchB = int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+          final vchA =
+              int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+          final vchB =
+              int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
           if (vchA != vchB) return vchB.compareTo(vchA);
           DateTime dateA = DateTime.parse(a.data['DATE']);
           DateTime dateB = DateTime.parse(b.data['DATE']);
@@ -397,6 +401,8 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
         setState(() {
           FocusManager.instance.primaryFocus?.unfocus();
           _searchController.clear();
+          selectedSingleDate = null;
+          selectedDateRange = null;
 
           if (filteredSalesEntries.isEmpty) {
             isVisibleNoSalesEntryFound = true;
@@ -522,14 +528,11 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
   }
 
   void searchSales(String query) {
-    if (query.trim().isEmpty) {
-      setState(() {
-        filteredSalesEntries = List.from(salesentries);
-      });
-      return;
-    }
+    _applyFilters();
+  }
 
-    final lowerQuery = query.toLowerCase();
+  void _applyFilters() {
+    final query = _searchController.text.trim().toLowerCase();
 
     setState(() {
       filteredSalesEntries = salesentries.where((entry) {
@@ -542,12 +545,367 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
             .toLowerCase();
         final amount = (data['totalAmount'] ?? '').toString().toLowerCase();
 
-        return party.contains(lowerQuery) ||
-            vchno.contains(lowerQuery) ||
-            vchtype.contains(lowerQuery) ||
-            amount.contains(lowerQuery);
+        final bool matchesSearch =
+            query.isEmpty ||
+            party.contains(query) ||
+            vchno.contains(query) ||
+            vchtype.contains(query) ||
+            amount.contains(query);
+
+        final bool matchesDate = _matchesDateFilter(entry);
+
+        return matchesSearch && matchesDate;
       }).toList();
+
+      isVisibleNoSalesEntryFound = filteredSalesEntries.isEmpty;
     });
+  }
+
+  Future<void> _pickSingleDate() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: selectedSingleDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: isDark
+                ? ColorScheme.dark(
+                    primary: app_color,
+                    onPrimary: Colors.white,
+                    surface: const Color(0xFF1F2937),
+                    onSurface: Theme.of(context).colorScheme.onSurface,
+                  )
+                : ColorScheme.light(
+                    primary: app_color,
+                    onPrimary: Colors.white,
+                    onSurface: Theme.of(context).colorScheme.onSurface,
+                  ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(foregroundColor: app_color),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate != null) {
+      setState(() {
+        selectedSingleDate = pickedDate;
+        selectedDateRange = null;
+      });
+
+      _applyFilters();
+    }
+  }
+
+  Future<void> _pickDateRange() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final pickedRange = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      initialDateRange: selectedDateRange,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: app_color,
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            datePickerTheme: DatePickerThemeData(
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              headerBackgroundColor: app_color,
+              headerForegroundColor: Colors.white,
+              rangeSelectionBackgroundColor: app_color.withOpacity(0.14),
+              dayShape: WidgetStateProperty.resolveWith<OutlinedBorder?>((
+                states,
+              ) {
+                if (states.contains(WidgetState.selected)) {
+                  return const CircleBorder();
+                }
+                return null;
+              }),
+              dayForegroundColor: WidgetStateProperty.resolveWith<Color?>((
+                states,
+              ) {
+                if (states.contains(WidgetState.selected)) {
+                  return Colors.white;
+                }
+                if (states.contains(WidgetState.disabled)) {
+                  return Colors.grey.shade400;
+                }
+                return Theme.of(context).colorScheme.onSurface;
+              }),
+              dayBackgroundColor: WidgetStateProperty.resolveWith<Color?>((
+                states,
+              ) {
+                if (states.contains(WidgetState.selected)) {
+                  return app_color;
+                }
+                return null;
+              }),
+              todayForegroundColor: WidgetStateProperty.resolveWith<Color?>((
+                states,
+              ) {
+                if (states.contains(WidgetState.selected)) {
+                  return Colors.white;
+                }
+                return app_color;
+              }),
+              todayBackgroundColor: WidgetStateProperty.resolveWith<Color?>((
+                states,
+              ) {
+                if (states.contains(WidgetState.selected)) {
+                  return app_color;
+                }
+                return Colors.transparent;
+              }),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(foregroundColor: app_color),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedRange != null) {
+      setState(() {
+        selectedDateRange = pickedRange;
+        selectedSingleDate = null;
+      });
+
+      _applyFilters();
+    }
+  }
+
+  void _clearDateFilter() {
+    setState(() {
+      selectedSingleDate = null;
+      selectedDateRange = null;
+    });
+
+    _applyFilters();
+  }
+
+  String _getDateFilterText() {
+    if (selectedSingleDate != null) {
+      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate!);
+    }
+
+    if (selectedDateRange != null) {
+      final start = DateFormat("dd-MMM").format(selectedDateRange!.start);
+      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange!.end);
+      return "$start to $end";
+    }
+
+    return "All Dates";
+  }
+
+  bool _matchesDateFilter(SalesModel entry) {
+    final dateValue = entry.data['DATE'];
+
+    if (dateValue == null) return false;
+
+    final entryDate = DateTime.tryParse(dateValue.toString());
+
+    if (entryDate == null) return false;
+
+    final onlyEntryDate = DateTime(
+      entryDate.year,
+      entryDate.month,
+      entryDate.day,
+    );
+
+    if (selectedSingleDate != null) {
+      final selected = DateTime(
+        selectedSingleDate!.year,
+        selectedSingleDate!.month,
+        selectedSingleDate!.day,
+      );
+
+      return onlyEntryDate == selected;
+    }
+
+    if (selectedDateRange != null) {
+      final start = DateTime(
+        selectedDateRange!.start.year,
+        selectedDateRange!.start.month,
+        selectedDateRange!.start.day,
+      );
+
+      final end = DateTime(
+        selectedDateRange!.end.year,
+        selectedDateRange!.end.month,
+        selectedDateRange!.end.day,
+      );
+
+      return onlyEntryDate.isAtSameMomentAs(start) ||
+          onlyEntryDate.isAtSameMomentAs(end) ||
+          (onlyEntryDate.isAfter(start) && onlyEntryDate.isBefore(end));
+    }
+
+    return true;
+  }
+
+  Widget _buildDateFilterSection() {
+    final bool hasDateFilter =
+        selectedSingleDate != null || selectedDateRange != null;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Theme.of(context).dividerColor),
+          boxShadow: [
+            BoxShadow(
+              color: isDark
+                  ? Colors.black.withValues(alpha: 0.3)
+                  : Colors.black.withValues(alpha: 0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [app_color.withValues(alpha: 0.8), app_color],
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.calendar_month_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _getDateFilterText(),
+                    style: GoogleFonts.poppins(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                if (hasDateFilter)
+                  GestureDetector(
+                    onTap: _clearDateFilter,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: Colors.red.shade600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildFilterButton(
+                    icon: Icons.today_rounded,
+                    text: "Single Date",
+                    isSelected: selectedSingleDate != null,
+                    onTap: _pickSingleDate,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildFilterButton(
+                    icon: Icons.date_range_rounded,
+                    text: "Date Range",
+                    isSelected: selectedDateRange != null,
+                    onTap: _pickDateRange,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterButton({
+    required IconData icon,
+    required String text,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: [app_color.withValues(alpha: 0.85), app_color],
+                )
+              : null,
+          color: isSelected
+              ? null
+              : (Theme.of(context).brightness == Brightness.dark
+                    ? Theme.of(context).colorScheme.surfaceContainerHighest
+                    : Colors.grey.shade50),
+          border: Border.all(
+            color: isSelected ? app_color : Colors.grey.shade200,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 17, color: isSelected ? Colors.white : app_color),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                text,
+                style: GoogleFonts.poppins(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected
+                      ? Colors.white
+                      : Theme.of(context).colorScheme.onSurface,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _refresh() async {
@@ -588,6 +946,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                   onChanged: searchSales,
                   hintText: "Search sales entries...",
                 ),
+              if (salesentries.isNotEmpty) _buildDateFilterSection(),
               Expanded(
                 child: Stack(
                   children: [
@@ -601,7 +960,9 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                               Icon(
                                 Icons.receipt_long,
                                 size: 64,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                               const SizedBox(height: 16),
                               Text(
@@ -610,7 +971,9 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                                 style: GoogleFonts.poppins(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -629,12 +992,17 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                           final totalAmount = card.data['totalAmount'];
                           final vchno = card.data['VOUCHERNUMBER'];
                           final vchtype = card.data['VOUCHERTYPENAME'] ?? 'N/A';
-                          final bool isExpanded = expandedCards.contains(card.id);
+                          final bool isExpanded = expandedCards.contains(
+                            card.id,
+                          );
 
                           DateTime date = DateTime.parse(dateStr);
-                          String formattedDate = DateFormat("dd-MMM-yyyy").format(date);
+                          String formattedDate = DateFormat(
+                            "dd-MMM-yyyy",
+                          ).format(date);
 
-                          final bool canActOnCard = card.isSynced != 1 &&
+                          final bool canActOnCard =
+                              card.isSynced != 1 &&
                               (serial_no != uniGasSerialNumber);
 
                           return PendingEntryCard(
@@ -643,7 +1011,8 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                             partyName: partyLedger,
                             amount: formatAmount(totalAmount.toString()),
                             isSynced: card.isSynced == 1,
-                            errorMessage: (card.isSynced == 2 && card.message != null)
+                            errorMessage:
+                                (card.isSynced == 2 && card.message != null)
                                 ? card.message
                                 : null,
                             isExpanded: isExpanded,
@@ -682,10 +1051,6 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                                 label: "Voucher Type",
                                 value: vchtype,
                               ),
-                              DetailRowTile(
-                                label: "Total Amount",
-                                value: formatAmount(totalAmount.toString()),
-                              ),
                             ],
                           );
                         },
@@ -718,7 +1083,10 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
                             gradient: LinearGradient(
-                              colors: [app_color.withValues(alpha: 0.9), app_color],
+                              colors: [
+                                app_color.withValues(alpha: 0.9),
+                                app_color,
+                              ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
@@ -740,7 +1108,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                               ),
                               const SizedBox(width: 10),
                               Text(
-                                "Create Entry",
+                                "Create",
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 15,

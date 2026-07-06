@@ -372,8 +372,10 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
           jsonList.map((json) => SalesModel.fromJson(json)).toList(),
         );
         deliverynoteentries.sort((a, b) {
-          final vchA = int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          final vchB = int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+          final vchA =
+              int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+          final vchB =
+              int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
           if (vchA != vchB) return vchB.compareTo(vchA);
           DateTime dateA = DateTime.parse(a.data['DATE']);
           DateTime dateB = DateTime.parse(b.data['DATE']);
@@ -788,7 +790,9 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           gradient: isSelected
-              ? LinearGradient(colors: [app_color.withValues(alpha: 0.85), app_color])
+              ? LinearGradient(
+                  colors: [app_color.withValues(alpha: 0.85), app_color],
+                )
               : null,
           color: isSelected
               ? null
@@ -871,7 +875,9 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                               Icon(
                                 Icons.receipt_long,
                                 size: 64,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                               const SizedBox(height: 16),
                               Text(
@@ -880,7 +886,9 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                                 style: GoogleFonts.poppins(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -899,12 +907,17 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                           final totalAmount = card.data['totalAmount'];
                           final vchno = card.data['VOUCHERNUMBER'];
                           final vchtype = card.data['VOUCHERTYPENAME'] ?? 'N/A';
-                          final bool isExpanded = expandedCards.contains(card.id);
+                          final bool isExpanded = expandedCards.contains(
+                            card.id,
+                          );
 
                           DateTime date = DateTime.parse(dateStr);
-                          String formattedDate = DateFormat("dd-MMM-yyyy").format(date);
+                          String formattedDate = DateFormat(
+                            "dd-MMM-yyyy",
+                          ).format(date);
 
-                          final bool canActOnCard = card.isSynced != 1 &&
+                          final bool canActOnCard =
+                              card.isSynced != 1 &&
                               (serial_no != uniGasSerialNumber);
 
                           return PendingEntryCard(
@@ -913,7 +926,8 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                             partyName: partyLedger,
                             amount: formatAmount(totalAmount.toString()),
                             isSynced: card.isSynced == 1,
-                            errorMessage: (card.isSynced == 2 && card.message != null)
+                            errorMessage:
+                                (card.isSynced == 2 && card.message != null)
                                 ? card.message
                                 : null,
                             isExpanded: isExpanded,
@@ -952,11 +966,6 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                                 label: "Voucher Type",
                                 value: vchtype,
                               ),
-                              // if (serial_no != uniGasSerialNumber)
-                                DetailRowTile(
-                                  label: "Total Amount",
-                                  value: formatAmount(totalAmount.toString()),
-                                ),
                             ],
                           );
                         },
@@ -989,7 +998,10 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
                             gradient: LinearGradient(
-                              colors: [app_color.withValues(alpha: 0.9), app_color],
+                              colors: [
+                                app_color.withValues(alpha: 0.9),
+                                app_color,
+                              ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
@@ -1011,7 +1023,7 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                               ),
                               const SizedBox(width: 10),
                               Text(
-                                "Create Entry",
+                                "Create",
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 15,
