@@ -1421,6 +1421,17 @@ class _MyHomePageState extends State<SerialSelect>
           final bool isSelected = item == _selectedserial;
           final serialText = item['serial_no']?.toString() ?? '';
 
+          final bool isDark = Theme.of(context).brightness == Brightness.dark;
+          final Color unselectedBorder = isDark
+              ? Theme.of(context).dividerColor.withOpacity(0.55)
+              : Colors.grey.shade300;
+          final Color unselectedBackground = isDark
+              ? Theme.of(context).cardColor.withOpacity(0.38)
+              : Colors.white;
+          final Color unselectedIconBackground = isDark
+              ? Theme.of(context).scaffoldBackgroundColor.withOpacity(0.5)
+              : Colors.grey.shade50;
+
           return InkWell(
             borderRadius: BorderRadius.circular(18),
             onTap: () async {
@@ -1432,16 +1443,12 @@ class _MyHomePageState extends State<SerialSelect>
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? app_color.withOpacity(0.08)
-                    : (Theme.of(context).brightness == Brightness.dark
-                          ? Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest
-                          : Colors.grey.shade50),
+                    ? app_color.withOpacity(isDark ? 0.14 : 0.08)
+                    : unselectedBackground,
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: isSelected ? app_color : Colors.grey.shade200,
-                  width: isSelected ? 1.4 : 1,
+                  color: isSelected ? app_color : unselectedBorder,
+                  width: isSelected ? 1.5 : 1,
                 ),
               ),
               child: Row(
@@ -1450,18 +1457,18 @@ class _MyHomePageState extends State<SerialSelect>
                     height: 38,
                     width: 38,
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? app_color
-                          : Theme.of(context).cardColor,
+                      color: isSelected ? app_color : unselectedIconBackground,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isSelected ? app_color : Colors.grey.shade200,
+                        color: isSelected ? app_color : unselectedBorder,
                       ),
                     ),
                     child: Icon(
                       Icons.qr_code_2_rounded,
                       size: 20,
-                      color: isSelected ? Colors.white : app_color,
+                      color: isSelected
+                          ? Colors.white
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(width: 12),

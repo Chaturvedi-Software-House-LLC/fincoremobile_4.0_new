@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
@@ -19,7 +18,45 @@ class Help extends StatefulWidget {
   _HelpPageState createState() => _HelpPageState();
 }
 
+class _MapPatternPainter extends CustomPainter {
+  final Color lineColor;
+
+  const _MapPatternPainter({required this.lineColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1.4
+      ..style = PaintingStyle.stroke;
+
+    for (double y = 24; y < size.height; y += 36) {
+      final path = Path()
+        ..moveTo(0, y)
+        ..quadraticBezierTo(size.width * 0.25, y - 18, size.width * 0.5, y)
+        ..quadraticBezierTo(size.width * 0.75, y + 18, size.width, y);
+      canvas.drawPath(path, paint);
+    }
+
+    for (double x = 28; x < size.width; x += 54) {
+      final path = Path()
+        ..moveTo(x, 0)
+        ..quadraticBezierTo(x + 16, size.height * 0.3, x - 4, size.height * 0.6)
+        ..quadraticBezierTo(x - 18, size.height * 0.82, x + 8, size.height);
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MapPatternPainter oldDelegate) {
+    return oldDelegate.lineColor != lineColor;
+  }
+}
+
 class _HelpPageState extends State<Help> with TickerProviderStateMixin {
+  static const String _officeMapQuery =
+      'Chaturvedi Software House LLC, 513 Al Khaleej Centre, Bur Dubai, Dubai';
+
   bool isDashEnable = true,
       isRolesVisible = true,
       isUserEnable = true,
@@ -49,11 +86,16 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
       HttpURL = "",
       SecuritybtnAcessHolder = "";
 
-  void launchMapSearch(String query) async {
-    final url =
-        'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}';
+  Future<void> launchMapSearch(String query) async {
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}',
+    );
 
-    await launch(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      Fluttertoast.showToast(msg: 'Could not open Google Maps');
+    }
   }
 
   Future<void> _initSharedPreferences() async {
@@ -77,6 +119,20 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
         msg: 'Could not launch $url. Kindly dial manually',
       );
       throw 'Could not launch $url';
+    }
+  }
+
+  Future<void> launchSupportEmail() async {
+    final Uri emailUri = Uri(
+      scheme: 'mailto',
+      path: 'saadan@ca-eim.com',
+      queryParameters: {'subject': 'Fincore Go App Support'},
+    );
+
+    if (await canLaunchUrl(emailUri)) {
+      await launchUrl(emailUri);
+    } else {
+      Fluttertoast.showToast(msg: 'Could not open email app');
     }
   }
 
@@ -104,6 +160,135 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     } else {
       Fluttertoast.showToast(msg: 'Could not open email app');
     }
+  }
+
+  Widget _buildGoogleLocationCard() {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => launchMapSearch(_officeMapQuery),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Theme.of(context).dividerColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.18 : 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 150,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF102525), const Color(0xFF121A2A)]
+                      : [app_color.withOpacity(0.12), const Color(0xFFEAF7F4)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _MapPatternPainter(
+                        lineColor: isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : app_color.withOpacity(0.12),
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Container(
+                      height: 62,
+                      width: 62,
+                      decoration: BoxDecoration(
+                        color: app_color,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: app_color.withOpacity(0.32),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.location_on_rounded,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.business_rounded, color: app_color),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Chaturvedi Software House LLC',
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '513 Al Khaleej Centre, Bur Dubai, Dubai U.A.E',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => launchMapSearch(_officeMapQuery),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: app_color,
+                        side: BorderSide(color: app_color.withOpacity(0.45)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.map_outlined),
+                      label: Text(
+                        'Open in Google Maps',
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -242,81 +427,67 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Location
-                      GestureDetector(
-                        onTap: () {
-                          launchMapSearch(
-                            'Chaturvedi Software House LLC, Dubai',
-                          );
-                        },
-                        child: Row(
-                          children: [
-                            Icon(Icons.location_on_rounded, color: app_color),
-                            const SizedBox(width: 10),
-                            Flexible(
-                              child: Text(
-                                "513 Al Khaleej Centre, Bur Dubai, Dubai U.A.E",
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _launchPhone("+97143258361"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: app_color,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Phone
-                      GestureDetector(
-                        onTap: () {
-                          _launchPhone("+97143258361");
-                        },
-                        child: Row(
-                          children: [
-                            Icon(Icons.call_rounded, color: app_color),
-                            const SizedBox(width: 10),
-                            Text(
-                              "+971-43258361",
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                color: Theme.of(context).colorScheme.onSurface,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Email
-                      Row(
-                        children: [
-                          Icon(Icons.email_outlined, color: app_color),
-                          const SizedBox(width: 10),
-                          Text(
-                            "saadan@ca-eim.com",
+                            elevation: 0,
+                          ),
+                          icon: const Icon(Icons.call_rounded),
+                          label: Text(
+                            "Call Support  +971-43258361",
                             style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: launchSupportEmail,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: app_color,
+                            side: BorderSide(
+                              color: app_color.withOpacity(0.45),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          icon: const Icon(Icons.email_outlined),
+                          label: Text(
+                            "Email Support  saadan@ca-eim.com",
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
 
+                const SizedBox(height: 14),
+
+                _buildGoogleLocationCard(),
+
                 const SizedBox(height: 24),
 
                 // Message box with label
                 Text(
-                  "Message",
+                  "Support Message",
                   style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w500,
                     fontSize: 14,
@@ -326,7 +497,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                 TextField(
                   controller: _textEditingController,
                   decoration: InputDecoration(
-                    hintText: "Type your message here...",
+                    hintText: "Type your support message here...",
                     hintStyle: GoogleFonts.poppins(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -387,7 +558,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                     ),
                     icon: const Icon(Icons.send_rounded),
                     label: Text(
-                      'Send',
+                      'Send Message',
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                     ),
                     onPressed: () {
