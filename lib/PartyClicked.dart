@@ -2877,11 +2877,11 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     !PayableVisibility &&
                                     !SalesOrderVisibility &&
                                     !PurchaseOrderVisibility)
-                                  Padding(
-                                    padding: EdgeInsets.only(top: 40),
+                                  SizedBox(
+                                    height: MediaQuery.of(context).size.height * 0.5,
                                     child: Center(
                                       child: Column(
-                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment: MainAxisAlignment.center,
                                         children: [
                                           Icon(
                                             Icons.search_off_rounded,
@@ -3411,11 +3411,11 @@ class _PartyClickedPageState extends State<PartyClicked>
 
                                 // No Data Message
                                 if (isVisibleNoDataFound)
-                                  Padding(
-                                    padding: EdgeInsets.only(top: 40),
+                                  SizedBox(
+                                    height: MediaQuery.of(context).size.height * 0.5,
                                     child: Center(
                                       child: Column(
-                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment: MainAxisAlignment.center,
                                         children: [
                                           Icon(
                                             Icons.search_off_rounded,
@@ -3622,11 +3622,11 @@ class _PartyClickedPageState extends State<PartyClicked>
 
                                   /// ❌ No Data
                                   if (isVisibleNoDataFound)
-                                    Padding(
-                                      padding: EdgeInsets.only(top: 40),
+                                    SizedBox(
+                                      height: MediaQuery.of(context).size.height * 0.5,
                                       child: Center(
                                         child: Column(
-                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment: MainAxisAlignment.center,
                                           children: [
                                             Icon(
                                               Icons.search_off_rounded,

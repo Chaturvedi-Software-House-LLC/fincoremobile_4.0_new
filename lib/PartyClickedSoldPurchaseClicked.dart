@@ -1279,11 +1279,11 @@ class _PartyClickedSoldPurchaseClickedPageState
 
                       // No data found message
                       if (isVisibleNoDataFound)
-                        Padding(
-                          padding: EdgeInsets.only(top: 40),
+                        SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.5,
                           child: Center(
                             child: Column(
-                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
                                   Icons.search_off_rounded,

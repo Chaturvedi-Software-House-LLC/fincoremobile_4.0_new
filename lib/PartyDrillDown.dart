@@ -1170,12 +1170,15 @@ class _PartyDrillDownState extends State<PartyDrillDown>
             ),
 
           if (isVisibleNoDataFound)
-            Center(
-              child: Text(
-                'No data found',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+            SizedBox(
+              height: MediaQuery.of(context).size.height * 0.5,
+              child: Center(
+                child: Text(
+                  'No data found',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ),

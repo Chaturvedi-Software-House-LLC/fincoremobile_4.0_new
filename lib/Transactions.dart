@@ -1827,227 +1827,201 @@ class _TransactionsPageState extends State<Transactions>
                 ),
 
                 SliverToBoxAdapter(
-                  child: Container(
-                    width: double.infinity,
-                    margin: EdgeInsets.only(
-                      left: 12,
-                      right: 12,
-                      top: 8,
-                      bottom: 16,
-                    ),
-                    padding: EdgeInsets.only(
-                      left: 0,
-                      right: 0,
-                      top: 8,
-                      bottom: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
+                  child: Column(
+                    children: [
+                      Container(
+                        color: Colors.transparent,
+                        child: Column(
+                          children: [
+                            Padding(
+                              padding: EdgeInsets.only(
+                                left: 12,
+                                right: 12,
+                                top: 5,
+                              ),
+                              child: Material(
+                                elevation: 2,
+                                borderRadius: BorderRadius.circular(20),
+                                shadowColor: Colors.black12,
 
-                    child: Column(
-                      children: [
-                        Container(
-                          color: Colors.transparent,
-                          child: Column(
-                            children: [
-                              Padding(
-                                padding: EdgeInsets.only(
-                                  left: 12,
-                                  right: 12,
-                                  top: 5,
-                                ),
-                                child: Material(
-                                  elevation: 2,
-                                  borderRadius: BorderRadius.circular(20),
-                                  shadowColor: Colors.black12,
+                                child: TextField(
+                                  controller: searchController,
+                                  onChanged: (value) {
+                                    value = value.toLowerCase();
 
-                                  child: TextField(
-                                    controller: searchController,
-                                    onChanged: (value) {
-                                      value = value.toLowerCase();
-
-                                      if (value.isEmpty || value == '') {
-                                        setState(() {
-                                          filteredItems_transactions =
-                                              transactions_list;
-                                          transactions_count =
-                                              filteredItems_transactions.length
-                                                  .toString();
-                                        });
-                                      } else {
-                                        setState(() {
-                                          filteredItems_transactions =
-                                              transactions_list.where((item) {
-                                                // Filter items based on the search query and the ledgerName property
-                                                final query = value
-                                                    .toLowerCase();
-                                                return item.vchno
-                                                    .toLowerCase()
-                                                    .contains(query);
-                                              }).toList();
-                                          transactions_count =
-                                              filteredItems_transactions.length
-                                                  .toString();
-                                        });
-                                      }
-                                    },
-                                    style: GoogleFonts.poppins(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurface,
+                                    if (value.isEmpty || value == '') {
+                                      setState(() {
+                                        filteredItems_transactions =
+                                            transactions_list;
+                                        transactions_count =
+                                            filteredItems_transactions.length
+                                                .toString();
+                                      });
+                                    } else {
+                                      setState(() {
+                                        filteredItems_transactions =
+                                            transactions_list.where((item) {
+                                              // Filter items based on the search query and the ledgerName property
+                                              final query = value
+                                                  .toLowerCase();
+                                              return item.vchno
+                                                  .toLowerCase()
+                                                  .contains(query);
+                                            }).toList();
+                                        transactions_count =
+                                            filteredItems_transactions.length
+                                                .toString();
+                                      });
+                                    }
+                                  },
+                                  style: GoogleFonts.poppins(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface,
+                                    fontSize: 13,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: "Search by voucher no...",
+                                    hintStyle: GoogleFonts.poppins(
                                       fontSize: 13,
                                     ),
-                                    decoration: InputDecoration(
-                                      hintText: "Search by voucher no...",
-                                      hintStyle: GoogleFonts.poppins(
-                                        fontSize: 13,
+                                    prefixIcon: Icon(
+                                      Icons.search,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                    filled: true,
+                                    fillColor:
+                                    Theme.of(
+                                      context,
+                                    ).inputDecorationTheme.fillColor ??
+                                        Theme.of(
+                                          context,
+                                        ).colorScheme.surfaceContainerHighest,
+                                    contentPadding:
+                                    const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                      horizontal: 16,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      borderSide: BorderSide(
+                                        color: Theme.of(context).dividerColor,
                                       ),
-                                      prefixIcon: Icon(
-                                        Icons.search,
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      borderSide: const BorderSide(
+                                        color: app_color,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    border: InputBorder.none,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            if (transactions_count != "0")
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 16,
+                                  right: 16,
+                                  top: 10,
+                                  bottom: 10,
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(
+                                      sigmaX: 6,
+                                      sigmaY: 6,
+                                    ),
+                                    child: Container(
+                                      width: double.infinity,
+                                      decoration: BoxDecoration(
                                         color: Theme.of(
                                           context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
-                                      filled: true,
-                                      fillColor:
-                                          Theme.of(
-                                            context,
-                                          ).inputDecorationTheme.fillColor ??
-                                          Theme.of(
-                                            context,
-                                          ).colorScheme.surfaceContainerHighest,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            vertical: 14,
-                                            horizontal: 16,
-                                          ),
-                                      enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(20),
-                                        borderSide: BorderSide(
-                                          color: Theme.of(context).dividerColor,
+                                        ).cardColor.withOpacity(0.65),
+                                        borderRadius: BorderRadius.circular(
+                                          30,
                                         ),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(20),
-                                        borderSide: const BorderSide(
+                                        border: Border.all(
                                           color: app_color,
-                                          width: 1.5,
+                                          width: 1.4,
                                         ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(
+                                              0.04,
+                                            ),
+                                            blurRadius: 10,
+                                            offset: Offset(0, 4),
+                                          ),
+                                        ],
                                       ),
-                                      border: InputBorder.none,
+                                      padding: EdgeInsets.only(
+                                        left: 10,
+                                        right: 10,
+                                        top: 5,
+                                        bottom: 5,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                        children: [
+                                          // 🔵 Icon
+                                          Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: app_color.withOpacity(
+                                                0.1,
+                                              ),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(
+                                              Icons.receipt_long,
+                                              size: 16,
+                                              color: app_color,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+
+                                          // 🔢 Count Text
+                                          RichText(
+                                            text: TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text:
+                                                  "${transactions_count} ", // <-- Replace dynamically with $party_count
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 14,
+                                                    fontWeight:
+                                                    FontWeight.bold,
+                                                    color: app_color,
+                                                  ),
+                                                ),
+                                                TextSpan(
+                                                  text: "Transactions",
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 15,
+                                                    fontWeight:
+                                                    FontWeight.w500,
+                                                    color: app_color,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
 
-                              if (transactions_count != "0")
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 16,
-                                    right: 16,
-                                    top: 10,
-                                    bottom: 10,
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: BackdropFilter(
-                                      filter: ImageFilter.blur(
-                                        sigmaX: 6,
-                                        sigmaY: 6,
-                                      ),
-                                      child: Container(
-                                        width: double.infinity,
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(
-                                            context,
-                                          ).cardColor.withOpacity(0.65),
-                                          borderRadius: BorderRadius.circular(
-                                            30,
-                                          ),
-                                          border: Border.all(
-                                            color: app_color,
-                                            width: 1.4,
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withOpacity(
-                                                0.04,
-                                              ),
-                                              blurRadius: 10,
-                                              offset: Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        padding: EdgeInsets.only(
-                                          left: 10,
-                                          right: 10,
-                                          top: 5,
-                                          bottom: 5,
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            // 🔵 Icon
-                                            Container(
-                                              padding: const EdgeInsets.all(6),
-                                              decoration: BoxDecoration(
-                                                color: app_color.withOpacity(
-                                                  0.1,
-                                                ),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: const Icon(
-                                                Icons.receipt_long,
-                                                size: 16,
-                                                color: app_color,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-
-                                            // 🔢 Count Text
-                                            RichText(
-                                              text: TextSpan(
-                                                children: [
-                                                  TextSpan(
-                                                    text:
-                                                        "${transactions_count} ", // <-- Replace dynamically with $party_count
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: 14,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: app_color,
-                                                    ),
-                                                  ),
-                                                  TextSpan(
-                                                    text: "Transactions",
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: 15,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                      color: app_color,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                              /*Visibility(
+                            /*Visibility(
                                   visible: isVisibleNoDataFound,
                                   child: Padding(
                                     padding: const EdgeInsets.only(top: 60),
@@ -2067,361 +2041,360 @@ class _TransactionsPageState extends State<Transactions>
                                     ),
                                   ),
                                 ),*/
-                              isVisibleNoDataFound
-                                  ? _buildEmptyState(context)
-                                  : ListView.builder(
-                                      shrinkWrap: true,
-                                      physics: NeverScrollableScrollPhysics(),
-                                      controller:
-                                          _scrollController_transactions,
-                                      itemCount:
-                                          filteredItems_transactions.length,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 8,
+                            isVisibleNoDataFound
+                                ? _buildEmptyState(context)
+                                : ListView.builder(
+                              shrinkWrap: true,
+                              physics: NeverScrollableScrollPhysics(),
+                              controller:
+                              _scrollController_transactions,
+                              itemCount:
+                              filteredItems_transactions.length,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              itemBuilder: (context, index) {
+                                final card =
+                                filteredItems_transactions[index];
+                                final double amt =
+                                    double.tryParse(
+                                      card.amount.toString(),
+                                    ) ??
+                                        0.0;
+                                final bool isDebit = amt < 0;
+
+                                // 🔹 Currency + Decimal + CR/DR
+                                final formattedAmount =
+                                    '$currencysymbol ${NumberFormat("#,##0.${"0" * decimal!}").format(amt.abs())} ${isDebit ? "DR" : "CR"}';
+                                return GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            TransactionsClicked(
+                                              vchtype: card.vchname,
+                                              startdate:
+                                              startDateString,
+                                              enddate: endDateString,
+                                              vchno: card.vchno,
+                                              vchdate: card.vchdate,
+                                              ispostdated:
+                                              card.ispostdated,
+                                              isoptional:
+                                              card.isoptional,
+                                              refno: card.refno,
+                                              refdate: card.refdate,
+                                              masterid: card.masterid,
+                                            ),
                                       ),
-                                      itemBuilder: (context, index) {
-                                        final card =
-                                            filteredItems_transactions[index];
-                                        final double amt =
-                                            double.tryParse(
-                                              card.amount.toString(),
-                                            ) ??
-                                            0.0;
-                                        final bool isDebit = amt < 0;
-
-                                        // 🔹 Currency + Decimal + CR/DR
-                                        final formattedAmount =
-                                            '$currencysymbol ${NumberFormat("#,##0.${"0" * decimal!}").format(amt.abs())} ${isDebit ? "DR" : "CR"}';
-                                        return GestureDetector(
-                                          onTap: () {
-                                            Navigator.push(
+                                    );
+                                  },
+                                  child: Container(
+                                    margin: const EdgeInsets.symmetric(
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius:
+                                      BorderRadius.circular(20),
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          Theme.of(context)
+                                              .colorScheme
+                                              .surface
+                                              .withOpacity(
+                                            Theme.of(
                                               context,
-                                              MaterialPageRoute(
-                                                builder: (context) =>
-                                                    TransactionsClicked(
-                                                      vchtype: card.vchname,
-                                                      startdate:
-                                                          startDateString,
-                                                      enddate: endDateString,
-                                                      vchno: card.vchno,
-                                                      vchdate: card.vchdate,
-                                                      ispostdated:
-                                                          card.ispostdated,
-                                                      isoptional:
-                                                          card.isoptional,
-                                                      refno: card.refno,
-                                                      refdate: card.refdate,
-                                                      masterid: card.masterid,
-                                                    ),
-                                              ),
-                                            );
-                                          },
-                                          child: Container(
-                                            margin: const EdgeInsets.symmetric(
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              gradient: LinearGradient(
-                                                colors: [
-                                                  Theme.of(context)
-                                                      .colorScheme
-                                                      .surface
-                                                      .withOpacity(
-                                                        Theme.of(
-                                                                  context,
-                                                                ).brightness ==
-                                                                Brightness.dark
-                                                            ? 0.96
-                                                            : 1,
+                                            ).brightness ==
+                                                Brightness.dark
+                                                ? 0.96
+                                                : 1,
+                                          ),
+                                          Theme.of(context)
+                                              .colorScheme
+                                              .surfaceContainerHighest
+                                              .withOpacity(
+                                            Theme.of(
+                                              context,
+                                            ).brightness ==
+                                                Brightness.dark
+                                                ? 0.72
+                                                : 0.38,
+                                          ),
+                                        ],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black12
+                                              .withOpacity(0.08),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                      border: Border.all(
+                                        color: Theme.of(context)
+                                            .dividerColor
+                                            .withOpacity(
+                                          Theme.of(
+                                            context,
+                                          ).brightness ==
+                                              Brightness.dark
+                                              ? 0.7
+                                              : 0.55,
+                                        ),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                        children: [
+                                          /// 🔹 Header (Ledger + Chevron)
+                                          Row(
+                                            children: [
+                                              Container(
+                                                width: 36,
+                                                height: 36,
+                                                decoration: BoxDecoration(
+                                                  gradient: LinearGradient(
+                                                    colors: [
+                                                      app_color
+                                                          .withOpacity(
+                                                        0.6,
                                                       ),
-                                                  Theme.of(context)
-                                                      .colorScheme
-                                                      .surfaceContainerHighest
-                                                      .withOpacity(
-                                                        Theme.of(
-                                                                  context,
-                                                                ).brightness ==
-                                                                Brightness.dark
-                                                            ? 0.72
-                                                            : 0.38,
-                                                      ),
-                                                ],
-                                                begin: Alignment.topLeft,
-                                                end: Alignment.bottomRight,
-                                              ),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black12
-                                                      .withOpacity(0.08),
-                                                  blurRadius: 12,
-                                                  offset: const Offset(0, 6),
-                                                ),
-                                              ],
-                                              border: Border.all(
-                                                color: Theme.of(context)
-                                                    .dividerColor
-                                                    .withOpacity(
-                                                      Theme.of(
-                                                                context,
-                                                              ).brightness ==
-                                                              Brightness.dark
-                                                          ? 0.7
-                                                          : 0.55,
-                                                    ),
-                                                width: 1,
-                                              ),
-                                            ),
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(16),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  /// 🔹 Header (Ledger + Chevron)
-                                                  Row(
-                                                    children: [
-                                                      Container(
-                                                        width: 36,
-                                                        height: 36,
-                                                        decoration: BoxDecoration(
-                                                          gradient: LinearGradient(
-                                                            colors: [
-                                                              app_color
-                                                                  .withOpacity(
-                                                                    0.6,
-                                                                  ),
-                                                              app_color
-                                                                  .withOpacity(
-                                                                    0.9,
-                                                                  ),
-                                                            ],
-                                                          ),
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                12,
-                                                              ),
-                                                          boxShadow: [
-                                                            BoxShadow(
-                                                              color:
-                                                                  (isDebit
-                                                                          ? Colors.red
-                                                                          : Colors.green)
-                                                                      .withOpacity(
-                                                                        0.25,
-                                                                      ),
-                                                              blurRadius: 6,
-                                                              offset:
-                                                                  const Offset(
-                                                                    0,
-                                                                    3,
-                                                                  ),
-                                                            ),
-                                                          ],
-                                                        ),
-
-                                                        child: const Icon(
-                                                          Icons
-                                                              .account_balance_wallet_rounded,
-                                                          color: Colors.white,
-                                                          size: 20,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 12),
-                                                      Expanded(
-                                                        child: Text(
-                                                          card.vchname != "null"
-                                                              ? card.vchname
-                                                              : "Unknown Ledger",
-                                                          style: GoogleFonts.poppins(
-                                                            fontSize: 16,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            color:
-                                                                Theme.of(
-                                                                      context,
-                                                                    )
-                                                                    .colorScheme
-                                                                    .onSurface,
-                                                          ),
-                                                          overflow: TextOverflow
-                                                              .visible,
-                                                        ),
-                                                      ),
-
-                                                      Container(
-                                                        padding:
-                                                            const EdgeInsets.all(
-                                                              6,
-                                                            ),
-                                                        decoration: BoxDecoration(
-                                                          color: Theme.of(context)
-                                                              .colorScheme
-                                                              .surfaceContainerHighest,
-                                                          shape:
-                                                              BoxShape.circle,
-                                                          boxShadow: [
-                                                            BoxShadow(
-                                                              color: Colors
-                                                                  .black12,
-                                                              blurRadius: 4,
-                                                              offset:
-                                                                  const Offset(
-                                                                    0,
-                                                                    2,
-                                                                  ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                        child: Icon(
-                                                          Icons
-                                                              .chevron_right_rounded,
-                                                          size: 20,
-                                                          color: Theme.of(context)
-                                                              .colorScheme
-                                                              .onSurfaceVariant,
-                                                        ),
+                                                      app_color
+                                                          .withOpacity(
+                                                        0.9,
                                                       ),
                                                     ],
                                                   ),
-
-                                                  const SizedBox(height: 14),
-                                                  Divider(
-                                                    height: 1,
-                                                    color: Theme.of(
-                                                      context,
-                                                    ).dividerColor,
+                                                  borderRadius:
+                                                  BorderRadius.circular(
+                                                    12,
                                                   ),
-                                                  const SizedBox(height: 14),
-
-                                                  _modernDetailRow(
-                                                    context,
-                                                    "Voucher No",
-                                                    card.vchno,
-                                                    Icons.receipt_long_rounded,
-                                                  ),
-
-                                                  _modernDetailRow(
-                                                    context,
-                                                    "Date",
-                                                    convertDateFormat(
-                                                      card.vchdate,
-                                                    ),
-                                                    Icons
-                                                        .calendar_today_outlined,
-                                                  ),
-
-                                                  _modernDetailRow(
-                                                    context,
-                                                    "Amount",
-                                                    formattedAmount,
-                                                    Icons.payments_outlined,
-                                                    isDebit: isDebit,
-                                                    isAmountRow: true,
-                                                  ),
-
-                                                  /// 🔹 Tags
-                                                  if (card.ispostdated == "1" ||
-                                                      card.isoptional ==
-                                                          "1") ...[
-                                                    const SizedBox(height: 12),
-                                                    Wrap(
-                                                      spacing: 8,
-                                                      runSpacing: 6,
-                                                      children: [
-                                                        if (card.ispostdated ==
-                                                            "1")
-                                                          _buildTagChip(
-                                                            label: "Post Dated",
-                                                            icon:
-                                                                Icons.schedule,
-                                                            bgColor: app_color.withOpacity(
-                                                              Theme.of(
-                                                                        context,
-                                                                      ).brightness ==
-                                                                      Brightness
-                                                                          .dark
-                                                                  ? 0.18
-                                                                  : 0.10,
-                                                            ),
-                                                            borderColor: app_color.withOpacity(
-                                                              Theme.of(
-                                                                        context,
-                                                                      ).brightness ==
-                                                                      Brightness
-                                                                          .dark
-                                                                  ? 0.42
-                                                                  : 0.30,
-                                                            ),
-                                                            textColor:
-                                                                Theme.of(
-                                                                      context,
-                                                                    ).brightness ==
-                                                                    Brightness
-                                                                        .dark
-                                                                ? Colors
-                                                                      .tealAccent
-                                                                      .shade100
-                                                                : Colors
-                                                                      .teal
-                                                                      .shade700,
-                                                          ),
-                                                        if (card.isoptional ==
-                                                            "1")
-                                                          _buildTagChip(
-                                                            label: "Optional",
-                                                            icon: Icons
-                                                                .info_outline,
-                                                            bgColor: Colors.orange.withOpacity(
-                                                              Theme.of(
-                                                                        context,
-                                                                      ).brightness ==
-                                                                      Brightness
-                                                                          .dark
-                                                                  ? 0.18
-                                                                  : 0.10,
-                                                            ),
-                                                            borderColor: Colors
-                                                                .orange
-                                                                .withOpacity(
-                                                                  Theme.of(
-                                                                            context,
-                                                                          ).brightness ==
-                                                                          Brightness
-                                                                              .dark
-                                                                      ? 0.42
-                                                                      : 0.30,
-                                                                ),
-                                                            textColor:
-                                                                Theme.of(
-                                                                      context,
-                                                                    ).brightness ==
-                                                                    Brightness
-                                                                        .dark
-                                                                ? Colors
-                                                                      .orange
-                                                                      .shade200
-                                                                : Colors
-                                                                      .orange
-                                                                      .shade700,
-                                                          ),
-                                                      ],
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color:
+                                                      (isDebit
+                                                          ? Colors.red
+                                                          : Colors.green)
+                                                          .withOpacity(
+                                                        0.25,
+                                                      ),
+                                                      blurRadius: 6,
+                                                      offset:
+                                                      const Offset(
+                                                        0,
+                                                        3,
+                                                      ),
                                                     ),
                                                   ],
-                                                ],
+                                                ),
+
+                                                child: const Icon(
+                                                  Icons
+                                                      .account_balance_wallet_rounded,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
                                               ),
-                                            ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Text(
+                                                  card.vchname != "null"
+                                                      ? card.vchname
+                                                      : "Unknown Ledger",
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 16,
+                                                    fontWeight:
+                                                    FontWeight.w600,
+                                                    color:
+                                                    Theme.of(
+                                                      context,
+                                                    )
+                                                        .colorScheme
+                                                        .onSurface,
+                                                  ),
+                                                  overflow: TextOverflow
+                                                      .visible,
+                                                ),
+                                              ),
+
+                                              Container(
+                                                padding:
+                                                const EdgeInsets.all(
+                                                  6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .surfaceContainerHighest,
+                                                  shape:
+                                                  BoxShape.circle,
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors
+                                                          .black12,
+                                                      blurRadius: 4,
+                                                      offset:
+                                                      const Offset(
+                                                        0,
+                                                        2,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: Icon(
+                                                  Icons
+                                                      .chevron_right_rounded,
+                                                  size: 20,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        );
-                                      },
+
+                                          const SizedBox(height: 14),
+                                          Divider(
+                                            height: 1,
+                                            color: Theme.of(
+                                              context,
+                                            ).dividerColor,
+                                          ),
+                                          const SizedBox(height: 14),
+
+                                          _modernDetailRow(
+                                            context,
+                                            "Voucher No",
+                                            card.vchno,
+                                            Icons.receipt_long_rounded,
+                                          ),
+
+                                          _modernDetailRow(
+                                            context,
+                                            "Date",
+                                            convertDateFormat(
+                                              card.vchdate,
+                                            ),
+                                            Icons
+                                                .calendar_today_outlined,
+                                          ),
+
+                                          _modernDetailRow(
+                                            context,
+                                            "Amount",
+                                            formattedAmount,
+                                            Icons.payments_outlined,
+                                            isDebit: isDebit,
+                                            isAmountRow: true,
+                                          ),
+
+                                          /// 🔹 Tags
+                                          if (card.ispostdated == "1" ||
+                                              card.isoptional ==
+                                                  "1") ...[
+                                            const SizedBox(height: 12),
+                                            Wrap(
+                                              spacing: 8,
+                                              runSpacing: 6,
+                                              children: [
+                                                if (card.ispostdated ==
+                                                    "1")
+                                                  _buildTagChip(
+                                                    label: "Post Dated",
+                                                    icon:
+                                                    Icons.schedule,
+                                                    bgColor: app_color.withOpacity(
+                                                      Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                          Brightness
+                                                              .dark
+                                                          ? 0.18
+                                                          : 0.10,
+                                                    ),
+                                                    borderColor: app_color.withOpacity(
+                                                      Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                          Brightness
+                                                              .dark
+                                                          ? 0.42
+                                                          : 0.30,
+                                                    ),
+                                                    textColor:
+                                                    Theme.of(
+                                                      context,
+                                                    ).brightness ==
+                                                        Brightness
+                                                            .dark
+                                                        ? Colors
+                                                        .tealAccent
+                                                        .shade100
+                                                        : Colors
+                                                        .teal
+                                                        .shade700,
+                                                  ),
+                                                if (card.isoptional ==
+                                                    "1")
+                                                  _buildTagChip(
+                                                    label: "Optional",
+                                                    icon: Icons
+                                                        .info_outline,
+                                                    bgColor: Colors.orange.withOpacity(
+                                                      Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                          Brightness
+                                                              .dark
+                                                          ? 0.18
+                                                          : 0.10,
+                                                    ),
+                                                    borderColor: Colors
+                                                        .orange
+                                                        .withOpacity(
+                                                      Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                          Brightness
+                                                              .dark
+                                                          ? 0.42
+                                                          : 0.30,
+                                                    ),
+                                                    textColor:
+                                                    Theme.of(
+                                                      context,
+                                                    ).brightness ==
+                                                        Brightness
+                                                            .dark
+                                                        ? Colors
+                                                        .orange
+                                                        .shade200
+                                                        : Colors
+                                                        .orange
+                                                        .shade700,
+                                                  ),
+                                              ],
+                                            ),
+                                          ],
+                                        ],
+                                      ),
                                     ),
-                            ],
-                          ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -2483,7 +2456,9 @@ class _TransactionsPageState extends State<Transactions>
 }
 
 Widget _buildEmptyState(BuildContext context) {
-  return Center(
+  return SizedBox(
+    height: MediaQuery.of(context).size.height * 0.5,
+    child: Center(
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -2503,6 +2478,7 @@ Widget _buildEmptyState(BuildContext context) {
         ),
       ],
     ),
+  ),
   );
 }
 
