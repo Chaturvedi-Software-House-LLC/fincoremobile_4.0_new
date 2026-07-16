@@ -4827,24 +4827,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
               MaterialPageRoute(builder: (context) => PendingReceiptEntry()),
             );
           },
-          actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
-          ],
         ),
         body: const Center(child: AppLogoLoader()),
       );
@@ -4870,24 +4852,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             MaterialPageRoute(builder: (context) => PendingReceiptEntry()),
           );
         },
-        actions: [
-          IconButton(
-            tooltip: 'Toggle theme',
-            icon: Icon(
-              Theme.of(context).brightness == Brightness.dark
-                  ? Icons.light_mode
-                  : Icons.dark_mode,
-              color: Colors.white,
-            ),
-            onPressed: () {
-              themeController.setThemeMode(
-                Theme.of(context).brightness == Brightness.dark
-                    ? ThemeMode.light
-                    : ThemeMode.dark,
-              );
-            },
-          ),
-        ],
       ),
       body: WillPopScope(
         onWillPop: () async {

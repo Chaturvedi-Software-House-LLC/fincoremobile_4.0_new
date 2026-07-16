@@ -71,7 +71,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
   late DateTime now = DateTime.now();
 
-  bool showOutstandingBills = false; // temporary hide
+  bool showOutstandingBills = true; // temporary hide
 
   bool isVchEditable = false; // state variable
 
@@ -328,7 +328,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     double displayBalance = totalOutstanding.abs();
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
@@ -5679,24 +5679,6 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               MaterialPageRoute(builder: (context) => PendingReceiptEntry()),
             );
           },
-          actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
-          ],
         ),
         body: Center(child: AppLogoLoader()),
       );
@@ -5722,24 +5704,6 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             MaterialPageRoute(builder: (context) => PendingReceiptEntry()),
           );
         },
-        actions: [
-          IconButton(
-            tooltip: 'Toggle theme',
-            icon: Icon(
-              Theme.of(context).brightness == Brightness.dark
-                  ? Icons.light_mode
-                  : Icons.dark_mode,
-              color: Colors.white,
-            ),
-            onPressed: () {
-              themeController.setThemeMode(
-                Theme.of(context).brightness == Brightness.dark
-                    ? ThemeMode.light
-                    : ThemeMode.dark,
-              );
-            },
-          ),
-        ],
       ),
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,

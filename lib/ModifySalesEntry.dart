@@ -39,6 +39,20 @@ class ModifySalesEntry extends StatefulWidget {
   );
 }
 
+// Debug helper for the bulk multi-item add: records which source
+// (Item Rate / Manual) an item's rate came from.
+class _ResolvedRateInfo {
+  final double? rate;
+  final String source;
+  final bool loading;
+
+  _ResolvedRateInfo({
+    required this.rate,
+    required this.source,
+    required this.loading,
+  });
+}
+
 class SaleItem {
   final String itemName;
   String itemQuantity;
@@ -48,6 +62,8 @@ class SaleItem {
   final String itemUnit;
   late Map<String, dynamic> accountingAllocationList;
   late Map<String, dynamic> batchAllocationList;
+  final String meterFrom;
+  final String meterTo;
 
   SaleItem({
     required this.itemName,
@@ -58,6 +74,8 @@ class SaleItem {
     required this.itemUnit,
     required this.accountingAllocationList,
     required this.batchAllocationList,
+    this.meterFrom = '',
+    this.meterTo = '',
   });
 
   SaleItem updateQuantity(String newQuantity) {
@@ -70,6 +88,8 @@ class SaleItem {
       itemUnit: this.itemUnit,
       accountingAllocationList: this.accountingAllocationList,
       batchAllocationList: this.batchAllocationList,
+      meterFrom: this.meterFrom,
+      meterTo: this.meterTo,
     );
   }
 
@@ -83,6 +103,8 @@ class SaleItem {
       itemUnit: this.itemUnit,
       accountingAllocationList: this.accountingAllocationList,
       batchAllocationList: this.batchAllocationList,
+      meterFrom: this.meterFrom,
+      meterTo: this.meterTo,
     );
   }
 }
@@ -1364,325 +1386,356 @@ _itemController.text = _selecteditem;
       );
     }
 
-    pdf.addPage(
-      pw.Page(
-        build: (pw.Context context) {
-          return pw.Stack(
-            children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  // Tax Invoice Heading
-                  pw.Header(
-                    level: 0,
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border(bottom: pw.BorderSide.none),
-                    ),
+    pw.MemoryImage? uniGasLogo;
+    if (isUniGasSerial(serial_no)) {
+      final logoBytes = await rootBundle.load("assets/uigas-logo.jpeg");
+      uniGasLogo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    }
 
-                    child: pw.Center(
-                      child: pw.Text(
-                        'Tax Invoice',
-                        textAlign: pw.TextAlign.center,
-                        style: pw.TextStyle(fontSize: 18),
+    pdf.addPage(
+      pw.MultiPage(
+        footer: (pw.Context context) {
+          return pw.Container(
+            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+            alignment: pw.Alignment.center,
+            child: pw.Text(
+              'Created in Fincore Go',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(
+                fontSize: 10,
+                color: PdfColor.fromInt(0xFFCCCCCC),
+              ),
+            ),
+          );
+        },
+        build: (pw.Context context) {
+          return [
+            // Logo is pinned to the top-left corner, sitting directly
+            // above the details table's left edge - independent of the
+            // "Tax Invoice" heading, which stays centered on its own.
+            // A Stack keeps both compact (~50pt tall) instead of the old
+            // standalone centered 110pt-tall logo stacked above the text.
+            if (uniGasLogo != null)
+              pw.SizedBox(
+                height: 50,
+                child: pw.Stack(
+                  children: [
+                    pw.Positioned(
+                      left: 0,
+                      top: 0,
+                      child: pw.Image(uniGasLogo, height: 50),
+                    ),
+                    pw.Positioned.fill(
+                      child: pw.Center(
+                        child: pw.Text(
+                          'Tax Invoice',
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(fontSize: 18),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              pw.Header(
+                level: 0,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border(bottom: pw.BorderSide.none),
+                ),
+
+                child: pw.Center(
+                  child: pw.Text(
+                    'Tax Invoice',
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(fontSize: 18),
+                  ),
+                ),
+              ),
+            pw.SizedBox(height: 5),
+
+            pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border(
+                  right: pw.BorderSide(width: 1.0),
+                  top: pw.BorderSide(width: 1.0),
+                  left: pw.BorderSide(width: 1.0),
+                  bottom: pw.BorderSide(width: 1.0),
+                ),
+              ),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                mainAxisAlignment: pw.MainAxisAlignment.start,
+                children: [
+                  // Left column
+                  pw.Expanded(
+                    flex: 1,
+                    child: pw.Container(
+                      padding: pw.EdgeInsets.only(
+                        left: 5,
+                        top: 2,
+                        bottom: 2,
+                        right: 5,
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        mainAxisAlignment: pw.MainAxisAlignment.start,
+                        children: [
+                          pw.Text(company!),
+
+                          if (company_address != "null" ||
+                              company_address != "Not Available")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Text(company_address),
+                              ],
+                            ),
+
+                          if (company_emirate != "null" ||
+                              company_emirate != "Not Available")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Row(
+                                  children: [
+                                    pw.Text("Emirate "),
+
+                                    pw.SizedBox(width: 20),
+                                    pw.Text(company_emirate),
+                                  ],
+                                ),
+                              ],
+                            ),
+
+                          if (company_country != "null" ||
+                              company_country != "Not Available")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Row(
+                                  children: [
+                                    pw.Text("Country "),
+
+                                    pw.SizedBox(width: 20),
+                                    pw.Text(company_country),
+                                  ],
+                                ),
+                              ],
+                            ),
+
+                          if (company_trn != "null" ||
+                              company_trn != "Not Available")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Row(
+                                  children: [
+                                    pw.Text("TRN "),
+
+                                    pw.SizedBox(width: 35),
+                                    pw.Text(company_trn),
+                                  ],
+                                ),
+                              ],
+                            ),
+                        ],
                       ),
                     ),
                   ),
-                  pw.SizedBox(height: 5),
 
-                  pw.Container(
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border(
-                        right: pw.BorderSide(width: 1.0),
-                        top: pw.BorderSide(width: 1.0),
-                        left: pw.BorderSide(width: 1.0),
-                        bottom: pw.BorderSide(width: 1.0),
+                  // Right column
+                  pw.Expanded(
+                    flex: 1,
+                    child: pw.Container(
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border(
+                          right: pw.BorderSide(width: 1.0),
+                          top: pw.BorderSide(width: 1.0),
+
+                          bottom: pw.BorderSide(width: 1.0),
+                          left: pw.BorderSide(width: 1.0),
+                        ),
                       ),
-                    ),
-                    child: pw.Row(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      mainAxisAlignment: pw.MainAxisAlignment.start,
-                      children: [
-                        // Left column
-                        pw.Expanded(
-                          flex: 1,
-                          child: pw.Container(
-                            padding: pw.EdgeInsets.only(
-                              left: 5,
-                              top: 2,
-                              bottom: 2,
-                              right: 5,
+
+                      child: pw.Column(
+                        children: [
+                          // first row right column
+                          pw.Container(
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(width: 1),
                             ),
-                            child: pw.Column(
+                            child: pw.Row(
                               crossAxisAlignment: pw.CrossAxisAlignment.start,
                               mainAxisAlignment: pw.MainAxisAlignment.start,
                               children: [
-                                pw.Text(company!),
-
-                                if (company_address != "null" ||
-                                    company_address != "Not Available")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Text(company_address),
-                                    ],
-                                  ),
-
-                                if (company_emirate != "null" ||
-                                    company_emirate != "Not Available")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Row(
-                                        children: [
-                                          pw.Text("Emirate "),
-
-                                          pw.SizedBox(width: 20),
-                                          pw.Text(company_emirate),
-                                        ],
+                                // invoice no
+                                pw.Expanded(
+                                  child: pw.Container(
+                                    decoration: pw.BoxDecoration(
+                                      border: pw.Border(
+                                        right: pw.BorderSide(width: 1),
                                       ),
-                                    ],
+                                    ),
+                                    padding: pw.EdgeInsets.only(
+                                      left: 5,
+                                      top: 5,
+                                      bottom: 5,
+                                      right: 5,
+                                    ),
+
+                                    child: pw.Column(
+                                      crossAxisAlignment:
+                                          pw.CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          pw.MainAxisAlignment.start,
+                                      children: [
+                                        pw.Text('Invoice No:'),
+                                        pw.SizedBox(height: 2),
+                                        pw.Text(_vchnoController.text),
+                                      ],
+                                    ),
                                   ),
+                                ),
 
-                                if (company_country != "null" ||
-                                    company_country != "Not Available")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Row(
-                                        children: [
-                                          pw.Text("Country "),
-
-                                          pw.SizedBox(width: 20),
-                                          pw.Text(company_country),
-                                        ],
+                                pw.Expanded(
+                                  child: pw.Container(
+                                    decoration: pw.BoxDecoration(
+                                      border: pw.Border(
+                                        left: pw.BorderSide(width: 1),
                                       ),
-                                    ],
+                                    ),
+                                    padding: pw.EdgeInsets.only(
+                                      left: 5,
+                                      top: 5,
+                                      bottom: 5,
+                                      right: 5,
+                                    ),
+                                    child: pw.Column(
+                                      crossAxisAlignment:
+                                          pw.CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          pw.MainAxisAlignment.start,
+                                      children: [
+                                        pw.Text('Dated:'),
+                                        pw.SizedBox(height: 2),
+                                        pw.Text(
+                                          formatlastsaledate(saledatestring),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-
-                                if (company_trn != "null" ||
-                                    company_trn != "Not Available")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Row(
-                                        children: [
-                                          pw.Text("TRN "),
-
-                                          pw.SizedBox(width: 35),
-                                          pw.Text(company_trn),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-
-                                pw.SizedBox(height: 20),
+                                ),
                               ],
                             ),
                           ),
-                        ),
 
-                        // Right column
-                        pw.Expanded(
-                          flex: 1,
-                          child: pw.Container(
+                          //second row right column
+                          pw.Container(
                             decoration: pw.BoxDecoration(
-                              border: pw.Border(
-                                right: pw.BorderSide(width: 1.0),
-                                top: pw.BorderSide(width: 1.0),
-
-                                bottom: pw.BorderSide(width: 1.0),
-                                left: pw.BorderSide(width: 1.0),
-                              ),
+                              border: pw.Border.all(width: 1),
                             ),
-
-                            child: pw.Column(
+                            child: pw.Row(
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
+                              mainAxisAlignment: pw.MainAxisAlignment.start,
                               children: [
-                                // first row right column
-                                pw.Container(
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border.all(width: 1),
-                                  ),
-                                  child: pw.Row(
-                                    crossAxisAlignment:
-                                        pw.CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        pw.MainAxisAlignment.start,
-                                    children: [
-                                      // invoice no
-                                      pw.Expanded(
-                                        child: pw.Container(
-                                          decoration: pw.BoxDecoration(
-                                            border: pw.Border(
-                                              right: pw.BorderSide(width: 1),
-                                            ),
-                                          ),
-                                          padding: pw.EdgeInsets.only(
-                                            left: 5,
-                                            top: 5,
-                                            bottom: 5,
-                                            right: 5,
-                                          ),
-
-                                          child: pw.Column(
-                                            crossAxisAlignment:
-                                                pw.CrossAxisAlignment.start,
-                                            mainAxisAlignment:
-                                                pw.MainAxisAlignment.start,
-                                            children: [
-                                              pw.Text('Invoice No:'),
-                                              pw.SizedBox(height: 2),
-                                              pw.Text(_vchnoController.text),
-                                            ],
-                                          ),
-                                        ),
+                                pw.Expanded(
+                                  child: pw.Container(
+                                    decoration: pw.BoxDecoration(
+                                      border: pw.Border(
+                                        right: pw.BorderSide(width: 1),
                                       ),
+                                    ),
+                                    padding: pw.EdgeInsets.only(
+                                      left: 5,
+                                      top: 5,
+                                      bottom: 5,
+                                      right: 5,
+                                    ),
 
-                                      pw.Expanded(
-                                        child: pw.Container(
-                                          decoration: pw.BoxDecoration(
-                                            border: pw.Border(
-                                              left: pw.BorderSide(width: 1),
-                                            ),
-                                          ),
-                                          padding: pw.EdgeInsets.only(
-                                            left: 5,
-                                            top: 5,
-                                            bottom: 5,
-                                            right: 5,
-                                          ),
-                                          child: pw.Column(
-                                            crossAxisAlignment:
-                                                pw.CrossAxisAlignment.start,
-                                            mainAxisAlignment:
-                                                pw.MainAxisAlignment.start,
-                                            children: [
-                                              pw.Text('Dated:'),
-                                              pw.SizedBox(height: 2),
-                                              pw.Text(
-                                                formatlastsaledate(
-                                                  saledatestring,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                    child: pw.Column(
+                                      crossAxisAlignment:
+                                          pw.CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          pw.MainAxisAlignment.start,
 
-                                //second row right column
-                                pw.Container(
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border.all(width: 1),
-                                  ),
-                                  child: pw.Row(
-                                    crossAxisAlignment:
-                                        pw.CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        pw.MainAxisAlignment.start,
-                                    children: [
-                                      pw.Expanded(
-                                        child: pw.Container(
-                                          decoration: pw.BoxDecoration(
-                                            border: pw.Border(
-                                              right: pw.BorderSide(width: 1),
-                                            ),
-                                          ),
-                                          padding: pw.EdgeInsets.only(
-                                            left: 5,
-                                            top: 5,
-                                            bottom: 5,
-                                            right: 5,
-                                          ),
-
-                                          child: pw.Column(
-                                            crossAxisAlignment:
-                                                pw.CrossAxisAlignment.start,
-                                            mainAxisAlignment:
-                                                pw.MainAxisAlignment.start,
-
-                                            children: [
-                                              pw.Text('Reference No:'),
-                                              pw.SizedBox(height: 2),
-                                              pw.Text(controller_refno.text),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-
-                                      pw.Expanded(
-                                        child: pw.Container(
-                                          decoration: pw.BoxDecoration(
-                                            border: pw.Border(
-                                              left: pw.BorderSide(width: 1),
-                                            ),
-                                          ),
-                                          padding: pw.EdgeInsets.only(
-                                            left: 5,
-                                            top: 5,
-                                            bottom: 5,
-                                            right: 5,
-                                          ),
-                                          child: pw.Column(
-                                            crossAxisAlignment:
-                                                pw.CrossAxisAlignment.start,
-                                            mainAxisAlignment:
-                                                pw.MainAxisAlignment.start,
-                                            children: [
-                                              pw.Text('Reference Date:'),
-                                              pw.SizedBox(height: 2),
-                                              pw.Text(
-                                                formatlastsaledate(
-                                                  refdatestring,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                // third row right column
-                                pw.Container(
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      top: pw.BorderSide(width: 1),
-                                      left: pw.BorderSide(width: 1),
+                                      children: [
+                                        pw.Text('Reference No:'),
+                                        pw.SizedBox(height: 2),
+                                        pw.Text(controller_refno.text),
+                                      ],
                                     ),
                                   ),
-                                  child: pw.Row(
-                                    children: [
-                                      pw.Expanded(
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.only(
-                                            left: 5,
-                                            top: 5,
-                                            bottom: 5,
-                                            right: 5,
-                                          ),
+                                ),
 
-                                          child: pw.Column(
-                                            crossAxisAlignment:
-                                                pw.CrossAxisAlignment.start,
-                                            children: [
-                                              pw.Text('Remarks:'),
-                                              pw.SizedBox(height: 2),
-                                              pw.Text(
-                                                controller_narration.text,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+                                pw.Expanded(
+                                  child: pw.Container(
+                                    decoration: pw.BoxDecoration(
+                                      border: pw.Border(
+                                        left: pw.BorderSide(width: 1),
                                       ),
+                                    ),
+                                    padding: pw.EdgeInsets.only(
+                                      left: 5,
+                                      top: 5,
+                                      bottom: 5,
+                                      right: 5,
+                                    ),
+                                    child: pw.Column(
+                                      crossAxisAlignment:
+                                          pw.CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          pw.MainAxisAlignment.start,
+                                      children: [
+                                        pw.Text('Reference Date:'),
+                                        pw.SizedBox(height: 2),
+                                        pw.Text(
+                                          formatlastsaledate(refdatestring),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
 
-                                      /* pw.Expanded(child: pw.Container(
+                          // third row right column
+                          pw.Container(
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border(
+                                top: pw.BorderSide(width: 1),
+                                left: pw.BorderSide(width: 1),
+                              ),
+                            ),
+                            child: pw.Row(
+                              children: [
+                                pw.Expanded(
+                                  child: pw.Container(
+                                    padding: pw.EdgeInsets.only(
+                                      left: 5,
+                                      top: 5,
+                                      bottom: 5,
+                                      right: 5,
+                                    ),
+
+                                    child: pw.Column(
+                                      crossAxisAlignment:
+                                          pw.CrossAxisAlignment.start,
+                                      children: [
+                                        pw.Text('Remarks:'),
+                                        pw.SizedBox(height: 2),
+                                        pw.Text(controller_narration.text),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                                /* pw.Expanded(child: pw.Container(
                                             decoration: pw.BoxDecoration(
                                               border: pw.Border(left: pw.BorderSide(width: 1)
                                               ),
@@ -1699,123 +1752,121 @@ _itemController.text = _selecteditem;
 
                                             )
                                         ),)*/
-                                    ],
-                                  ),
-                                ),
                               ],
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  pw.Container(
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border(
-                        right: pw.BorderSide(width: 1.0),
-
-                        left: pw.BorderSide(width: 1.0),
-                        bottom: pw.BorderSide(width: 1.0),
+                        ],
                       ),
                     ),
-                    child: pw.Row(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      mainAxisAlignment: pw.MainAxisAlignment.start,
-                      children: [
-                        // Left column
-                        pw.Expanded(
-                          flex: 1,
-                          child: pw.Container(
-                            padding: pw.EdgeInsets.only(
-                              left: 5,
-                              top: 2,
-                              bottom: 2,
-                              right: 5,
-                            ),
-                            child: pw.Column(
-                              crossAxisAlignment: pw.CrossAxisAlignment.start,
-                              mainAxisAlignment: pw.MainAxisAlignment.start,
-                              children: [
-                                pw.Text("Buyer's Name"),
+                  ),
+                ],
+              ),
+            ),
 
-                                pw.Column(
-                                  children: [
-                                    pw.SizedBox(height: 2),
+            pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border(
+                  right: pw.BorderSide(width: 1.0),
 
-                                    pw.Text(
-                                      _selectedpartyledger!,
-                                      style: pw.TextStyle(
-                                        fontWeight: pw.FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
+                  left: pw.BorderSide(width: 1.0),
+                  bottom: pw.BorderSide(width: 1.0),
+                ),
+              ),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                mainAxisAlignment: pw.MainAxisAlignment.start,
+                children: [
+                  // Left column
+                  pw.Expanded(
+                    flex: 1,
+                    child: pw.Container(
+                      padding: pw.EdgeInsets.only(
+                        left: 5,
+                        top: 2,
+                        bottom: 2,
+                        right: 5,
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        mainAxisAlignment: pw.MainAxisAlignment.start,
+                        children: [
+                          pw.Text("Buyer's Name"),
+
+                          pw.Column(
+                            children: [
+                              pw.SizedBox(height: 2),
+
+                              pw.Text(
+                                _selectedpartyledger!,
+                                style: pw.TextStyle(
+                                  fontWeight: pw.FontWeight.bold,
                                 ),
+                              ),
+                            ],
+                          ),
 
-                                if (address != "null")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
+                          if (address != "null")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
 
-                                      pw.Text(address),
-                                    ],
-                                  ),
-
-                                if (emirate != "null")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Row(
-                                        children: [
-                                          pw.Text("Emirate "),
-
-                                          pw.SizedBox(width: 20),
-                                          pw.Text(emirate),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-
-                                if (country != "null")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Row(
-                                        children: [
-                                          pw.Text("Country "),
-
-                                          pw.SizedBox(width: 20),
-                                          pw.Text(country),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-
-                                if (trn != "null")
-                                  pw.Column(
-                                    children: [
-                                      pw.SizedBox(height: 2),
-
-                                      pw.Row(
-                                        children: [
-                                          pw.Text("TRN "),
-
-                                          pw.SizedBox(width: 35),
-                                          pw.Text(trn),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-
-                                pw.SizedBox(height: 20),
+                                pw.Text(address),
                               ],
                             ),
-                          ),
-                        ),
-                        // Right column
-                        /*pw.Expanded(
+
+                          if (emirate != "null")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Row(
+                                  children: [
+                                    pw.Text("Emirate "),
+
+                                    pw.SizedBox(width: 20),
+                                    pw.Text(emirate),
+                                  ],
+                                ),
+                              ],
+                            ),
+
+                          if (country != "null")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Row(
+                                  children: [
+                                    pw.Text("Country "),
+
+                                    pw.SizedBox(width: 20),
+                                    pw.Text(country),
+                                  ],
+                                ),
+                              ],
+                            ),
+
+                          if (trn != "null")
+                            pw.Column(
+                              children: [
+                                pw.SizedBox(height: 2),
+
+                                pw.Row(
+                                  children: [
+                                    pw.Text("TRN "),
+
+                                    pw.SizedBox(width: 35),
+                                    pw.Text(trn),
+                                  ],
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Right column
+                  /*pw.Expanded(
                       flex: 1,
                       child: pw.Container(
                           decoration: pw.BoxDecoration(
@@ -1984,11 +2035,11 @@ _itemController.text = _selecteditem;
                               ]
                           )
                       ),),*/
-                      ],
-                    ),
-                  ),
+                ],
+              ),
+            ),
 
-                  /*pw.Container(
+            /*pw.Container(
                 decoration: pw.BoxDecoration(
                   border: pw.Border(
                       right: pw.BorderSide(
@@ -2048,1006 +2099,823 @@ _itemController.text = _selecteditem;
                   ],
                 ),
               ),*/
-                  pw.Container(
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border(
-                        right: pw.BorderSide(width: 1.0),
-                        left: pw.BorderSide(width: 1.0),
-                        bottom: pw.BorderSide(width: 1.0),
+            pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border(
+                  right: pw.BorderSide(width: 1.0),
+                  left: pw.BorderSide(width: 1.0),
+                  bottom: pw.BorderSide(width: 1.0),
+                ),
+              ),
+              child: pw.Column(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                mainAxisAlignment: pw.MainAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    children: [
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(
+                            5,
+                            5,
+                            5,
+                            5,
+                          ), // Left, Top, Right, Bottom
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'Sr No.',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
                       ),
-                    ),
-                    child: pw.Expanded(
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.center,
-                        mainAxisAlignment: pw.MainAxisAlignment.start,
-                        children: [
-                          pw.Row(
-                            children: [
-                              pw.Expanded(
-                                flex: 1,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(
-                                    5,
-                                    5,
-                                    5,
-                                    5,
-                                  ), // Left, Top, Right, Bottom
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      right: pw.BorderSide(width: 1.0),
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'Sr No.',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                flex: 3,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      right: pw.BorderSide(width: 1.0),
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'Description of Goods/Services',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                flex: 1,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      right: pw.BorderSide(width: 1.0),
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'Quantity',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                flex: 1,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      right: pw.BorderSide(width: 1.0),
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'Rate',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                flex: 1,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      right: pw.BorderSide(width: 1.0),
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'per',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                flex: 1,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      right: pw.BorderSide(width: 1.0),
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'Disc. %',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                flex: 2,
-                                child: pw.Container(
-                                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                                  alignment: pw.Alignment.center,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border(
-                                      bottom: pw.BorderSide(width: 1.0),
-                                    ),
-                                  ),
-                                  child: pw.Text(
-                                    'Amount',
-                                    style: pw.TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              ),
-                            ],
+                      pw.Expanded(
+                        flex: 3,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
                           ),
-                        ],
+                          child: pw.Text(
+                            'Description of Goods/Services',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-
-                  pw.Container(
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border(
-                        right: pw.BorderSide(width: 1.0),
-                        left: pw.BorderSide(width: 1.0),
-                        bottom: pw.BorderSide(width: 1.0),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'Quantity',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
                       ),
-                    ),
-                    child: pw.Expanded(
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.center,
-                        mainAxisAlignment: pw.MainAxisAlignment.start,
-                        children: [
-                          pw.Table(
-                            border: pw.TableBorder(
-                              horizontalInside: pw.BorderSide.none,
-                              verticalInside: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                              bottom: pw.BorderSide.none,
-                              top: pw.BorderSide.none,
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
                             ),
-                            children: [
-                              for (var item in saleItems.asMap().entries)
-                                pw.TableRow(
-                                  children: [
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ), // Left, Top, Right, Bottom
-                                        alignment: pw.Alignment.center,
-
-                                        child: pw.Text(
-                                          formatitemKey(item.key),
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-
-                                    pw.Expanded(
-                                      flex: 3,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.center,
-
-                                        child: pw.Text(
-                                          item.value.itemName,
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-
-                                        child: pw.Row(
-                                          mainAxisAlignment:
-                                              pw.MainAxisAlignment.center,
-                                          crossAxisAlignment:
-                                              pw.CrossAxisAlignment.center,
-                                          children: [
-                                            pw.Text(
-                                              item.value.itemQuantity,
-                                              textAlign: pw.TextAlign.right,
-                                              style: pw.TextStyle(fontSize: 10),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.center,
-
-                                        child: pw.Text(
-                                          formatAmountInvoice(
-                                            item.value.itemPrice.toString(),
-                                          ),
-                                          textAlign: pw.TextAlign.center,
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.center,
-                                        child: pw.Text(
-                                          item.value.itemUnit,
-                                          textAlign: pw.TextAlign.center,
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.center,
-                                        child: pw.Text(
-                                          '',
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 2,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-                                        child: pw.Text(
-                                          formatAmountInvoice(
-                                            item.value.itemAmount.toString(),
-                                          ),
-                                          textAlign: pw.TextAlign.right,
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                            ],
                           ),
-
-                          pw.Table(
-                            border: pw.TableBorder(
-                              horizontalInside: pw.BorderSide.none,
-                              verticalInside: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                              top: pw.BorderSide.none,
-                              bottom: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                            ),
-                            children: [
-                              pw.TableRow(
-                                children: [
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ), // Left, Top, Right, Bottom
-                                      alignment: pw.Alignment.center,
-                                    ),
-                                  ),
-
-                                  pw.Expanded(
-                                    flex: 3,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                      child: pw.Text(
-                                        '',
-                                        style: pw.TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.center,
-                                      child: pw.Text(
-                                        '',
-                                        style: pw.TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 2,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        50,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                      child: pw.Text(
-                                        formatAmountInvoice(
-                                          totalitemAmount.toString(),
-                                        ),
-                                        textAlign: pw.TextAlign.right,
-                                        style: pw.TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                          child: pw.Text(
+                            'Rate',
+                            style: pw.TextStyle(fontSize: 10),
                           ),
-
-                          if (ledgerEntries.isNotEmpty)
-                            for (var ledger in ledgerEntries.asMap().entries)
-                              pw.Table(
-                                border: pw.TableBorder(
-                                  horizontalInside: pw.BorderSide(
-                                    color: PdfColor.fromHex('#050400'),
-                                  ),
-                                  verticalInside: pw.BorderSide(
-                                    color: PdfColor.fromHex('#050400'),
-                                  ),
-                                  bottom: pw.BorderSide(
-                                    color: PdfColor.fromHex('#050400'),
-                                  ),
-                                  top: pw.BorderSide.none,
-                                ),
-                                children: [
-                                  pw.TableRow(
-                                    children: [
-                                      pw.Expanded(
-                                        flex: 1,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ), // Left, Top, Right, Bottom
-                                          alignment: pw.Alignment.center,
-                                        ),
-                                      ),
-
-                                      pw.Expanded(
-                                        flex: 3,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ),
-                                          alignment: pw.Alignment.centerRight,
-
-                                          child: pw.Text(
-                                            ledger.value.ledgerName,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-                                        ),
-                                      ),
-                                      pw.Expanded(
-                                        flex: 1,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ),
-                                          alignment: pw.Alignment.centerRight,
-                                        ),
-                                      ),
-                                      pw.Expanded(
-                                        flex: 1,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ),
-                                          alignment: pw.Alignment.centerRight,
-                                        ),
-                                      ),
-                                      pw.Expanded(
-                                        flex: 1,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ),
-                                          alignment: pw.Alignment.centerRight,
-                                        ),
-                                      ),
-                                      pw.Expanded(
-                                        flex: 1,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ),
-                                          alignment: pw.Alignment.centerRight,
-                                        ),
-                                      ),
-                                      pw.Expanded(
-                                        flex: 2,
-                                        child: pw.Container(
-                                          padding: pw.EdgeInsets.fromLTRB(
-                                            5,
-                                            5,
-                                            5,
-                                            5,
-                                          ),
-                                          alignment: pw.Alignment.centerRight,
-                                          child: pw.Text(
-                                            formatAmountInvoice(
-                                              ledger.value.ledgerAmount
-                                                  .toString(),
-                                            ),
-                                            textAlign: pw.TextAlign.right,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-
-                          if (vatledgerdata.isNotEmpty &&
-                              _selectedvatledger != 'Not Applicable')
-                            pw.Table(
-                              border: pw.TableBorder(
-                                horizontalInside: pw.BorderSide(
-                                  color: PdfColor.fromHex('#050400'),
-                                ),
-                                verticalInside: pw.BorderSide(
-                                  color: PdfColor.fromHex('#050400'),
-                                ),
-                                bottom: pw.BorderSide(
-                                  color: PdfColor.fromHex('#050400'),
-                                ),
-                                top: pw.BorderSide.none,
-                              ),
-                              children: [
-                                pw.TableRow(
-                                  children: [
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ), // Left, Top, Right, Bottom
-                                        alignment: pw.Alignment.center,
-                                      ),
-                                    ),
-
-                                    pw.Expanded(
-                                      flex: 3,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-
-                                        child: pw.Text(
-                                          _selectedvatledger,
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 1,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-                                      ),
-                                    ),
-                                    pw.Expanded(
-                                      flex: 2,
-                                      child: pw.Container(
-                                        padding: pw.EdgeInsets.fromLTRB(
-                                          5,
-                                          5,
-                                          5,
-                                          5,
-                                        ),
-                                        alignment: pw.Alignment.centerRight,
-
-                                        child: pw.Text(
-                                          formatAmountInvoice(
-                                            totalVatAmount.toString(),
-                                          ),
-                                          textAlign: pw.TextAlign.right,
-                                          style: pw.TextStyle(fontSize: 10),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-
-                          pw.Table(
-                            border: pw.TableBorder(
-                              horizontalInside: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                              verticalInside: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                              bottom: pw.BorderSide.none,
-                            ),
-                            children: [
-                              pw.TableRow(
-                                children: [
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ), // Left, Top, Right, Bottom
-                                      alignment: pw.Alignment.center,
-                                    ),
-                                  ),
-
-                                  pw.Expanded(
-                                    flex: 3,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-
-                                      child: pw.Text(
-                                        'Total',
-                                        style: pw.TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.center,
-                                      child: pw.Text(
-                                        totalQuantity.toString(),
-                                        style: pw.TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-                                    ),
-                                  ),
-                                  pw.Expanded(
-                                    flex: 2,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      alignment: pw.Alignment.centerRight,
-
-                                      child: pw.Text(
-                                        formatAmountInvoice(
-                                          roundedtotalAmount.toString(),
-                                        ),
-                                        textAlign: pw.TextAlign.right,
-                                        style: pw.TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-
-                          pw.Table(
-                            border: pw.TableBorder(
-                              horizontalInside: pw.BorderSide.none,
-                              verticalInside: pw.BorderSide.none,
-                              bottom: pw.BorderSide.none,
-                              top: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                            ),
-                            children: [
-                              pw.TableRow(
-                                children: [
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ), // Left, Top, Right, Bottom
-                                      alignment: pw.Alignment.centerLeft,
-
-                                      child: pw.Column(
-                                        mainAxisAlignment:
-                                            pw.MainAxisAlignment.start,
-                                        crossAxisAlignment:
-                                            pw.CrossAxisAlignment.start,
-                                        children: [
-                                          pw.Text(
-                                            'Amount Chargeable (in words)',
-                                            textAlign: pw.TextAlign.left,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-
-                                          pw.Text(
-                                            convertAmountToWords(totalAmount),
-                                            textAlign: pw.TextAlign.left,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-
-                                          pw.SizedBox(height: 10),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-
-                          // declaration table
-                          pw.Table(
-                            border: pw.TableBorder(
-                              horizontalInside: pw.BorderSide.none,
-                              verticalInside: pw.BorderSide.none,
-                              bottom: pw.BorderSide.none,
-                              top: pw.BorderSide(
-                                color: PdfColor.fromHex('#050400'),
-                              ),
-                            ),
-                            children: [
-                              pw.TableRow(
-                                children: [
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ), // Left, Top, Right, Bottom
-                                      alignment: pw.Alignment.centerLeft,
-
-                                      child: pw.Column(
-                                        mainAxisAlignment:
-                                            pw.MainAxisAlignment.start,
-                                        crossAxisAlignment:
-                                            pw.CrossAxisAlignment.start,
-                                        children: [
-                                          pw.SizedBox(height: 10),
-
-                                          pw.Text(
-                                            'Declaration',
-                                            textAlign: pw.TextAlign.left,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-
-                                          pw.Text(
-                                            'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct',
-                                            textAlign: pw.TextAlign.left,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-
-                                          pw.SizedBox(height: 10),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-
-                                  pw.Expanded(
-                                    flex: 1,
-                                    child: pw.Container(
-                                      margin: pw.EdgeInsets.only(top: 30),
-                                      padding: pw.EdgeInsets.fromLTRB(
-                                        5,
-                                        5,
-                                        5,
-                                        5,
-                                      ),
-                                      decoration: pw.BoxDecoration(
-                                        border: pw.Border(
-                                          top: pw.BorderSide(width: 1.0),
-                                          left: pw.BorderSide(width: 1.0),
-                                        ),
-                                      ),
-
-                                      // Left, Top, Right, Bottom
-                                      alignment: pw.Alignment.center,
-
-                                      child: pw.Column(
-                                        mainAxisAlignment:
-                                            pw.MainAxisAlignment.center,
-                                        crossAxisAlignment:
-                                            pw.CrossAxisAlignment.center,
-                                        children: [
-                                          pw.Text(
-                                            'for $company',
-                                            textAlign: pw.TextAlign.center,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-
-                                          pw.SizedBox(height: 30),
-
-                                          pw.Text(
-                                            'Authorised Signatory',
-                                            textAlign: pw.TextAlign.left,
-                                            style: pw.TextStyle(fontSize: 10),
-                                          ),
-
-                                          pw.SizedBox(height: 5),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-
-                  pw.Container(
-                    padding: pw.EdgeInsets.fromLTRB(
-                      5,
-                      5,
-                      5,
-                      5,
-                    ), // Left, Top, Right, Bottom
-                    alignment: pw.Alignment.center,
-
-                    child: pw.Text(
-                      'This is a System Generated Document',
-                      textAlign: pw.TextAlign.left,
-                      style: pw.TextStyle(fontSize: 10),
-                    ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'per',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'Disc. %',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'Amount',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              pw.Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: pw.Container(
-                  padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
-                  alignment: pw.Alignment.center,
-                  child: pw.Text(
-                    'Created in Fincore Go',
-                    textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      fontSize: 10,
-                      color: PdfColor.fromInt(0xFFCCCCCC),
-                    ),
+            ),
+
+            // NOTE: these tables are direct top-level widgets (not
+            // wrapped in a Container/Column) — pw.MultiPage can only
+            // split a pw.Table row-by-row across pages when the Table
+            // is top-level; wrapping it defers every row to the next
+            // page instead. Left/right border lines are added on each
+            // Table's own TableBorder so the box still looks unified.
+            ...[
+              pw.Table(
+                border: pw.TableBorder(
+                  left: pw.BorderSide(width: 1.0),
+                  right: pw.BorderSide(width: 1.0),
+                  horizontalInside: pw.BorderSide.none,
+                  verticalInside: pw.BorderSide(
+                    color: PdfColor.fromHex('#050400'),
                   ),
+                  bottom: pw.BorderSide.none,
+                  top: pw.BorderSide(width: 1.0),
+                ),
+                children: [
+                  for (var item in saleItems.asMap().entries)
+                    pw.TableRow(
+                      children: [
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0),
+                            ), // Left, Top, Right, Bottom
+                            alignment: pw.Alignment.center,
+
+                            child: pw.Text(
+                              formatitemKey(item.key),
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+
+                        pw.Expanded(
+                          flex: 3,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            alignment: pw.Alignment.centerLeft,
+
+                            child: pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
+                              children: [
+                                pw.Text(
+                                  item.value.itemName,
+                                  style: pw.TextStyle(fontSize: 10),
+                                ),
+                                if (isUniGasSerial(serial_no) &&
+                                    item.value.meterFrom.isNotEmpty &&
+                                    item.value.meterTo.isNotEmpty)
+                                  pw.Text(
+                                    'Meter Reading: ${item.value.meterFrom} - ${item.value.meterTo}',
+                                    style: pw.TextStyle(
+                                      fontSize: 7,
+                                      fontStyle: pw.FontStyle.italic,
+                                      color: PdfColors.grey500,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            alignment: pw.Alignment.centerRight,
+
+                            child: pw.Row(
+                              mainAxisAlignment: pw.MainAxisAlignment.center,
+                              crossAxisAlignment: pw.CrossAxisAlignment.center,
+                              children: [
+                                pw.Text(
+                                  item.value.itemQuantity,
+                                  textAlign: pw.TextAlign.right,
+                                  style: pw.TextStyle(fontSize: 10),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            alignment: pw.Alignment.center,
+
+                            child: pw.Text(
+                              formatAmountInvoice(
+                                item.value.itemPrice.toString(),
+                              ),
+                              textAlign: pw.TextAlign.center,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            alignment: pw.Alignment.center,
+                            child: pw.Text(
+                              item.value.itemUnit,
+                              textAlign: pw.TextAlign.center,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            alignment: pw.Alignment.center,
+                            child: pw.Text(
+                              '',
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 2,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            alignment: pw.Alignment.centerRight,
+                            child: pw.Text(
+                              formatAmountInvoice(
+                                item.value.itemAmount.toStringAsFixed(decimal!),
+                              ),
+                              textAlign: pw.TextAlign.right,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+
+              pw.Table(
+                border: pw.TableBorder(
+                  left: pw.BorderSide(width: 1.0),
+                  right: pw.BorderSide(width: 1.0),
+                  horizontalInside: pw.BorderSide.none,
+                  verticalInside: pw.BorderSide(
+                    color: PdfColor.fromHex('#050400'),
+                  ),
+                  top: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                  bottom: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                ),
+                children: [
+                  pw.TableRow(
+                    children: [
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(
+                            5,
+                            5,
+                            5,
+                            5,
+                          ), // Left, Top, Right, Bottom
+                          alignment: pw.Alignment.center,
+                        ),
+                      ),
+
+                      pw.Expanded(
+                        flex: 3,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                          child: pw.Text('', style: pw.TextStyle(fontSize: 10)),
+                        ),
+                      ),
+
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          child: pw.Text('', style: pw.TextStyle(fontSize: 10)),
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                          child: pw.Text(
+                            formatAmountInvoice(
+                              totalitemAmount.toStringAsFixed(decimal!),
+                            ),
+                            textAlign: pw.TextAlign.right,
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              if (ledgerEntries.isNotEmpty)
+                for (var ledger in ledgerEntries.asMap().entries)
+                  pw.Table(
+                    border: pw.TableBorder(
+                      left: pw.BorderSide(width: 1.0),
+                      right: pw.BorderSide(width: 1.0),
+                      horizontalInside: pw.BorderSide(
+                        color: PdfColor.fromHex('#050400'),
+                      ),
+                      verticalInside: pw.BorderSide(
+                        color: PdfColor.fromHex('#050400'),
+                      ),
+                      bottom: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                      top: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                    ),
+                    children: [
+                      pw.TableRow(
+                        children: [
+                          pw.Expanded(
+                            flex: 1,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(
+                                5,
+                                5,
+                                5,
+                                5,
+                              ), // Left, Top, Right, Bottom
+                              alignment: pw.Alignment.center,
+                            ),
+                          ),
+
+                          pw.Expanded(
+                            flex: 3,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                              alignment: pw.Alignment.centerRight,
+
+                              child: pw.Text(
+                                ledger.value.ledgerName,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 1,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                              alignment: pw.Alignment.centerRight,
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 1,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                              alignment: pw.Alignment.centerRight,
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 1,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                              alignment: pw.Alignment.centerRight,
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 1,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                              alignment: pw.Alignment.centerRight,
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 2,
+                            child: pw.Container(
+                              padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                              alignment: pw.Alignment.centerRight,
+                              child: pw.Text(
+                                formatAmountInvoice(
+                                  ledger.value.ledgerAmount.toString(),
+                                ),
+                                textAlign: pw.TextAlign.right,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+              if (vatledgerdata.isNotEmpty &&
+                  _selectedvatledger != 'Not Applicable')
+                pw.Table(
+                  border: pw.TableBorder(
+                    left: pw.BorderSide(width: 1.0),
+                    right: pw.BorderSide(width: 1.0),
+                    horizontalInside: pw.BorderSide(
+                      color: PdfColor.fromHex('#050400'),
+                    ),
+                    verticalInside: pw.BorderSide(
+                      color: PdfColor.fromHex('#050400'),
+                    ),
+                    bottom: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                    top: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                  ),
+                  children: [
+                    pw.TableRow(
+                      children: [
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              5,
+                            ), // Left, Top, Right, Bottom
+                            alignment: pw.Alignment.center,
+                          ),
+                        ),
+
+                        pw.Expanded(
+                          flex: 3,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                            alignment: pw.Alignment.centerRight,
+
+                            child: pw.Text(
+                              _selectedvatledger,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                            alignment: pw.Alignment.centerRight,
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                            alignment: pw.Alignment.centerRight,
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                            alignment: pw.Alignment.centerRight,
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                            alignment: pw.Alignment.centerRight,
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 2,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                            alignment: pw.Alignment.centerRight,
+
+                            child: pw.Text(
+                              formatAmountInvoice(totalVatAmount.toString()),
+                              textAlign: pw.TextAlign.right,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+
+              pw.Table(
+                border: pw.TableBorder(
+                  left: pw.BorderSide(width: 1.0),
+                  right: pw.BorderSide(width: 1.0),
+                  horizontalInside: pw.BorderSide(
+                    color: PdfColor.fromHex('#050400'),
+                  ),
+                  verticalInside: pw.BorderSide(
+                    color: PdfColor.fromHex('#050400'),
+                  ),
+                  bottom: pw.BorderSide.none,
+                ),
+                children: [
+                  pw.TableRow(
+                    children: [
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(
+                            5,
+                            5,
+                            5,
+                            5,
+                          ), // Left, Top, Right, Bottom
+                          alignment: pw.Alignment.center,
+                        ),
+                      ),
+
+                      pw.Expanded(
+                        flex: 3,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+
+                          child: pw.Text(
+                            'Total',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          child: pw.Text(
+                            totalQuantity.toString(),
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.centerRight,
+
+                          child: pw.Text(
+                            formatAmountInvoice(roundedtotalAmount.toString()),
+                            textAlign: pw.TextAlign.right,
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              pw.Table(
+                border: pw.TableBorder(
+                  left: pw.BorderSide(width: 1.0),
+                  right: pw.BorderSide(width: 1.0),
+                  horizontalInside: pw.BorderSide.none,
+                  verticalInside: pw.BorderSide.none,
+                  bottom: pw.BorderSide.none,
+                  top: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                ),
+                children: [
+                  pw.TableRow(
+                    children: [
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(
+                            5,
+                            5,
+                            5,
+                            5,
+                          ), // Left, Top, Right, Bottom
+                          alignment: pw.Alignment.centerLeft,
+
+                          child: pw.Column(
+                            mainAxisAlignment: pw.MainAxisAlignment.start,
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text(
+                                'Amount Chargeable (in words)',
+                                textAlign: pw.TextAlign.left,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+
+                              pw.Text(
+                                convertAmountToWords(totalAmount),
+                                textAlign: pw.TextAlign.left,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+
+                              pw.SizedBox(height: 10),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              // declaration table - both this table's bottom border AND
+              // the note container's top border below are real (not
+              // none), so the box closes properly whether they land on
+              // the same page (the two lines just overlap into one) or
+              // get split across a page break (each half still closes
+              // cleanly on its own).
+              pw.Table(
+                border: pw.TableBorder(
+                  left: pw.BorderSide(width: 1.0),
+                  right: pw.BorderSide(width: 1.0),
+                  horizontalInside: pw.BorderSide.none,
+                  verticalInside: pw.BorderSide(width: 1.0),
+                  bottom: pw.BorderSide(width: 1.0),
+                  top: pw.BorderSide(color: PdfColor.fromHex('#050400')),
+                ),
+                children: [
+                  pw.TableRow(
+                    children: [
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(
+                            5,
+                            5,
+                            5,
+                            5,
+                          ), // Left, Top, Right, Bottom
+                          alignment: pw.Alignment.centerLeft,
+
+                          child: pw.Column(
+                            mainAxisAlignment: pw.MainAxisAlignment.start,
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.SizedBox(height: 4),
+
+                              pw.Text(
+                                'Declaration',
+                                textAlign: pw.TextAlign.left,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+
+                              pw.Text(
+                                'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct',
+                                textAlign: pw.TextAlign.left,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+
+                              pw.SizedBox(height: 4),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+
+                          child: pw.Column(
+                            mainAxisAlignment: pw.MainAxisAlignment.center,
+                            crossAxisAlignment: pw.CrossAxisAlignment.center,
+                            children: [
+                              pw.Text(
+                                'for $company',
+                                textAlign: pw.TextAlign.center,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+
+                              pw.SizedBox(height: 30),
+
+                              pw.Text(
+                                'Authorised Signatory',
+                                textAlign: pw.TextAlign.left,
+                                style: pw.TextStyle(fontSize: 10),
+                              ),
+
+                              pw.SizedBox(height: 2),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              pw.Container(
+                padding: pw.EdgeInsets.fromLTRB(
+                  5,
+                  2,
+                  5,
+                  2,
+                ), // Left, Top, Right, Bottom
+                decoration: pw.BoxDecoration(
+                  border: pw.Border(
+                    left: pw.BorderSide(width: 1.0),
+                    right: pw.BorderSide(width: 1.0),
+                    top: pw.BorderSide(width: 1.0),
+                    bottom: pw.BorderSide(width: 1.0),
+                  ),
+                ),
+                alignment: pw.Alignment.center,
+
+                child: pw.Text(
+                  'This is a System Generated Document',
+                  textAlign: pw.TextAlign.left,
+                  style: pw.TextStyle(fontSize: 10),
                 ),
               ),
             ],
-          );
+          ];
         },
       ),
     );
 
     // 🗂 Save to temp file
     final pdfData = await pdf.save();
-    final dir = await getApplicationDocumentsDirectory();
 
+    final dir = await getApplicationDocumentsDirectory();
     final filePath = '${dir.path}/SaleInvoice.pdf';
 
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    // ✅ Share using ShareXFiles (modern API)
-    final xfile = XFile(filePath, mimeType: 'application/pdf');
     await Share.shareXFiles([
-      xfile,
+      XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Sale Invoice for $_selectedpartyledger');
 
     setState(() {
@@ -3064,11 +2932,11 @@ _itemController.text = _selecteditem;
       refdatestring = _dateFormat.format(refdate);
       refdatetxt = formatlastsaledate(refdatestring);
       _refdateController.text = refdatetxt;
-      _selectedvchtypename = vchtypenamedata[0];
+      // _selectedvchtypename = vchtypenamedata[0];
       fetchvchnos(_selectedvchtypename);
-      _selectedpartyledger = partyledgerdata[0];
-
-      _selectedsalesledger = salesledger_data[0];
+      _selectedpartyledger = null;
+      _partyLedgerController.clear();
+      // _selectedsalesledger = salesledger_data[0];
 
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
 
@@ -3102,8 +2970,7 @@ _itemController.text = _selecteditem;
         double previousAmount,
         LedgerEntry entry,
       ) {
-        return previousAmount +
-            double.parse(entry.ledgerAmount.toStringAsFixed(decimal!));
+        return previousAmount + entry.ledgerAmount;
       });
 
       if (_selectedvatledger != 'Not Applicable') {
@@ -4376,6 +4243,53 @@ _itemController.text = _selecteditem;
     itemAmountController.text = formattedAmount.toString();
   }
 
+  // When both start/end meter readings are entered and valid, quantity is
+  // derived from them (end - start) and the field is locked to prevent it
+  // drifting out of sync with the readings. If both readings are cleared,
+  // quantity goes back to being user-editable and resets to '1'.
+  bool _isQtyLockedByMeterReading(String startText, String endText) {
+    final start = double.tryParse(startText.trim());
+    final end = double.tryParse(endText.trim());
+    return start != null && end != null && end > start;
+  }
+
+  void _syncQtyWithMeterReading({
+    required TextEditingController startController,
+    required TextEditingController endController,
+    required TextEditingController qtyController,
+  }) {
+    final startText = startController.text.trim();
+    final endText = endController.text.trim();
+    final start = double.tryParse(startText);
+    final end = double.tryParse(endText);
+
+    if (start != null && end != null && end > start) {
+      final qty = end - start;
+      qtyController.text = qty == qty.roundToDouble()
+          ? qty.toInt().toString()
+          : qty.toString();
+    } else if (startText.isEmpty && endText.isEmpty) {
+      qtyController.text = '1';
+    }
+  }
+
+  double _estimateInvoiceLastRowFillerPadding(int itemCount) {
+    // Calibrated against actual rendered output on an A4 page (same
+    // technique as the Delivery Note PDF), re-measured after the header
+    // was compacted (logo moved to the top-left corner instead of a
+    // standalone 110pt-tall centered block). With the shorter header, a
+    // single item's content now ends ~557pt from the top with no filler,
+    // so there's real room to stretch the last row down to fill the page.
+    const double targetContentEnd = 700.0;
+    const double baselineForOneItem = 557.4;
+    const double perItemHeight = 33.0;
+
+    final double baseline =
+        baselineForOneItem + (itemCount - 1) * perItemHeight;
+    final double remaining = targetContentEnd - baseline;
+    return remaining.clamp(5.0, 260.0);
+  }
+
   void updateAmount() {
     String qtyValue = itemQuantityController.text;
 
@@ -4824,6 +4738,1252 @@ _itemController.text = _selecteditem;
       },);}
     );
   }*/
+
+  InputDecoration _inputDecoration({
+    required String label,
+    required IconData icon,
+    required List<Color> gradientColors,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: GoogleFonts.poppins(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+      prefixIcon: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: gradientColors),
+          borderRadius: const BorderRadius.all(Radius.circular(8)),
+        ),
+        child: Icon(icon, color: Colors.white),
+      ),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: app_color, width: 1.5),
+      ),
+    );
+  }
+
+  double? _resolveItemOwnRate(Map<String, dynamic> item, double multiplier) {
+    final String standardPrice = item['standardprice']?.toString() ?? 'null';
+    final String salePrice = item['saleprice']?.toString() ?? 'null';
+
+    if (standardPrice != 'null') {
+      final double? parsed = double.tryParse(standardPrice);
+      if (parsed != null) return parsed * multiplier;
+    }
+    if (salePrice != 'null') {
+      final double? parsed = double.tryParse(salePrice);
+      if (parsed != null) return parsed * multiplier;
+    }
+    return null;
+  }
+
+  // Mirrors the totals recalculation addItem() does, kept separate so
+  // this experimental flow can't regress the existing single-item logic.
+  void _recalcTotalsAfterBulkAdd() {
+    setState(() {
+      isVisibleItemHeading = saleItems.isNotEmpty;
+
+      totalPriceOfItems = saleItems.fold(0.0, (
+        double previousAmount,
+        SaleItem item,
+      ) {
+        return previousAmount +
+            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
+                double.parse(item.itemQuantity));
+      });
+
+      double vat_perc = vatperc / 100;
+      if (_selectedvatledger != 'Not Applicable') {
+        double totalAmountForVatAppEntries = ledgerEntries
+            .where((entry) => entry.vatApp)
+            .fold(0.0, (double previousAmount, LedgerEntry entry) {
+              return previousAmount + entry.ledgerAmount;
+            });
+        double ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
+        itemsVatAmount = double.parse(
+          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
+        );
+        totalVatAmount = itemsVatAmount + ledgerVatAmount;
+      } else {
+        totalVatAmount = 0;
+      }
+      roundedtotalVatAmount = double.parse(
+        totalVatAmount.toStringAsFixed(decimal!),
+      );
+      final vatFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
+      controller_vatamt.text = vatFormatter.format(roundedtotalVatAmount);
+
+      double totalAmountOfLedgers = ledgerEntries.fold(0.0, (
+        double previousAmount,
+        LedgerEntry entry,
+      ) {
+        return previousAmount + entry.ledgerAmount;
+      });
+
+      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
+      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
+      final totalFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
+      controller_totalamt.text = totalFormatter.format(roundedtotalAmount);
+    });
+  }
+
+  // Small colored badge used to permanently show where a rate came from
+  // (Price Level / Item Rate / Manual) — a normal user-facing indicator.
+  Widget _rateSourceBadge(String source) {
+    final Color color = source == 'Price Level'
+        ? Colors.green
+        : (source == 'Item Rate' ? Colors.blueAccent : Colors.orange);
+    final String label = source == 'Empty' ? 'Manual' : source;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (source == 'Price Level')
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(Icons.lock_outline, size: 12, color: color),
+            ),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Compact rounded stepper used for quantity in the bulk-add sheet.
+  Widget _bulkQtyStepper(
+    TextEditingController controller,
+    VoidCallback onDecrement,
+    VoidCallback onIncrement, {
+    ValueChanged<String>? onChanged,
+    bool enabled = true,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: enabled ? onDecrement : null,
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(14),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                Icons.remove,
+                size: 18,
+                color: enabled ? Colors.redAccent : Colors.grey,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            child: TextField(
+              controller: controller,
+              enabled: enabled,
+              textAlign: TextAlign.center,
+              textAlignVertical: TextAlignVertical.center,
+              keyboardType: TextInputType.number,
+              onChanged: onChanged,
+              style: GoogleFonts.poppins(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: enabled ? onIncrement : null,
+            borderRadius: const BorderRadius.horizontal(
+              right: Radius.circular(14),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                Icons.add,
+                size: 18,
+                color: enabled ? app_color : Colors.grey,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showMultiItemSelectPopup(BuildContext context) async {
+    final Set<String> selectedItemNames = {};
+    // Shows exactly where each item's rate came from — Price Level,
+    // Item Rate, or Manual (empty, needs entry).
+    final Map<String, _ResolvedRateInfo> rateInfoCache = {};
+    // Editable rate per item — locked when the rate came from a Price
+    // Level (matches the existing single-item behavior), editable when
+    // it came from the item's own rate or was left empty.
+    final Map<String, TextEditingController> rateEditControllers = {};
+    // Editable quantity per item, defaults to "1".
+    final Map<String, TextEditingController> qtyEditControllers = {};
+    // Meter start/end reading per item — only used/shown for UniGas
+    // serials, same fields and validation as the single-item flow.
+    final Map<String, TextEditingController> startReadingControllers = {};
+    final Map<String, TextEditingController> endReadingControllers = {};
+    final Map<String, String?> meterReadingErrors = {};
+    // Selected unit per item — matches the single-item flow's unit
+    // dropdown. Switching units resets qty to "1" (same behavior; rate
+    // is intentionally NOT recomputed on unit change, mirroring the
+    // single-item flow exactly).
+    final Map<String, String> selectedUnitPerItem = {};
+    final TextEditingController searchController = TextEditingController();
+    String searchQuery = '';
+
+    Future<void> resolveRateFor(
+      String name,
+      Map<String, dynamic> itemInfo,
+      StateSetter setStateDialog,
+    ) async {
+      setStateDialog(() {
+        rateInfoCache[name] = _ResolvedRateInfo(
+          rate: null,
+          source: 'Resolving…',
+          loading: true,
+        );
+      });
+
+      final List<dynamic> unitJson = itemInfo['unit'] ?? [];
+      final List<Unit> units = unitJson.map((u) => Unit.fromJson(u)).toList();
+      final double multiplier = units.isNotEmpty ? units.first.multiplier : 1.0;
+      final double? rate = _resolveItemOwnRate(itemInfo, multiplier);
+      final String source = rate != null ? 'Item Rate' : 'Empty';
+
+      setStateDialog(() {
+        rateInfoCache[name] = _ResolvedRateInfo(
+          rate: rate,
+          source: source,
+          loading: false,
+        );
+        rateEditControllers[name] = TextEditingController(
+          text: rate != null ? rate.toStringAsFixed(decimal ?? 2) : '',
+        );
+      });
+    }
+
+    void adjustQty(String name, int delta, StateSetter setStateDialog) {
+      final controller = qtyEditControllers[name];
+      if (controller == null) return;
+      final int current = int.tryParse(controller.text.trim()) ?? 1;
+      final int next = (current + delta) < 1 ? 1 : current + delta;
+      setStateDialog(() {
+        controller.text = next.toString();
+      });
+    }
+
+    // Mirrors addItem()'s meter reading validation exactly: both fields
+    // must be filled together, and end must be greater than start.
+    void validateMeterReading(String name, StateSetter setStateDialog) {
+      final String meterFrom = startReadingControllers[name]?.text.trim() ?? '';
+      final String meterTo = endReadingControllers[name]?.text.trim() ?? '';
+
+      String? error;
+      if ((meterFrom.isNotEmpty && meterTo.isEmpty) ||
+          (meterFrom.isEmpty && meterTo.isNotEmpty)) {
+        error = "Please enter both start and end readings";
+      } else if (meterFrom.isNotEmpty && meterTo.isNotEmpty) {
+        final start = double.tryParse(meterFrom);
+        final end = double.tryParse(meterTo);
+        if (start == null || end == null || end <= start) {
+          error = "End reading must be greater than start reading";
+        }
+      }
+
+      setStateDialog(() {
+        meterReadingErrors[name] = error;
+        final qtyController = qtyEditControllers[name];
+        if (qtyController != null) {
+          _syncQtyWithMeterReading(
+            startController: startReadingControllers[name]!,
+            endController: endReadingControllers[name]!,
+            qtyController: qtyController,
+          );
+        }
+      });
+    }
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            bool isAdding = false;
+            final List<dynamic> filteredItems = searchQuery.isEmpty
+                ? itemdata
+                : itemdata
+                      .where(
+                        (i) => (i['name']?.toString() ?? '')
+                            .toLowerCase()
+                            .contains(searchQuery.toLowerCase()),
+                      )
+                      .toList();
+
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.9,
+              minChildSize: 0.5,
+              builder: (context, scrollController) {
+                return Column(
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 10),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 12, 6),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Colors.indigo, Colors.blueAccent],
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.checklist,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              "Add Multiple Items",
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          if (selectedItemNames.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              margin: const EdgeInsets.only(right: 4),
+                              decoration: BoxDecoration(
+                                color: app_color.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                "${selectedItemNames.length} selected",
+                                style: GoogleFonts.poppins(
+                                  color: app_color,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          IconButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                      child: TextField(
+                        controller: searchController,
+                        style: GoogleFonts.poppins(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Search items…',
+                          hintStyle: GoogleFonts.poppins(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                          suffixIcon: searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.close),
+                                  onPressed: () {
+                                    searchController.clear();
+                                    setStateDialog(() => searchQuery = '');
+                                  },
+                                )
+                              : null,
+                          filled: true,
+                          fillColor:
+                              Theme.of(context).brightness == Brightness.dark
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest
+                              : Colors.grey.shade100,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 0,
+                            horizontal: 16,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        onChanged: (value) {
+                          setStateDialog(() => searchQuery = value);
+                        },
+                      ),
+                    ),
+                    Expanded(
+                      child: filteredItems.isEmpty
+                          ? Center(
+                              child: Text(
+                                "No items found",
+                                style: GoogleFonts.poppins(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              controller: scrollController,
+                              padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
+                              itemCount: filteredItems.length,
+                              itemBuilder: (context, index) {
+                                final item = filteredItems[index];
+                                final String name =
+                                    item['name']?.toString() ?? '';
+                                final bool checked = selectedItemNames.contains(
+                                  name,
+                                );
+                                final _ResolvedRateInfo? info =
+                                    rateInfoCache[name];
+                                final bool isDark =
+                                    Theme.of(context).brightness ==
+                                    Brightness.dark;
+                                final List<Unit> itemUnits =
+                                    ((item['unit'] ?? []) as List<dynamic>)
+                                        .map((u) => Unit.fromJson(u))
+                                        .toList();
+
+                                void toggle() {
+                                  final bool next = !checked;
+                                  setStateDialog(() {
+                                    if (next) {
+                                      selectedItemNames.add(name);
+                                      qtyEditControllers.putIfAbsent(
+                                        name,
+                                        () => TextEditingController(text: '1'),
+                                      );
+                                      if (itemUnits.isNotEmpty) {
+                                        selectedUnitPerItem.putIfAbsent(
+                                          name,
+                                          () => itemUnits.first.name,
+                                        );
+                                      }
+                                      if (isUniGasSerial(serial_no)) {
+                                        startReadingControllers.putIfAbsent(
+                                          name,
+                                          () => TextEditingController(),
+                                        );
+                                        endReadingControllers.putIfAbsent(
+                                          name,
+                                          () => TextEditingController(),
+                                        );
+                                      }
+                                    } else {
+                                      selectedItemNames.remove(name);
+                                    }
+                                  });
+                                  if (next &&
+                                      !rateInfoCache.containsKey(name)) {
+                                    resolveRateFor(name, item, setStateDialog);
+                                  }
+                                }
+
+                                return Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                  ),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).cardColor,
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: checked
+                                          ? app_color.withValues(alpha: 0.55)
+                                          : (isDark
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.08,
+                                                  )
+                                                : Colors.grey.shade200),
+                                      width: checked ? 1.6 : 1,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.04,
+                                        ),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(12),
+                                        onTap: toggle,
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                gradient: LinearGradient(
+                                                  colors: checked
+                                                      ? [
+                                                          app_color,
+                                                          app_color.withValues(
+                                                            alpha: 0.7,
+                                                          ),
+                                                        ]
+                                                      : [
+                                                          Colors.grey.shade400,
+                                                          Colors.grey.shade300,
+                                                        ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              child: const Icon(
+                                                Icons.shopping_bag_outlined,
+                                                color: Colors.white,
+                                                size: 16,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(
+                                                name,
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.onSurface,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Icon(
+                                              checked
+                                                  ? Icons.check_circle
+                                                  : Icons
+                                                        .radio_button_unchecked,
+                                              color: checked
+                                                  ? app_color
+                                                  : Colors.grey.shade400,
+                                              size: 24,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (checked && info != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 12,
+                                          ),
+                                          child: info.loading
+                                              ? Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        left: 4,
+                                                      ),
+                                                  child: Row(
+                                                    children: [
+                                                      const SizedBox(
+                                                        width: 14,
+                                                        height: 14,
+                                                        child:
+                                                            CircularProgressIndicator(
+                                                              strokeWidth: 2,
+                                                            ),
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        'Resolving rate…',
+                                                        style:
+                                                            GoogleFonts.poppins(
+                                                              color:
+                                                                  Colors.grey,
+                                                              fontSize: 12,
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                )
+                                              : Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    if (itemUnits.length >
+                                                        1) ...[
+                                                      DropdownButtonFormField<
+                                                        String
+                                                      >(
+                                                        value:
+                                                            selectedUnitPerItem[name] ??
+                                                            itemUnits
+                                                                .first
+                                                                .name,
+                                                        isExpanded: true,
+                                                        items: itemUnits.map((
+                                                          u,
+                                                        ) {
+                                                          return DropdownMenuItem(
+                                                            value: u.name,
+                                                            child: Text(
+                                                              u.name,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                              style: GoogleFonts.poppins(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                          );
+                                                        }).toList(),
+                                                        onChanged: (val) {
+                                                          setStateDialog(() {
+                                                            selectedUnitPerItem[name] =
+                                                                val!;
+                                                            // Matches the
+                                                            // single-item
+                                                            // flow: switching
+                                                            // units resets
+                                                            // qty to 1 and
+                                                            // does NOT
+                                                            // recompute rate.
+                                                            qtyEditControllers[name]
+                                                                    ?.text =
+                                                                '1';
+                                                          });
+                                                        },
+                                                        decoration: _inputDecoration(
+                                                          label: "Unit",
+                                                          icon:
+                                                              Icons.straighten,
+                                                          gradientColors: const [
+                                                            Colors.purple,
+                                                            Colors
+                                                                .deepPurpleAccent,
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 10,
+                                                      ),
+                                                    ],
+                                                    Row(
+                                                      children: [
+                                                        _bulkQtyStepper(
+                                                          qtyEditControllers[name]!,
+                                                          () => adjustQty(
+                                                            name,
+                                                            -1,
+                                                            setStateDialog,
+                                                          ),
+                                                          () => adjustQty(
+                                                            name,
+                                                            1,
+                                                            setStateDialog,
+                                                          ),
+                                                          onChanged: (_) =>
+                                                              setStateDialog(
+                                                                () {},
+                                                              ),
+                                                          enabled:
+                                                              !(isUniGasSerial(
+                                                                serial_no,
+                                                              ) &&
+                                                              _isQtyLockedByMeterReading(
+                                                                startReadingControllers[name]
+                                                                        ?.text ??
+                                                                    '',
+                                                                endReadingControllers[name]
+                                                                        ?.text ??
+                                                                    '',
+                                                              )),
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 10,
+                                                        ),
+                                                        Expanded(
+                                                          child: TextField(
+                                                            controller:
+                                                                rateEditControllers[name],
+                                                            onChanged: (_) =>
+                                                                setStateDialog(
+                                                                  () {},
+                                                                ),
+                                                            textAlignVertical:
+                                                                TextAlignVertical
+                                                                    .center,
+                                                            keyboardType:
+                                                                const TextInputType.numberWithOptions(
+                                                                  decimal: true,
+                                                                ),
+                                                            style:
+                                                                GoogleFonts.poppins(
+                                                                  fontSize: 14,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w600,
+                                                                ),
+                                                            decoration: InputDecoration(
+                                                              isDense: true,
+                                                              hintText: 'Rate',
+                                                              hintStyle: GoogleFonts.poppins(
+                                                                fontSize: 13,
+                                                                color: Theme.of(context)
+                                                                    .colorScheme
+                                                                    .onSurfaceVariant,
+                                                              ),
+                                                              prefixText:
+                                                                  '${getCurrencySymbol(currencycode)} ',
+                                                              prefixStyle: GoogleFonts.poppins(
+                                                                fontSize: 14,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                color: Theme.of(
+                                                                  context,
+                                                                ).colorScheme.onSurface,
+                                                              ),
+                                                              filled: true,
+                                                              fillColor: isDark
+                                                                  ? Theme.of(
+                                                                          context,
+                                                                        )
+                                                                        .colorScheme
+                                                                        .surfaceContainerHighest
+                                                                  : Colors
+                                                                        .grey
+                                                                        .shade100,
+                                                              contentPadding:
+                                                                  const EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        12,
+                                                                    vertical:
+                                                                        10,
+                                                                  ),
+                                                              enabledBorder:
+                                                                  OutlineInputBorder(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          14,
+                                                                        ),
+                                                                    borderSide:
+                                                                        BorderSide
+                                                                            .none,
+                                                                  ),
+                                                              focusedBorder: OutlineInputBorder(
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      14,
+                                                                    ),
+                                                                borderSide:
+                                                                    BorderSide(
+                                                                      color:
+                                                                          app_color,
+                                                                      width:
+                                                                          1.5,
+                                                                    ),
+                                                              ),
+                                                              border: OutlineInputBorder(
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      14,
+                                                                    ),
+                                                                borderSide:
+                                                                    BorderSide
+                                                                        .none,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    if (isUniGasSerial(
+                                                      serial_no,
+                                                    )) ...[
+                                                      const SizedBox(
+                                                        height: 10,
+                                                      ),
+                                                      Row(
+                                                        children: [
+                                                          Expanded(
+                                                            child: TextField(
+                                                              controller:
+                                                                  startReadingControllers[name],
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              style:
+                                                                  GoogleFonts.poppins(
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                              onChanged: (_) =>
+                                                                  validateMeterReading(
+                                                                    name,
+                                                                    setStateDialog,
+                                                                  ),
+                                                              decoration: _inputDecoration(
+                                                                label:
+                                                                    "Start Reading",
+                                                                icon:
+                                                                    Icons.speed,
+                                                                gradientColors:
+                                                                    const [
+                                                                      Colors
+                                                                          .orange,
+                                                                      Colors
+                                                                          .deepOrangeAccent,
+                                                                    ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 10,
+                                                          ),
+                                                          Expanded(
+                                                            child: TextField(
+                                                              controller:
+                                                                  endReadingControllers[name],
+                                                              keyboardType:
+                                                                  TextInputType
+                                                                      .number,
+                                                              style:
+                                                                  GoogleFonts.poppins(
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                              onChanged: (_) =>
+                                                                  validateMeterReading(
+                                                                    name,
+                                                                    setStateDialog,
+                                                                  ),
+                                                              decoration: _inputDecoration(
+                                                                label:
+                                                                    "End Reading",
+                                                                icon: Icons
+                                                                    .speed_outlined,
+                                                                gradientColors:
+                                                                    const [
+                                                                      Colors
+                                                                          .red,
+                                                                      Colors
+                                                                          .deepOrange,
+                                                                    ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      if (meterReadingErrors[name] !=
+                                                          null)
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets.only(
+                                                                top: 6,
+                                                                left: 4,
+                                                              ),
+                                                          child: Row(
+                                                            children: [
+                                                              const Icon(
+                                                                Icons
+                                                                    .error_outline,
+                                                                size: 14,
+                                                                color: Colors
+                                                                    .redAccent,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 4,
+                                                              ),
+                                                              Expanded(
+                                                                child: Text(
+                                                                  meterReadingErrors[name]!,
+                                                                  style: GoogleFonts.poppins(
+                                                                    color: Colors
+                                                                        .redAccent,
+                                                                    fontSize:
+                                                                        11,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                    ],
+                                                    const SizedBox(height: 12),
+                                                    Row(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .spaceBetween,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .end,
+                                                      children: [
+                                                        if (isUniGasSerial(
+                                                          serial_no,
+                                                        ))
+                                                          _rateSourceBadge(
+                                                            info.source,
+                                                          )
+                                                        else
+                                                          const SizedBox.shrink(),
+                                                        Builder(
+                                                          builder: (context) {
+                                                            final double qty =
+                                                                double.tryParse(
+                                                                  qtyEditControllers[name]
+                                                                          ?.text
+                                                                          .trim() ??
+                                                                      '',
+                                                                ) ??
+                                                                0;
+                                                            final double rate =
+                                                                double.tryParse(
+                                                                  rateEditControllers[name]
+                                                                          ?.text
+                                                                          .trim() ??
+                                                                      '',
+                                                                ) ??
+                                                                0;
+                                                            final double
+                                                            amount = double.parse(
+                                                              (qty * rate)
+                                                                  .toStringAsFixed(
+                                                                    decimal ??
+                                                                        2,
+                                                                  ),
+                                                            );
+                                                            final currencyFormatter =
+                                                                NumberFormat(
+                                                                  '#,##0.${'0' * (decimal ?? 2)}',
+                                                                  'en_US',
+                                                                );
+                                                            return Container(
+                                                              padding:
+                                                                  const EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        12,
+                                                                    vertical: 7,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: app_color
+                                                                    .withValues(
+                                                                      alpha:
+                                                                          0.1,
+                                                                    ),
+                                                                borderRadius:
+                                                                    BorderRadius.circular(
+                                                                      12,
+                                                                    ),
+                                                              ),
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .end,
+                                                                mainAxisSize:
+                                                                    MainAxisSize
+                                                                        .min,
+                                                                children: [
+                                                                  Text(
+                                                                    'Amount',
+                                                                    style: GoogleFonts.poppins(
+                                                                      fontSize:
+                                                                          9,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                      color: app_color.withValues(
+                                                                        alpha:
+                                                                            0.8,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                  Text(
+                                                                    '${getCurrencySymbol(currencycode)} ${currencyFormatter.format(amount)}',
+                                                                    style: GoogleFonts.poppins(
+                                                                      fontSize:
+                                                                          15,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                      color:
+                                                                          app_color,
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            );
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                        ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                    SafeArea(
+                      top: false,
+                      minimum: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: app_color,
+                            minimumSize: const Size(double.infinity, 52),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          icon: isAdding
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.check, color: Colors.white),
+                          label: Text(
+                            "Add Selected (${selectedItemNames.length})",
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          onPressed:
+                              selectedItemNames.isEmpty ||
+                                  isAdding ||
+                                  meterReadingErrors.values.any(
+                                    (e) => e != null,
+                                  )
+                              ? null
+                              : () async {
+                                  // Same qty>0 check addItem() does, run for
+                                  // every selected item before adding any of
+                                  // them (all-or-nothing, like the single-item
+                                  // flow returning early on failure).
+                                  for (final name in selectedItemNames) {
+                                    final double qty =
+                                        double.tryParse(
+                                          qtyEditControllers[name]?.text
+                                                  .trim() ??
+                                              '',
+                                        ) ??
+                                        0;
+                                    if (qty <= 0) {
+                                      Fluttertoast.showToast(
+                                        msg:
+                                            "Quantity must be greater than 0 for $name",
+                                        backgroundColor: Colors.redAccent,
+                                        textColor: Colors.white,
+                                      );
+                                      return;
+                                    }
+
+                                    // Same as addItem()'s itemPrice.isNotEmpty
+                                    // requirement — a rate is required.
+                                    final String rateText =
+                                        rateEditControllers[name]?.text
+                                            .trim() ??
+                                        '';
+                                    if (rateText.isEmpty) {
+                                      Fluttertoast.showToast(
+                                        msg: "Rate is required for $name",
+                                        backgroundColor: Colors.redAccent,
+                                        textColor: Colors.white,
+                                      );
+                                      return;
+                                    }
+                                  }
+
+                                  setStateDialog(() => isAdding = true);
+                                  await _addSelectedItemsInBulk(
+                                    selectedItemNames,
+                                    rateEditControllers,
+                                    qtyEditControllers,
+                                    startReadingControllers,
+                                    endReadingControllers,
+                                    selectedUnitPerItem,
+                                  );
+                                  if (context.mounted) {
+                                    Navigator.of(context).pop();
+                                  }
+                                },
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _addSelectedItemsInBulk(
+    Set<String> selectedItemNames,
+    Map<String, TextEditingController> rateEditControllers,
+    Map<String, TextEditingController> qtyEditControllers,
+    Map<String, TextEditingController> startReadingControllers,
+    Map<String, TextEditingController> endReadingControllers,
+    Map<String, String> selectedUnitPerItem,
+  ) async {
+    for (final name in selectedItemNames) {
+      final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
+        (i) => i['name'] == name,
+        orElse: () => null,
+      );
+      if (itemInfo == null) continue;
+
+      final List<dynamic> unitJson = itemInfo['unit'] ?? [];
+      final List<Unit> units = unitJson.map((u) => Unit.fromJson(u)).toList();
+      final String unitName =
+          selectedUnitPerItem[name] ??
+          (units.isNotEmpty ? units.first.name : '');
+
+      // Use whatever rate is currently in the editable field — lets the
+      // user type a rate when it came back Empty, or override an Item
+      // Rate value before adding. Price Level rates stay locked (field
+      // disabled), so they always come through unchanged.
+      final double resolvedRate =
+          double.tryParse(rateEditControllers[name]?.text.trim() ?? '') ?? 0.0;
+      final int parsedQty =
+          int.tryParse(qtyEditControllers[name]?.text.trim() ?? '') ?? 1;
+      final String qty = (parsedQty < 1 ? 1 : parsedQty).toString();
+      // Matches updateRateAndAmount()/addItem(): amount is rounded to the
+      // configured decimal places before being stored, not left raw.
+      final double amount = double.parse(
+        (resolvedRate * double.parse(qty)).toStringAsFixed(decimal!),
+      );
+      final String meterFrom = isUniGasSerial(serial_no)
+          ? (startReadingControllers[name]?.text.trim() ?? '')
+          : '';
+      final String meterTo = isUniGasSerial(serial_no)
+          ? (endReadingControllers[name]?.text.trim() ?? '')
+          : '';
+
+      final int existingIndex = saleItems.indexWhere(
+        (i) =>
+            i.itemName == name &&
+            double.parse(i.itemPrice.toStringAsFixed(decimal!)) ==
+                double.parse(resolvedRate.toStringAsFixed(decimal!)) &&
+            i.itemUnit == unitName,
+      );
+
+      if (existingIndex != -1) {
+        final existing = saleItems[existingIndex];
+        final String newQty = (int.parse(existing.itemQuantity) + parsedQty)
+            .toString();
+        saleItems[existingIndex] = existing
+            .updateQuantity(newQty)
+            .updateItemAmount(resolvedRate * int.parse(newQty));
+      } else {
+        saleItems.add(
+          SaleItem(
+            itemName: name,
+            itemQuantity: qty,
+            itemPrice: resolvedRate,
+            itemAmount: amount,
+            itemLocation: selectedLocation,
+            itemUnit: unitName,
+            accountingAllocationList: {},
+            batchAllocationList: {
+              'GODOWNNAME': selectedLocation,
+              'AMOUNT': amount,
+              'ACTUALQTY': '$qty $unitName',
+              'BILLEDQTY': '$qty $unitName',
+            },
+            meterFrom: meterFrom,
+            meterTo: meterTo,
+          ),
+        );
+      }
+    }
+
+    _recalcTotalsAfterBulkAdd();
+  }
 
   Future<void> _showItemDetailsPopup(BuildContext context) async {
     showModalBottomSheet(
@@ -6640,24 +7800,6 @@ _itemController.text = _selecteditem;
               MaterialPageRoute(builder: (context) => PendingSalesEntry()),
             );
           },
-          actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
-          ],
         ),
         body: Center(child: AppLogoLoader()),
       );
@@ -6683,24 +7825,6 @@ _itemController.text = _selecteditem;
             MaterialPageRoute(builder: (context) => PendingSalesEntry()),
           );
         },
-        actions: [
-          IconButton(
-            tooltip: 'Toggle theme',
-            icon: Icon(
-              Theme.of(context).brightness == Brightness.dark
-                  ? Icons.light_mode
-                  : Icons.dark_mode,
-              color: Colors.white,
-            ),
-            onPressed: () {
-              themeController.setThemeMode(
-                Theme.of(context).brightness == Brightness.dark
-                    ? ThemeMode.light
-                    : ThemeMode.dark,
-              );
-            },
-          ),
-        ],
       ),
       body: WillPopScope(
         onWillPop: () async {
@@ -7617,8 +8741,7 @@ _itemController.text = _selecteditem;
                               iconGradient: [Colors.purple, Colors.blue],
                               trailing: GestureDetector(
                                 onTap: () {
-                                  _showItemDetailsPopup(context);
-                                  _updateUnitDropdown(_selecteditem);
+                                  _showMultiItemSelectPopup(context);
                                 },
                                 child: Container(
                                   width: 34,
@@ -7626,7 +8749,10 @@ _itemController.text = _selecteditem;
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     gradient: const LinearGradient(
-                                      colors: [Colors.teal, Colors.green],
+                                      colors: [
+                                        Colors.indigo,
+                                        Colors.blueAccent,
+                                      ],
                                       begin: Alignment.topLeft,
                                       end: Alignment.bottomRight,
                                     ),
@@ -7657,6 +8783,9 @@ _itemController.text = _selecteditem;
                                     final itemUnit = [
                                       if (item.itemUnit.isNotEmpty)
                                         item.itemUnit,
+                                      if (item.meterFrom.isNotEmpty ||
+                                          item.meterTo.isNotEmpty)
+                                        'Meter: ${item.meterFrom} - ${item.meterTo}',
                                     ].join(' | ');
 
                                     return EntryItemCard(

@@ -3224,37 +3224,36 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       children: [
                         if (_isopeningVisible)
                           Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: 12,
-                              left: 10,
-                              right: 10,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Expanded(
-                                  child: Text(
-                                    openingheading ?? '',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurface,
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [Colors.teal.shade400, Colors.teal.shade700],
                                     ),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 16),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  openingheading ?? '',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                                Expanded(
-                                  child: Text(
-                                    formatOpening(opening_value!),
-                                    textAlign: TextAlign.right,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurface,
-                                    ),
+                                const Spacer(),
+                                Text(
+                                  formatOpening(opening_value!),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
                               ],
@@ -3334,6 +3333,20 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             ),
                           ),
 
+                        if (_isLedgerGroupVisible && isVisibleNoDataFound && !_isLoading && filteredLedgerGroupList.isEmpty)
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.5,
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.inbox_rounded, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  const SizedBox(height: 10),
+                                  Text("No records found", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                ],
+                              ),
+                            ),
+                          ),
                         if (_isLedgerGroupVisible)
                           ListView.builder(
                             shrinkWrap: true,
@@ -3527,27 +3540,29 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   ),
                                 ),
 
-                              if (isVisibleNoDataFound)
-                                Center(
-                                  child: Column(
-                                    children: [
-                                      SizedBox(height: 20),
-                                      Icon(
-                                        Icons.inbox_rounded,
-                                        size: 40,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
-                                      SizedBox(height: 10),
-                                      Text(
-                                        "No records found",
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w500,
+                              if (isVisibleNoDataFound && !_isLoading)
+                                SizedBox(
+                                  height: MediaQuery.of(context).size.height * 0.5,
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.inbox_rounded,
+                                          size: 40,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          "No records found",
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
 
@@ -3569,7 +3584,21 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             ],
                           ),
 
-                        if (_isOutstandingListVisible)
+                        if (_isOutstandingListVisible) ...[
+                          if (isVisibleNoDataFound && !_isLoading)
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.5,
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.inbox_rounded, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    const SizedBox(height: 10),
+                                    Text("No records found", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ListView.builder(
                             shrinkWrap: true,
                             physics: NeverScrollableScrollPhysics(),
@@ -3581,6 +3610,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               return buildReceivableCard(card, index: index);
                             },
                           ),
+                        ],
                       ],
                     ),
                   ),

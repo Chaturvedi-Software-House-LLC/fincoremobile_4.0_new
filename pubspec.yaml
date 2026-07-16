@@ -111,6 +111,7 @@ flutter:
   assets:
     - assets/fonts/
     - assets/fonts/NotoSans.ttf
+    - assets/fonts/NotoSansArabic.ttf
     - assets/installation.pdf
     - assets/tally_1.png
     - assets/fincorego_logo.jpeg
@@ -131,6 +132,7 @@ flutter:
     - assets/ic_launcher_delete.png
     - assets/ic_launcher_group_img.png
     - assets/ic_launcher_email_img.png
+    - assets/uigas-logo.jpeg
 
   # To add assets to your application, add an assets section, like this:
   # assets:
