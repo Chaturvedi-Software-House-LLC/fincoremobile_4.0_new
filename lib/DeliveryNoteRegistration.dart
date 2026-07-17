@@ -2341,6 +2341,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   // Shared by both the standard A4 PDF path and the UniGas POS delivery note path:
   // clears the form and recomputes totals after a delivery note is shared.
   void _resetDeliveryNoteFormAfterShare() {
+    // Drop focus first - otherwise clearing a party/ledger TypeAheadField's
+    // text below while it still has focus makes it re-run its
+    // suggestionsCallback('') (which matches everything) and pop its
+    // suggestions overlay back open right after reset.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     setState(() {
       controller_narration.clear();
       controller_refno.clear();
@@ -2355,7 +2361,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       refdatestring = _dateFormat.format(refdate);
       refdatetxt = formatlastsaledate(refdatestring);
       _refdateController.text = refdatetxt;
-      _selectedvchtypename = vchtypenamedata[0];
+      // Don't reassign _selectedvchtypename here - for UniGas it's locked
+      // to the allocation-assigned voucher type, and shouldn't fall back
+      // to the first option on reset like a manually-selected one would.
       fetchvchnos(_selectedvchtypename);
       _selectedpartyledger = null;
       _partyLedgerController.clear();
@@ -2482,6 +2490,15 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       _isFocused_narration = false;
       _isFocused_totalamt = false;
       _isFocused_vatamt = false;
+    });
+
+    // The print flow's full-screen animation dialog can restore focus to
+    // whatever field was active before it was shown once its route pops -
+    // that restoration lands a frame after the unfocus() above, so it can
+    // win the race and pop the Party Ledger suggestions back open. Unfocus
+    // again once that settles to make sure it sticks.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusManager.instance.primaryFocus?.unfocus();
     });
   }
 
@@ -2898,14 +2915,21 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    // UniGas is direct-print only - no share sheet.
-    await printUniGasPdf(
-      context,
-      pdfData,
-      documentName: 'DeliveryNote_$formattedDate',
-    );
-
-    _resetDeliveryNoteFormAfterShare();
+    // UniGas is direct-print only - no share sheet. Reset always runs,
+    // even if the print flow itself throws (e.g. no printer available,
+    // user cancels, raster/platform error) - otherwise a failed/aborted
+    // print silently leaves the form filled with no way to know why.
+    try {
+      await printUniGasPdf(
+        context,
+        pdfData,
+        documentName: 'DeliveryNote_$formattedDate',
+      );
+    } catch (e) {
+      debugPrint('UNIGAS DELIVERY NOTE PRINT ERROR: $e');
+    } finally {
+      _resetDeliveryNoteFormAfterShare();
+    }
   }
 
   String getCurrencySymbol(String currencyCode) {

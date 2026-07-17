@@ -2362,6 +2362,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   // Shared by both the regular A4 receipt voucher path and the UniGas
   // POS receipt path so the post-share reset stays in sync between them.
   void _resetReceiptFormAfterShare() {
+    // Drop focus first - otherwise clearing a party/ledger TypeAheadField's
+    // text below while it still has focus makes it re-run its
+    // suggestionsCallback('') (which matches everything) and pop its
+    // suggestions overlay back open right after reset.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     setState(() {
       _selectedparty = null;
       showOutstandingCard = false;
@@ -2937,14 +2943,21 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    // UniGas is direct-print only - no share sheet.
-    await printUniGasPdf(
-      context,
-      pdfData,
-      documentName: 'Receipt_$formattedDate',
-    );
-
-    _resetReceiptFormAfterShare();
+    // UniGas is direct-print only - no share sheet. Reset always runs,
+    // even if the print flow itself throws (e.g. no printer available,
+    // user cancels, raster/platform error) - otherwise a failed/aborted
+    // print silently leaves the form filled with no way to know why.
+    try {
+      await printUniGasPdf(
+        context,
+        pdfData,
+        documentName: 'Receipt_$formattedDate',
+      );
+    } catch (e) {
+      debugPrint('UNIGAS RECEIPT PRINT ERROR: $e');
+    } finally {
+      _resetReceiptFormAfterShare();
+    }
   }
 
   void updateChequeAmount() {

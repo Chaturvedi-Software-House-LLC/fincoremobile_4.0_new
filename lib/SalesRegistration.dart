@@ -3306,19 +3306,32 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    // UniGas is direct-print only - no share sheet.
-    await printUniGasPdf(
-      context,
-      pdfData,
-      documentName: 'SaleInvoice_$formattedDate',
-    );
-
-    _resetSalesInvoiceFormAfterPrint();
+    // UniGas is direct-print only - no share sheet. Reset always runs,
+    // even if the print flow itself throws (e.g. no printer available,
+    // user cancels, raster/platform error) - otherwise a failed/aborted
+    // print silently leaves the form filled with no way to know why.
+    try {
+      await printUniGasPdf(
+        context,
+        pdfData,
+        documentName: 'SaleInvoice_$formattedDate',
+      );
+    } catch (e) {
+      debugPrint('UNIGAS TAX INVOICE PRINT ERROR: $e');
+    } finally {
+      _resetSalesInvoiceFormAfterPrint();
+    }
   }
 
   // Mirrors showSalesInvoiceDialog's "No, Thanks" reset - used after the
   // UniGas direct-print flow, which skips that dialog entirely.
   void _resetSalesInvoiceFormAfterPrint() {
+    // Drop focus first - otherwise clearing _partyLedgerController's text
+    // below while the Party Ledger TypeAheadField still has focus makes
+    // it re-run its suggestionsCallback('') (which matches everything)
+    // and pop its suggestions overlay back open right after reset.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     setState(() {
       controller_narration.clear();
       controller_refno.clear();
@@ -3374,6 +3387,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       _isFocused_narration = false;
       _isFocused_totalamt = false;
       _isFocused_vatamt = false;
+    });
+
+    // The print flow's full-screen animation dialog can restore focus to
+    // whatever field was active before it was shown once its route pops -
+    // that restoration lands a frame after the unfocus() above, so it can
+    // win the race and pop the Party Ledger suggestions back open. Unfocus
+    // again once that settles to make sure it sticks.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusManager.instance.primaryFocus?.unfocus();
     });
   }
 
