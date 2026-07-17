@@ -17,7 +17,6 @@ import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 
@@ -1951,7 +1950,11 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               5,
                               5,
                               5,
-                              (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0),
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
                             ), // Left, Top, Right, Bottom
                             alignment: pw.Alignment.center,
 
@@ -1965,7 +1968,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 3,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.centerLeft,
 
                             child: pw.Column(
@@ -1993,7 +2005,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.centerRight,
 
                             child: pw.Row(
@@ -2012,7 +2033,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.center,
 
                             child: pw.Text(
@@ -2027,7 +2057,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.center,
                             child: pw.Text(
                               item.value.itemUnit,
@@ -2039,7 +2078,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.center,
                             child: pw.Text(
                               '',
@@ -2050,7 +2098,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 2,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.centerRight,
                             child: pw.Text(
                               formatAmountInvoice(
@@ -2847,7 +2904,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   fontWeight: boldLabel ? pw.FontWeight.bold : null,
                 ),
               ),
-              pw.TextSpan(text: value, style: pw.TextStyle(fontSize: size)),
+              pw.TextSpan(
+                text: value,
+                style: pw.TextStyle(fontSize: size),
+              ),
             ],
           ),
         ),
@@ -2989,18 +3049,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               leftText('Invoice No: ${_vchnoController.text}'),
               leftText('Date & Time: $dateTimeText'),
               pw.SizedBox(height: 10),
-              leftText(
-                'CUSTOMER DETAILS',
-                size: 9,
-                weight: pw.FontWeight.bold,
-              ),
+              leftText('CUSTOMER DETAILS', size: 9, weight: pw.FontWeight.bold),
               pw.SizedBox(height: 4),
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -3048,8 +3102,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                     itemRow([
                       _Col('SN', 1.2, bold: true),
                       _Col('ITEM', 2.7, bold: true),
-                      _Col('QTY', 1.6, bold: true, gapAfter: 2,center: true),
-                      _Col('UNIT', 1.7, bold: true,center: true),
+                      _Col('QTY', 1.6, bold: true, gapAfter: 2, center: true),
+                      _Col('UNIT', 1.7, bold: true, center: true),
                       _Col('RATE', 2.3, bold: true, center: true),
                       _Col('AMOUNT (AED)', 3.5, bold: true, center: true),
                     ]),
@@ -3060,17 +3114,20 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                       itemRow([
                         _Col('${item.key + 1}', 1.2),
                         _Col(item.value.itemName, 2.7),
-                        _Col(item.value.itemQuantity, 1.6, gapAfter: 2,center: true),
-                        _Col(item.value.itemUnit, 1.7,center: true),
+                        _Col(
+                          item.value.itemQuantity,
+                          1.6,
+                          gapAfter: 2,
+                          center: true,
+                        ),
+                        _Col(item.value.itemUnit, 1.7, center: true),
                         _Col(
                           formatAmountInvoice(item.value.itemPrice.toString()),
                           2.3,
-                            center: true
+                          center: true,
                         ),
                         _Col(
-                          formatAmountInvoice(
-                            item.value.itemAmount.toString(),
-                          ),
+                          formatAmountInvoice(item.value.itemAmount.toString()),
                           3.5,
                           center: true,
                         ),
@@ -3115,22 +3172,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                 ),
               ),
               pw.SizedBox(height: 10),
-              spaceBetweenLine(
-                'Delivered by:',
-                cleanOrNotAvailable(name),
-              ),
+              spaceBetweenLine('Delivered by:', cleanOrNotAvailable(name)),
               pw.SizedBox(height: 2),
-              spaceBetweenLine(
-                'Vehicle:',
-                cleanOrNotAvailable(vehicleName),
-              ),
+              spaceBetweenLine('Vehicle:', cleanOrNotAvailable(vehicleName)),
               pw.SizedBox(height: 10),
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -3228,9 +3277,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    await Share.shareXFiles([
-      XFile(filePath, mimeType: 'application/pdf'),
-    ], text: 'Sharing Sale Invoice for $_selectedpartyledger');
+    // UniGas is direct-print only - no share sheet.
+    await printUniGasPdf(
+      context,
+      pdfData,
+      documentName: 'SaleInvoice_$formattedDate',
+    );
   }
 
   /*Future<void> generateInvoicePDF(String trn, String address, String emirate, String country) async {
@@ -3672,6 +3724,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     String emirate,
     String country,
   ) {
+    // UniGas prints directly - no "created successfully / Share" dialog.
+    if (isUniGasSerial) {
+      generateInvoicePDF(trn, address, emirate, country);
+      return;
+    }
+
     showGeneralDialog(
       context: context,
       barrierDismissible: false,
@@ -5971,14 +6029,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                               ),
                                                           enabled:
                                                               !(isUniGasSerial &&
-                                                              _isQtyLockedByMeterReading(
-                                                                startReadingControllers[name]
-                                                                        ?.text ??
-                                                                    '',
-                                                                endReadingControllers[name]
-                                                                        ?.text ??
-                                                                    '',
-                                                              )),
+                                                                  _isQtyLockedByMeterReading(
+                                                                    startReadingControllers[name]
+                                                                            ?.text ??
+                                                                        '',
+                                                                    endReadingControllers[name]
+                                                                            ?.text ??
+                                                                        '',
+                                                                  )),
                                                         ),
                                                         const SizedBox(
                                                           width: 10,

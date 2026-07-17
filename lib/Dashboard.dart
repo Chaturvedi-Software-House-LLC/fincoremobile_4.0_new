@@ -20,7 +20,6 @@ import 'DashboardAnalytics.dart';
 import 'PendingSalesOrderEntry.dart';
 import 'SerialSelect.dart';
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:http/http.dart' as http;
 
 List<String> months_chart = [];
@@ -2687,27 +2686,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 ),
               ),
             ),
-            actions: [
-              SizedBox(
-                width: kToolbarHeight,
-                child: IconButton(
-                  tooltip: 'Toggle theme',
-                  icon: Icon(
-                    Theme.of(context).brightness == Brightness.dark
-                        ? Icons.light_mode
-                        : Icons.dark_mode,
-                    color: Colors.white,
-                  ),
-                  onPressed: () {
-                    themeController.setThemeMode(
-                      Theme.of(context).brightness == Brightness.dark
-                          ? ThemeMode.light
-                          : ThemeMode.dark,
-                    );
-                  },
-                ),
-              ),
-            ],
+            actions: const [],
           ),
         ),
 

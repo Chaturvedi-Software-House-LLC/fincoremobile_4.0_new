@@ -8,7 +8,6 @@ import 'package:mailer/smtp_server.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'UserView.dart';
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:http/http.dart' as http;
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
@@ -636,24 +635,7 @@ class _CreateUserPageState extends State<CreateUser>
               ),
             ),
             centerTitle: true,
-            actions: [
-              IconButton(
-                tooltip: 'Toggle theme',
-                icon: Icon(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? Icons.light_mode
-                      : Icons.dark_mode,
-                  color: Colors.white,
-                ),
-                onPressed: () {
-                  themeController.setThemeMode(
-                    Theme.of(context).brightness == Brightness.dark
-                        ? ThemeMode.light
-                        : ThemeMode.dark,
-                  );
-                },
-              ),
-            ],
+            actions: [],
           ),
         ),
         body: Stack(

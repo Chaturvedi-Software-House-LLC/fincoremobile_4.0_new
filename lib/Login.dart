@@ -20,7 +20,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
-import 'theme_controller.dart';
 // import 'package:firebase_messaging/firebase_messaging.dart';
 
 class Login extends StatefulWidget {
@@ -1396,22 +1395,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                           style: TextStyle(color: Colors.white),
                         ),
                         actions: [
-                          IconButton(
-                            tooltip: 'Toggle theme',
-                            icon: Icon(
-                              Theme.of(context).brightness == Brightness.dark
-                                  ? Icons.light_mode
-                                  : Icons.dark_mode,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
-                              themeController.setThemeMode(
-                                Theme.of(context).brightness == Brightness.dark
-                                    ? ThemeMode.light
-                                    : ThemeMode.dark,
-                              );
-                            },
-                          ),
                           IconButton(
                             icon: const Icon(
                               Icons.help_outline,

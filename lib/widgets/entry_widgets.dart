@@ -1,7 +1,8 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:printing/printing.dart';
 import '../constants.dart';
-import '../theme_controller.dart';
 
 // ─── Section Header ──────────────────────────────────────────────
 class EntrySection extends StatelessWidget {
@@ -440,7 +441,9 @@ class EntryItemCard extends StatelessWidget {
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
                           ),
                           textAlign: TextAlign.right,
                         ),
@@ -777,25 +780,7 @@ PreferredSizeWidget entryAppBar({
           color: Colors.white,
         ),
       ),
-      actions: [
-        IconButton(
-          tooltip: 'Toggle theme',
-          icon: Icon(
-            Theme.of(context).brightness == Brightness.dark
-                ? Icons.light_mode
-                : Icons.dark_mode,
-            color: Colors.white,
-          ),
-          onPressed: () {
-            themeController.setThemeMode(
-              Theme.of(context).brightness == Brightness.dark
-                  ? ThemeMode.light
-                  : ThemeMode.dark,
-            );
-          },
-        ),
-        ...?actions,
-      ],
+      actions: actions,
     ),
   );
 }
@@ -1297,4 +1282,223 @@ class EntrySearchBar extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── UniGas Direct-Print Animation ───────────────────────────────
+// A full-screen animation of the ACTUAL generated document swiping up
+// into a printer graphic, shown while a UniGas POS PDF (Delivery Note /
+// Tax Invoice / Receipt) is handed straight to the OS print flow - no
+// share sheet, no share button.
+class _PrintingAnimationOverlay extends StatefulWidget {
+  final Uint8List pdfBytes;
+
+  const _PrintingAnimationOverlay({required this.pdfBytes});
+
+  @override
+  State<_PrintingAnimationOverlay> createState() =>
+      _PrintingAnimationOverlayState();
+}
+
+class _PrintingAnimationOverlayState extends State<_PrintingAnimationOverlay>
+    with SingleTickerProviderStateMixin {
+  // Paper feed progress (0 -> 1, how much of the document has emerged).
+  late final AnimationController _feedController;
+  Uint8List? _pageImage;
+  double? _pageAspectRatio;
+
+  @override
+  void initState() {
+    super.initState();
+    _feedController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
+    _feedController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) Navigator.of(context, rootNavigator: true).pop();
+        });
+      }
+    });
+    _renderPreview();
+  }
+
+  Future<void> _renderPreview() async {
+    try {
+      await for (final page in Printing.raster(
+        widget.pdfBytes,
+        pages: const [0],
+        dpi: 160,
+      )) {
+        final png = await page.toPng();
+        if (!mounted) return;
+        setState(() {
+          _pageImage = png;
+          _pageAspectRatio = page.width / page.height;
+        });
+        break;
+      }
+    } catch (_) {
+      // Fall back to just the printer body without a live paper preview.
+    } finally {
+      if (mounted) _feedController.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _feedController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.92),
+      child: SafeArea(
+        child: _pageImage == null
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: Colors.white),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Preparing document...',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            // LayoutBuilder gives the SafeArea's own (notch/status-bar
+            // excluded) constraints, so the printer graphic is placed
+            // relative to the actual visible canvas instead of the raw
+            // MediaQuery size - otherwise it can render too high and
+            // overlap the status bar / device chrome.
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final size = constraints.biggest;
+                  final slotTop = size.height * 0.14;
+
+                  // Fit the document's width/height to whatever's left
+                  // below the top instead of a fixed size, since UniGas
+                  // receipts can be very tall (continuous-roll).
+                  final aspectRatio = _pageAspectRatio ?? 0.34; // w / h
+                  double paperWidth = size.width * 0.6;
+                  double paperHeight = paperWidth / aspectRatio;
+                  final maxPaperHeight = size.height - slotTop - 70;
+                  if (paperHeight > maxPaperHeight) {
+                    paperHeight = maxPaperHeight;
+                    paperWidth = paperHeight * aspectRatio;
+                  }
+
+                  return AnimatedBuilder(
+                    animation: _feedController,
+                    builder: (context, child) {
+                      final raw = _feedController.value.clamp(0.0, 1.0);
+                      // Phase 1 (0 -> 0.65): the receipt grows out of the slot.
+                      // Phase 2 (0.65 -> 1.0): once fully printed, it ejects -
+                      // slides further down and out from under the printer.
+                      final revealT = Curves.easeOutCubic.transform(
+                        (raw / 0.65).clamp(0.0, 1.0),
+                      );
+                      final ejectRaw = ((raw - 0.65) / 0.35).clamp(0.0, 1.0);
+                      final ejectT = Curves.easeIn.transform(ejectRaw);
+                      // Eject upward off the top of the screen (past the
+                      // printer) rather than sliding further down.
+                      final ejectOffset = -ejectT * (size.height * 0.7);
+                      final ejectOpacity =
+                          1.0 -
+                          Curves.easeIn.transform(
+                            ((ejectRaw - 0.55) / 0.45).clamp(0.0, 1.0),
+                          );
+
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.topCenter,
+                        children: [
+                          // The real generated document: grows out from
+                          // the top, then ejects (slides up and away)
+                          // once fully printed.
+                          Positioned(
+                            top: slotTop + ejectOffset,
+                            child: Opacity(
+                              opacity: ejectOpacity,
+                              child: ClipRect(
+                                child: Align(
+                                  alignment: Alignment.topCenter,
+                                  heightFactor: revealT.clamp(0.001, 1.0),
+                                  child: Container(
+                                    width: paperWidth,
+                                    height: paperHeight,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: const BorderRadius.vertical(
+                                        bottom: Radius.circular(6),
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.45,
+                                          ),
+                                          blurRadius: 18,
+                                          offset: const Offset(0, 8),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: const BorderRadius.vertical(
+                                        bottom: Radius.circular(6),
+                                      ),
+                                      child: Image.memory(
+                                        _pageImage!,
+                                        width: paperWidth,
+                                        fit: BoxFit.fitWidth,
+                                        alignment: Alignment.topCenter,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+/// Plays a full-screen "document grows out, then ejects upward" animation
+/// using the ACTUAL generated PDF as the preview, then hands [pdfBytes]
+/// straight to the OS print flow (Android's print framework, where the
+/// Sunmi's built-in thermal printer should appear as a selectable
+/// target) - no share sheet involved, matching UniGas's direct-print
+/// flow.
+Future<void> printUniGasPdf(
+  BuildContext context,
+  Uint8List pdfBytes, {
+  required String documentName,
+}) async {
+  await showGeneralDialog(
+    context: context,
+    barrierDismissible: false,
+    barrierLabel: 'Printing',
+    barrierColor: Colors.transparent,
+    transitionDuration: Duration.zero,
+    pageBuilder: (context, animation, secondaryAnimation) =>
+        _PrintingAnimationOverlay(pdfBytes: pdfBytes),
+  );
+
+  await Printing.layoutPdf(
+    onLayout: (format) async => pdfBytes,
+    name: documentName,
+  );
 }

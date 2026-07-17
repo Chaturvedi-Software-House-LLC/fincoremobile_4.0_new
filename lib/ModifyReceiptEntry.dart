@@ -11,7 +11,6 @@ import 'package:open_file/open_file.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'Dashboard.dart';
-import 'theme_controller.dart';
 import 'PendingReceiptEntry.dart';
 import 'SerialSelect.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -5657,8 +5656,8 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                       ),
 
                       Visibility(
-                        visible: isPaymentModeVisible &&
-                            !isSelectedBankCashInHand,
+                        visible:
+                            isPaymentModeVisible && !isSelectedBankCashInHand,
                         child: EntrySection(
                           icon: Icons.payment_outlined,
                           title: "Payment Mode",

@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:ui';
-import 'theme_controller.dart';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/constants.dart';
 import 'package:flutter/cupertino.dart';
@@ -874,22 +873,6 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
           ),
           centerTitle: true,
           actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
             /*IconButton(
               onPressed: () {
 
@@ -1234,10 +1217,10 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                 filteredItems_parties = value.isEmpty
                                     ? parties_list
                                     : parties_list.where((item) {
-                                  return item.partyname
-                                      .toLowerCase()
-                                      .contains(value);
-                                }).toList();
+                                        return item.partyname
+                                            .toLowerCase()
+                                            .contains(value);
+                                      }).toList();
 
                                 party_count = filteredItems_parties.length
                                     .toString();
@@ -1260,9 +1243,9 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
                               filled: true,
                               fillColor:
-                              Theme.of(
-                                context,
-                              ).inputDecorationTheme.fillColor ??
+                                  Theme.of(
+                                    context,
+                                  ).inputDecorationTheme.fillColor ??
                                   Theme.of(
                                     context,
                                   ).colorScheme.surfaceContainerHighest,
@@ -1349,7 +1332,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                       children: [
                                         TextSpan(
                                           text:
-                                          "${party_count} ", // <-- Replace dynamically with $party_count
+                                              "${party_count} ", // <-- Replace dynamically with $party_count
                                           style: GoogleFonts.poppins(
                                             fontSize: 14,
                                             fontWeight: FontWeight.bold,
@@ -1425,9 +1408,8 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => PartyClicked(
-                                      partyname: card.partyname,
-                                    ),
+                                    builder: (context) =>
+                                        PartyClicked(partyname: card.partyname),
                                   ),
                                 );
                               },
@@ -1461,19 +1443,17 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                   ),
                                   child: Column(
                                     crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                        CrossAxisAlignment.start,
                                     children: [
                                       // 🧾 Party Name Row with Icon + Prompt Arrow
                                       Row(
                                         crossAxisAlignment:
-                                        CrossAxisAlignment.center,
+                                            CrossAxisAlignment.center,
                                         children: [
                                           Container(
                                             padding: const EdgeInsets.all(8),
                                             decoration: BoxDecoration(
-                                              color: app_color.withOpacity(
-                                                0.1,
-                                              ),
+                                              color: app_color.withOpacity(0.1),
                                               shape: BoxShape.circle,
                                             ),
                                             child: Icon(
@@ -1486,14 +1466,13 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                           Expanded(
                                             child: Column(
                                               crossAxisAlignment:
-                                              CrossAxisAlignment.start,
+                                                  CrossAxisAlignment.start,
                                               children: [
                                                 Text(
                                                   card.partyname,
                                                   style: GoogleFonts.poppins(
                                                     fontSize: 17,
-                                                    fontWeight:
-                                                    FontWeight.w700,
+                                                    fontWeight: FontWeight.w700,
                                                     color: Theme.of(
                                                       context,
                                                     ).colorScheme.onSurface,
@@ -1504,17 +1483,17 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                                     card.alias != null)
                                                   Padding(
                                                     padding:
-                                                    const EdgeInsets.only(
-                                                      top: 4,
-                                                    ),
+                                                        const EdgeInsets.only(
+                                                          top: 4,
+                                                        ),
                                                     child: Text(
                                                       card.alias,
                                                       style:
-                                                      GoogleFonts.poppins(
-                                                        fontSize: 14,
-                                                        color: Colors
-                                                            .grey[600],
-                                                      ),
+                                                          GoogleFonts.poppins(
+                                                            fontSize: 14,
+                                                            color: Colors
+                                                                .grey[600],
+                                                          ),
                                                     ),
                                                   ),
                                               ],
@@ -1543,17 +1522,16 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                             children: [
                                               Container(
                                                 padding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 12,
-                                                  vertical: 5,
-                                                ),
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 5,
+                                                    ),
                                                 decoration: BoxDecoration(
-                                                  color: app_color
-                                                      .withOpacity(0.1),
-                                                  borderRadius:
-                                                  BorderRadius.circular(
-                                                    30,
+                                                  color: app_color.withOpacity(
+                                                    0.1,
                                                   ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(30),
                                                 ),
                                                 child: Row(
                                                   children: [
@@ -1567,27 +1545,23 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                                     Text(
                                                       'Last Invoice:',
                                                       style:
-                                                      GoogleFonts.poppins(
-                                                        fontWeight:
-                                                        FontWeight
-                                                            .w500,
-                                                        fontSize: 13,
-                                                        color: app_color,
-                                                      ),
+                                                          GoogleFonts.poppins(
+                                                            fontWeight:
+                                                                FontWeight.w500,
+                                                            fontSize: 13,
+                                                            color: app_color,
+                                                          ),
                                                     ),
                                                     const SizedBox(width: 6),
                                                     Text(
-                                                      formatdate(
-                                                        card.maxdate,
-                                                      ),
+                                                      formatdate(card.maxdate),
                                                       style:
-                                                      GoogleFonts.poppins(
-                                                        fontSize: 13.5,
-                                                        fontWeight:
-                                                        FontWeight
-                                                            .w500,
-                                                        color: app_color,
-                                                      ),
+                                                          GoogleFonts.poppins(
+                                                            fontSize: 13.5,
+                                                            fontWeight:
+                                                                FontWeight.w500,
+                                                            color: app_color,
+                                                          ),
                                                     ),
                                                   ],
                                                 ),

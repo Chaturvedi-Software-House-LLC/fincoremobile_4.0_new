@@ -15,7 +15,6 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 
@@ -754,22 +753,6 @@ class _PartyClickedSalePurcOrderClickedPageState
 
           actions: [
             IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
-            IconButton(
               onPressed: () {
                 counter++;
                 if (counter % 2 == 0) {
@@ -1075,10 +1058,12 @@ class _PartyClickedSalePurcOrderClickedPageState
 
                               if (isVisibleNoDataFound)
                                 SizedBox(
-                                  height: MediaQuery.of(context).size.height * 0.5,
+                                  height:
+                                      MediaQuery.of(context).size.height * 0.5,
                                   child: Center(
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Icon(
                                           Icons.search_off_rounded,

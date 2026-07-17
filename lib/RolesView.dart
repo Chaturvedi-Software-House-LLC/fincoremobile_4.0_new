@@ -8,7 +8,6 @@ import 'ModifyRole.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'SerialSelect.dart';
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
@@ -412,24 +411,7 @@ class _RolesViewPageState extends State<RolesView>
               ),
             ),
             centerTitle: true,
-            actions: [
-              IconButton(
-                tooltip: 'Toggle theme',
-                icon: Icon(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? Icons.light_mode
-                      : Icons.dark_mode,
-                  color: Colors.white,
-                ),
-                onPressed: () {
-                  themeController.setThemeMode(
-                    Theme.of(context).brightness == Brightness.dark
-                        ? ThemeMode.light
-                        : ThemeMode.dark,
-                  );
-                },
-              ),
-            ],
+            actions: [],
           ),
         ),
 

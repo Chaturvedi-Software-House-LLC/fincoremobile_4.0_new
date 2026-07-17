@@ -16,7 +16,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 
@@ -2608,7 +2607,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                   fontWeight: boldLabel ? pw.FontWeight.bold : null,
                 ),
               ),
-              pw.TextSpan(text: value, style: pw.TextStyle(fontSize: size)),
+              pw.TextSpan(
+                text: value,
+                style: pw.TextStyle(fontSize: size),
+              ),
             ],
           ),
         ),
@@ -2633,10 +2635,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
             child: pw.Text(
               value,
               textAlign: pw.TextAlign.right,
-              style: pw.TextStyle(
-                fontSize: 9,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
             ),
           ),
         ],
@@ -2724,18 +2723,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
               leftText('Document No: ${_vchnoController.text}'),
               leftText('Date & Time: $dateTimeText'),
               pw.SizedBox(height: 10),
-              leftText(
-                'CUSTOMER DETAILS',
-                size: 9,
-                weight: pw.FontWeight.bold,
-              ),
+              leftText('CUSTOMER DETAILS', size: 9, weight: pw.FontWeight.bold),
               pw.SizedBox(height: 4),
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -2773,9 +2766,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                 children: [
                   pw.TableRow(
                     decoration: const pw.BoxDecoration(
-                      border: pw.Border(
-                        bottom: pw.BorderSide(width: 0.75),
-                      ),
+                      border: pw.Border(bottom: pw.BorderSide(width: 0.75)),
                     ),
                     children: [
                       cell('SN', bold: true),
@@ -2796,15 +2787,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                 ],
               ),
               pw.SizedBox(height: 10),
-              spaceBetweenLine(
-                'Delivered by:',
-                cleanOrNotAvailable(name),
-              ),
+              spaceBetweenLine('Delivered by:', cleanOrNotAvailable(name)),
               pw.SizedBox(height: 2),
-              spaceBetweenLine(
-                'Vehicle:',
-                cleanOrNotAvailable(vehicleName),
-              ),
+              spaceBetweenLine('Vehicle:', cleanOrNotAvailable(vehicleName)),
               pw.SizedBox(height: 10),
               pw.Text(
                 'I confirm that quantity in this delivery is correct with good condition and quality',
@@ -2815,9 +2800,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -2915,9 +2898,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    await Share.shareXFiles([
-      XFile(filePath, mimeType: 'application/pdf'),
-    ], text: 'Sharing Delivery Note for $_selectedpartyledger');
+    // UniGas is direct-print only - no share sheet.
+    await printUniGasPdf(
+      context,
+      pdfData,
+      documentName: 'DeliveryNote_$formattedDate',
+    );
 
     _resetDeliveryNoteFormAfterShare();
   }
@@ -3155,6 +3141,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     String emirate,
     String country,
   ) {
+    // UniGas prints directly - no "created successfully / Share" dialog.
+    if (isUniGasMeterReadingSerial) {
+      generateDeliveryNotePDF(trn, address, emirate, country);
+      return;
+    }
+
     showGeneralDialog(
       context: context,
       barrierDismissible: false,
@@ -5820,14 +5812,14 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                               ),
                                                           enabled:
                                                               !(isUniGasMeterReadingSerial &&
-                                                              _isQtyLockedByMeterReading(
-                                                                startReadingControllers[name]
-                                                                        ?.text ??
-                                                                    '',
-                                                                endReadingControllers[name]
-                                                                        ?.text ??
-                                                                    '',
-                                                              )),
+                                                                  _isQtyLockedByMeterReading(
+                                                                    startReadingControllers[name]
+                                                                            ?.text ??
+                                                                        '',
+                                                                    endReadingControllers[name]
+                                                                            ?.text ??
+                                                                        '',
+                                                                  )),
                                                         ),
                                                         const SizedBox(
                                                           width: 10,
@@ -6800,11 +6792,13 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                       keyboardType: TextInputType.number,
                                       enabled:
                                           !(isUniGasMeterReadingSerial &&
-                                          showMeterReading &&
-                                          _isQtyLockedByMeterReading(
-                                            voucherStartReadingController.text,
-                                            voucherEndReadingController.text,
-                                          )),
+                                              showMeterReading &&
+                                              _isQtyLockedByMeterReading(
+                                                voucherStartReadingController
+                                                    .text,
+                                                voucherEndReadingController
+                                                    .text,
+                                              )),
                                       onChanged: (_) => updateRateAndAmount(),
                                       style: GoogleFonts.poppins(
                                         fontSize: 14,

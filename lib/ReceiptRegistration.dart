@@ -16,7 +16,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 
@@ -988,6 +987,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   }
 
   void showReceiptVoucherDialog(BuildContext context) {
+    // UniGas prints directly - no "created successfully / Share" dialog.
+    if (isUniGasSerial) {
+      generateVoucherPDF();
+      return;
+    }
+
     showGeneralDialog(
       context: context,
       barrierDismissible: false,
@@ -2513,11 +2518,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     );
     String formatAmount(num value) => amountFormatter.format(value);
 
-    pw.Widget leftText(
-      String text, {
-      double size = 9,
-      pw.FontWeight? weight,
-    }) {
+    pw.Widget leftText(String text, {double size = 9, pw.FontWeight? weight}) {
       return pw.Align(
         alignment: pw.Alignment.centerLeft,
         child: pw.Text(
@@ -2545,7 +2546,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                   fontWeight: boldLabel ? pw.FontWeight.bold : null,
                 ),
               ),
-              pw.TextSpan(text: value, style: pw.TextStyle(fontSize: size)),
+              pw.TextSpan(
+                text: value,
+                style: pw.TextStyle(fontSize: size),
+              ),
             ],
           ),
         ),
@@ -2566,10 +2570,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             child: pw.Text(
               value,
               textAlign: pw.TextAlign.right,
-              style: pw.TextStyle(
-                fontSize: 9,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
             ),
           ),
         ],
@@ -2680,18 +2681,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                 ],
               ),
               pw.SizedBox(height: 10),
-              leftText(
-                'CUSTOMER DETAILS',
-                size: 9,
-                weight: pw.FontWeight.bold,
-              ),
+              leftText('CUSTOMER DETAILS', size: 9, weight: pw.FontWeight.bold),
               pw.SizedBox(height: 4),
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -2704,10 +2699,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                     pw.SizedBox(height: 6),
                     detailLine('TRN', cleanOrNotAvailable(customerTrn)),
                     pw.SizedBox(height: 6),
-                    detailLine(
-                      'Address',
-                      cleanOrNotAvailable(customerAddress),
-                    ),
+                    detailLine('Address', cleanOrNotAvailable(customerAddress)),
                     pw.SizedBox(height: 6),
                     detailLine('Phone', cleanOrNotAvailable(customerMobile)),
                     pw.SizedBox(height: 6),
@@ -2719,9 +2711,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -2835,7 +2825,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      billRow('Sr. #', 'Document No.', 'Invoice Value', bold: true),
+                      billRow(
+                        'Sr. #',
+                        'Document No.',
+                        'Invoice Value',
+                        bold: true,
+                      ),
                       pw.SizedBox(height: 3),
                       pw.Divider(thickness: 0.75),
                       pw.SizedBox(height: 3),
@@ -2853,9 +2848,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.all(6),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(width: 1),
-                ),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -2893,9 +2886,15 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                           child: pw.Column(
                             crossAxisAlignment: pw.CrossAxisAlignment.start,
                             children: [
-                              pw.Text('Name:', style: pw.TextStyle(fontSize: 9)),
+                              pw.Text(
+                                'Name:',
+                                style: pw.TextStyle(fontSize: 9),
+                              ),
                               pw.SizedBox(height: 20),
-                              pw.Text('Phone:', style: pw.TextStyle(fontSize: 9)),
+                              pw.Text(
+                                'Phone:',
+                                style: pw.TextStyle(fontSize: 9),
+                              ),
                             ],
                           ),
                         ),
@@ -2920,7 +2919,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               pw.Text(
                 'Thank you for your business!',
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
               ),
             ],
           );
@@ -2935,9 +2937,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
-    await Share.shareXFiles([
-      XFile(filePath, mimeType: 'application/pdf'),
-    ], text: 'Sharing Receipt for $_selectedparty');
+    // UniGas is direct-print only - no share sheet.
+    await printUniGasPdf(
+      context,
+      pdfData,
+      documentName: 'Receipt_$formattedDate',
+    );
 
     _resetReceiptFormAfterShare();
   }
@@ -6633,7 +6638,9 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                       : (suggestion) {
                                           setState(() {
                                             _selectedbankcashname = suggestion;
-                                            debugPrint('cash in hand -> ${_selectedbankcashname!['type']}');
+                                            debugPrint(
+                                              'cash in hand -> ${_selectedbankcashname!['type']}',
+                                            );
                                             _bankcashnameController.text =
                                                 suggestion['name']!;
                                           });

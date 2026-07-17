@@ -14,7 +14,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:url_launcher/url_launcher.dart';
 import 'constants.dart';
-import 'theme_controller.dart';
 // import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class Serial {
@@ -251,22 +250,6 @@ class _MyHomePageState extends State<SerialSelect>
           ),
 
           actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
             ElevatedButton.icon(
               onPressed: () async {
                 Map<String, dynamic> selected_data = _selectcompany;

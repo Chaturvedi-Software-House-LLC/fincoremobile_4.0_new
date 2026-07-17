@@ -20,7 +20,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
@@ -2801,22 +2800,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
           centerTitle: true,
           actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
             /*IconButton(
               onPressed: () {
                 counter++;
@@ -3224,7 +3207,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       children: [
                         if (_isopeningVisible)
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
                             child: Row(
                               children: [
                                 Container(
@@ -3232,11 +3218,18 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   height: 32,
                                   decoration: BoxDecoration(
                                     gradient: LinearGradient(
-                                      colors: [Colors.teal.shade400, Colors.teal.shade700],
+                                      colors: [
+                                        Colors.teal.shade400,
+                                        Colors.teal.shade700,
+                                      ],
                                     ),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 16),
+                                  child: const Icon(
+                                    Icons.account_balance_wallet_outlined,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
                                 ),
                                 const SizedBox(width: 10),
                                 Text(
@@ -3244,7 +3237,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   style: GoogleFonts.poppins(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                                 const Spacer(),
@@ -3253,7 +3248,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   style: GoogleFonts.poppins(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700,
-                                    color: Theme.of(context).colorScheme.onSurface,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface,
                                   ),
                                 ),
                               ],
@@ -3333,16 +3330,34 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             ),
                           ),
 
-                        if (_isLedgerGroupVisible && isVisibleNoDataFound && !_isLoading && filteredLedgerGroupList.isEmpty)
+                        if (_isLedgerGroupVisible &&
+                            isVisibleNoDataFound &&
+                            !_isLoading &&
+                            filteredLedgerGroupList.isEmpty)
                           SizedBox(
                             height: MediaQuery.of(context).size.height * 0.5,
                             child: Center(
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.inbox_rounded, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                  Icon(
+                                    Icons.inbox_rounded,
+                                    size: 40,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
                                   const SizedBox(height: 10),
-                                  Text("No records found", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                  Text(
+                                    "No records found",
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -3542,7 +3557,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
                               if (isVisibleNoDataFound && !_isLoading)
                                 SizedBox(
-                                  height: MediaQuery.of(context).size.height * 0.5,
+                                  height:
+                                      MediaQuery.of(context).size.height * 0.5,
                                   child: Center(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
@@ -3550,7 +3566,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                         Icon(
                                           Icons.inbox_rounded,
                                           size: 40,
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
                                         ),
                                         const SizedBox(height: 10),
                                         Text(
@@ -3558,7 +3576,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                           style: GoogleFonts.poppins(
                                             fontSize: 16,
                                             fontWeight: FontWeight.w500,
-                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
                                           ),
                                         ),
                                       ],
@@ -3592,9 +3612,24 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.inbox_rounded, size: 40, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    Icon(
+                                      Icons.inbox_rounded,
+                                      size: 40,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
                                     const SizedBox(height: 10),
-                                    Text("No records found", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                    Text(
+                                      "No records found",
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),

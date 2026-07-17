@@ -12,7 +12,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:progress_dialog_null_safe/progress_dialog_null_safe.dart';
 import 'package:pdf/pdf.dart';
@@ -2272,7 +2271,11 @@ _itemController.text = _selecteditem;
                               5,
                               5,
                               5,
-                              (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0),
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
                             ), // Left, Top, Right, Bottom
                             alignment: pw.Alignment.center,
 
@@ -2286,7 +2289,16 @@ _itemController.text = _selecteditem;
                         pw.Expanded(
                           flex: 3,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.centerLeft,
 
                             child: pw.Column(
@@ -2314,7 +2326,16 @@ _itemController.text = _selecteditem;
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.centerRight,
 
                             child: pw.Row(
@@ -2333,7 +2354,16 @@ _itemController.text = _selecteditem;
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.center,
 
                             child: pw.Text(
@@ -2348,7 +2378,16 @@ _itemController.text = _selecteditem;
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.center,
                             child: pw.Text(
                               item.value.itemUnit,
@@ -2360,7 +2399,16 @@ _itemController.text = _selecteditem;
                         pw.Expanded(
                           flex: 1,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.center,
                             child: pw.Text(
                               '',
@@ -2371,7 +2419,16 @@ _itemController.text = _selecteditem;
                         pw.Expanded(
                           flex: 2,
                           child: pw.Container(
-                            padding: pw.EdgeInsets.fromLTRB(5, 5, 5, (item.key == saleItems.length - 1 ? _estimateInvoiceLastRowFillerPadding(saleItems.length) : 5.0)),
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
                             alignment: pw.Alignment.centerRight,
                             child: pw.Text(
                               formatAmountInvoice(
@@ -5462,16 +5519,16 @@ _itemController.text = _selecteditem;
                                                               ),
                                                           enabled:
                                                               !(isUniGasSerial(
-                                                                serial_no,
-                                                              ) &&
-                                                              _isQtyLockedByMeterReading(
-                                                                startReadingControllers[name]
-                                                                        ?.text ??
-                                                                    '',
-                                                                endReadingControllers[name]
-                                                                        ?.text ??
-                                                                    '',
-                                                              )),
+                                                                    serial_no,
+                                                                  ) &&
+                                                                  _isQtyLockedByMeterReading(
+                                                                    startReadingControllers[name]
+                                                                            ?.text ??
+                                                                        '',
+                                                                    endReadingControllers[name]
+                                                                            ?.text ??
+                                                                        '',
+                                                                  )),
                                                         ),
                                                         const SizedBox(
                                                           width: 10,

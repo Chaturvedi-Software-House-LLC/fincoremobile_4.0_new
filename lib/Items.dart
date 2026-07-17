@@ -15,7 +15,6 @@ import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'constants.dart';
-import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
@@ -1411,22 +1410,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             onPressed: () => AppNavigation.backOrDashboard(context),
           ),
           actions: [
-            IconButton(
-              tooltip: 'Toggle theme',
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
-                color: Colors.white,
-              ),
-              onPressed: () {
-                themeController.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                );
-              },
-            ),
             /*IconButton(
               icon: Icon(Icons.search, color: Colors.white, size: 26),
               onPressed: () => setState(() => _isSearchViewVisible = !_isSearchViewVisible),
