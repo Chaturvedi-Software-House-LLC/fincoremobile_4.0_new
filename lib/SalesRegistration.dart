@@ -35,6 +35,10 @@ class _Col {
   final bool right;
   final bool center;
   final double gapAfter;
+  // Small italic grey line under the main text - used for the ITEM
+  // column's "X - Y" meter-reading values, same as the Delivery Note's
+  // itemCell().
+  final String? subText;
   _Col(
     this.text,
     this.flex, {
@@ -42,6 +46,7 @@ class _Col {
     this.right = false,
     this.center = false,
     this.gapAfter = 0,
+    this.subText,
   });
 }
 
@@ -2964,15 +2969,31 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   padding: const pw.EdgeInsets.symmetric(horizontal: 1),
                   child: pw.Padding(
                     padding: pw.EdgeInsets.only(right: c.gapAfter),
-                    child: pw.Text(
-                      c.text,
-                      textAlign: c.center
-                          ? pw.TextAlign.center
-                          : (c.right ? pw.TextAlign.right : pw.TextAlign.left),
-                      style: pw.TextStyle(
-                        fontSize: 9,
-                        fontWeight: c.bold ? pw.FontWeight.bold : null,
-                      ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          c.text,
+                          textAlign: c.center
+                              ? pw.TextAlign.center
+                              : (c.right
+                                    ? pw.TextAlign.right
+                                    : pw.TextAlign.left),
+                          style: pw.TextStyle(
+                            fontSize: 9,
+                            fontWeight: c.bold ? pw.FontWeight.bold : null,
+                          ),
+                        ),
+                        if (c.subText != null && c.subText!.isNotEmpty)
+                          pw.Text(
+                            c.subText!,
+                            style: pw.TextStyle(
+                              fontSize: 7,
+                              fontStyle: pw.FontStyle.italic,
+                              color: PdfColors.grey500,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
@@ -3113,7 +3134,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                     for (var item in saleItems.asMap().entries)
                       itemRow([
                         _Col('${item.key + 1}', 1.2),
-                        _Col(item.value.itemName, 2.7),
+                        _Col(
+                          item.value.itemName,
+                          2.7,
+                          subText:
+                              item.value.meterFrom.isNotEmpty &&
+                                  item.value.meterTo.isNotEmpty
+                              ? '${item.value.meterFrom} - ${item.value.meterTo}'
+                              : null,
+                        ),
                         _Col(
                           item.value.itemQuantity,
                           1.6,
@@ -3283,6 +3312,69 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       pdfData,
       documentName: 'SaleInvoice_$formattedDate',
     );
+
+    _resetSalesInvoiceFormAfterPrint();
+  }
+
+  // Mirrors showSalesInvoiceDialog's "No, Thanks" reset - used after the
+  // UniGas direct-print flow, which skips that dialog entirely.
+  void _resetSalesInvoiceFormAfterPrint() {
+    setState(() {
+      controller_narration.clear();
+      controller_refno.clear();
+      _textFieldFocusNodeNarration.unfocus();
+
+      saledate = DateTime.now();
+      saledatestring = _dateFormat.format(saledate);
+      saledatetxt = formatlastsaledate(saledatestring);
+      _dateController.text = saledatetxt;
+
+      refdate = DateTime.now();
+      refdatestring = _dateFormat.format(refdate);
+      refdatetxt = formatlastsaledate(refdatestring);
+      _refdateController.text = refdatetxt;
+
+      fetchvchnos(_selectedvchtypename);
+
+      _selectedpartyledger = null;
+      _partyLedgerController.clear();
+
+      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+      _selectedvatledger = vatledgerdata[0];
+
+      _selecteditem = '${itemdata[0]['name']}';
+      _itemController.text = _selecteditem;
+
+      if (locationsdata.isNotEmpty) {
+        selectedLocation = locationsdata[0];
+        isVisibleLocation = true;
+      } else {
+        isVisibleLocation = false;
+      }
+
+      _updateUnitDropdown(_selecteditem);
+
+      saleItems.clear();
+      ledgerEntries.clear();
+
+      totalPriceOfItems = 0.0;
+      totalAmountOfLedgers = 0.0;
+      totalVatAmount = 0.0;
+
+      controller_vatamt.clear();
+      controller_totalamt.clear();
+
+      isVisibleItemHeading = false;
+      isVisibleLedgerHeading = false;
+
+      _isFocused_vchno = false;
+      _isFocused_item = false;
+      _isFocused_unit = false;
+      _isFocused_ledger = false;
+      _isFocused_narration = false;
+      _isFocused_totalamt = false;
+      _isFocused_vatamt = false;
+    });
   }
 
   /*Future<void> generateInvoicePDF(String trn, String address, String emirate, String country) async {
