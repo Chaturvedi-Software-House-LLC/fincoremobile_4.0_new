@@ -1489,6 +1489,11 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   }
 
   Future<void> generateVoucherPDF() async {
+    if (isUniGasSerial) {
+      await _generateUniGasReceiptPDF();
+      return;
+    }
+
     final pdf = pw.Document();
 
     pdf.addPage(
@@ -2346,6 +2351,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Receipt Voucher for $_selectedparty');
 
+    _resetReceiptFormAfterShare();
+  }
+
+  // Shared by both the regular A4 receipt voucher path and the UniGas
+  // POS receipt path so the post-share reset stays in sync between them.
+  void _resetReceiptFormAfterShare() {
     setState(() {
       _selectedparty = null;
       showOutstandingCard = false;
@@ -2406,6 +2417,529 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         isVisibleChequeHeading = true;
       }
     });
+  }
+
+  // UniGas-only POS receipt format (76mm wide, shared/viewed rather than
+  // printed on the Sunmi's thermal paper), built to match the reference
+  // "Unigas Receipt Format.pdf" - mirrors the styling of the UniGas Tax
+  // Invoice/Delivery Note formats in SalesRegistration.dart /
+  // DeliveryNoteRegistration.dart.
+  Future<void> _generateUniGasReceiptPDF() async {
+    // Vehicle lookup, same cached-prefs pattern as the other UniGas PDFs.
+    String vehicleName = '';
+    try {
+      final String? spectraAllocationsString = prefs.getString(
+        'spectra_allocations',
+      );
+      if (spectraAllocationsString != null &&
+          spectraAllocationsString.isNotEmpty) {
+        final List<dynamic> spectraAllocations = jsonDecode(
+          spectraAllocationsString,
+        );
+        if (spectraAllocations.isNotEmpty) {
+          final first = Map<String, dynamic>.from(spectraAllocations.first);
+          vehicleName = first['godown']?.toString() ?? '';
+        }
+      }
+    } catch (e) {
+      debugPrint("UNIGAS RECEIPT VEHICLE LOOKUP ERROR: $e");
+    }
+
+    // Party TRN/address/phone/email aren't preloaded for Receipt (unlike
+    // Sales Invoice's loadLedgerData) - fetched here on demand.
+    String customerTrn = '';
+    String customerAddress = '';
+    String customerMobile = '';
+    String customerEmail = '';
+    try {
+      if (HttpURL_loadLedgerData != null &&
+          _selectedparty != null &&
+          _selectedparty.toString().trim().isNotEmpty) {
+        final url = Uri.parse(HttpURL_loadLedgerData!);
+        final headers = {
+          'Authorization': 'Bearer $token',
+          "Content-Type": "application/json",
+        };
+        final body = jsonEncode({"ledger": _selectedparty});
+        final response = await http.post(url, headers: headers, body: body);
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body);
+          if (data.isNotEmpty) {
+            final first = Map<String, dynamic>.from(data.first);
+            customerTrn = first['tin']?.toString() ?? '';
+            final address = first['address']?.toString() ?? '';
+            final emirate = first['state']?.toString() ?? '';
+            final country = first['country']?.toString() ?? '';
+            customerAddress = [address, emirate, country]
+                .where(
+                  (p) =>
+                      p.trim().isNotEmpty && p.trim().toLowerCase() != 'null',
+                )
+                .join(', ');
+            customerMobile = first['mobile']?.toString() ?? '';
+            customerEmail = first['email']?.toString() ?? '';
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("UNIGAS RECEIPT LEDGER LOOKUP ERROR: $e");
+    }
+
+    String cleanOrNotAvailable(String? value) {
+      if (value == null) return 'Not Available';
+      final trimmed = value.trim();
+      return (trimmed.isEmpty || trimmed.toLowerCase() == 'null')
+          ? 'Not Available'
+          : trimmed;
+    }
+
+    final logoBytes = await rootBundle.load("assets/uigas-logo.jpeg");
+    final uniGasLogo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+
+    // Arabic-capable font - NotoSans.ttf (used for everything else) has
+    // no Arabic glyphs.
+    final arabicFontData = await rootBundle.load(
+      "assets/fonts/NotoSansArabic.ttf",
+    );
+    final arabicFont = pw.Font.ttf(arabicFontData);
+
+    final now = DateTime.now();
+    final dateTimeText =
+        '${DateFormat('dd-MM-yyyy').format(now)}    ${DateFormat('HH:mm').format(now)}';
+
+    final NumberFormat amountFormatter = NumberFormat(
+      '#,##0.${'0' * decimal!}',
+      'en_US',
+    );
+    String formatAmount(num value) => amountFormatter.format(value);
+
+    pw.Widget leftText(
+      String text, {
+      double size = 9,
+      pw.FontWeight? weight,
+    }) {
+      return pw.Align(
+        alignment: pw.Alignment.centerLeft,
+        child: pw.Text(
+          text,
+          style: pw.TextStyle(fontSize: size, fontWeight: weight),
+        ),
+      );
+    }
+
+    pw.Widget detailLine(
+      String label,
+      String value, {
+      double size = 8,
+      bool boldLabel = true,
+    }) {
+      return pw.Align(
+        alignment: pw.Alignment.centerLeft,
+        child: pw.RichText(
+          text: pw.TextSpan(
+            children: [
+              pw.TextSpan(
+                text: '$label: ',
+                style: pw.TextStyle(
+                  fontSize: size,
+                  fontWeight: boldLabel ? pw.FontWeight.bold : null,
+                ),
+              ),
+              pw.TextSpan(text: value, style: pw.TextStyle(fontSize: size)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    pw.Widget spaceBetweenLine(String label, String value) {
+      return pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(width: 6),
+          pw.Flexible(
+            child: pw.Text(
+              value,
+              textAlign: pw.TextAlign.right,
+              style: pw.TextStyle(
+                fontSize: 9,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    pw.Widget billRow(
+      String sn,
+      String docNo,
+      String amount, {
+      bool bold = false,
+    }) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 2),
+        child: pw.Row(
+          children: [
+            pw.Expanded(
+              flex: 2,
+              child: pw.Text(
+                sn,
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: bold ? pw.FontWeight.bold : null,
+                ),
+              ),
+            ),
+            pw.Expanded(
+              flex: 4,
+              child: pw.Text(
+                docNo,
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: bold ? pw.FontWeight.bold : null,
+                ),
+              ),
+            ),
+            pw.Expanded(
+              flex: 4,
+              child: pw.Text(
+                amount,
+                textAlign: pw.TextAlign.right,
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: bold ? pw.FontWeight.bold : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        // Shared/viewed only, so widened to 76mm to match the UniGas Tax
+        // Invoice/Delivery Note formats.
+        pageFormat: PdfPageFormat(
+          76 * PdfPageFormat.mm,
+          double.infinity,
+          marginLeft: 10,
+          marginRight: 10,
+          marginTop: 8,
+          marginBottom: 8,
+        ),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Image(uniGasLogo, height: 60),
+              pw.SizedBox(height: 4),
+              pw.Text(
+                'UNITED GAS CO. LLC',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                  fontSize: 10,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Divider(thickness: 1),
+              leftText('A Partner You Can Trust'),
+              leftText('Sharjah | Dubai | RAK | UAQ | Fujairah', size: 8),
+              pw.SizedBox(height: 6),
+              detailLine('Tel', '800 864427'),
+              detailLine('Email', 'Info@unigastt.com'),
+              detailLine('Web', 'www.unigastt.com'),
+              detailLine('TRN', '100206964700003'),
+              pw.SizedBox(height: 6),
+              pw.Divider(thickness: 1),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Text(
+                    'RECEIPT',
+                    style: pw.TextStyle(
+                      fontSize: 11,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.Text(
+                    'إيصال استلام',
+                    textDirection: pw.TextDirection.rtl,
+                    style: pw.TextStyle(fontSize: 10, font: arabicFont),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 10),
+              leftText(
+                'CUSTOMER DETAILS',
+                size: 9,
+                weight: pw.FontWeight.bold,
+              ),
+              pw.SizedBox(height: 4),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(6),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(width: 1),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    detailLine(
+                      'Name',
+                      cleanOrNotAvailable(_selectedparty?.toString()),
+                      size: 9,
+                      boldLabel: false,
+                    ),
+                    pw.SizedBox(height: 6),
+                    detailLine('TRN', cleanOrNotAvailable(customerTrn)),
+                    pw.SizedBox(height: 6),
+                    detailLine(
+                      'Address',
+                      cleanOrNotAvailable(customerAddress),
+                    ),
+                    pw.SizedBox(height: 6),
+                    detailLine('Phone', cleanOrNotAvailable(customerMobile)),
+                    pw.SizedBox(height: 6),
+                    detailLine('Email', cleanOrNotAvailable(customerEmail)),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(6),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(width: 1),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    spaceBetweenLine(
+                      'Receipt No. :',
+                      cleanOrNotAvailable(_vchnoController.text),
+                    ),
+                    pw.SizedBox(height: 4),
+                    spaceBetweenLine(
+                      'Payment Mode:',
+                      // Payment Mode is only a meaningful, user-chosen
+                      // value when the field is actually shown in the UI
+                      // (i.e. the ledger isn't Cash-in-Hand) - otherwise
+                      // _selectedpaymentmode still holds its leftover
+                      // paymentmode_data.first default ("ATM"), which was
+                      // never really selected, so show "Cash" instead.
+                      isPaymentModeVisible
+                          ? cleanOrNotAvailable(
+                              _selectedpaymentmode?.toString(),
+                            )
+                          : 'Cash',
+                    ),
+                    pw.SizedBox(height: 4),
+                    spaceBetweenLine(
+                      'Amount Received (AED):',
+                      formatAmount(roundedtotalBillAmount),
+                    ),
+                    pw.SizedBox(height: 4),
+                    spaceBetweenLine('Date & Time:', dateTimeText),
+                    pw.SizedBox(height: 4),
+                    spaceBetweenLine(
+                      'Vehicle No. :',
+                      cleanOrNotAvailable(vehicleName),
+                    ),
+                    pw.SizedBox(height: 4),
+                    spaceBetweenLine('Driver Name:', cleanOrNotAvailable(name)),
+                    if (controller_narration.text.trim().isNotEmpty) ...[
+                      pw.SizedBox(height: 6),
+                      pw.RichText(
+                        text: pw.TextSpan(
+                          children: [
+                            pw.TextSpan(
+                              text: 'Remarks: ',
+                              style: pw.TextStyle(
+                                fontSize: 9,
+                                fontWeight: pw.FontWeight.bold,
+                                fontStyle: pw.FontStyle.italic,
+                              ),
+                            ),
+                            pw.TextSpan(
+                              text: controller_narration.text,
+                              style: pw.TextStyle(fontSize: 9),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    pw.SizedBox(height: 8),
+                    pw.Divider(thickness: 0.75),
+                    pw.SizedBox(height: 4),
+                    pw.RichText(
+                      text: pw.TextSpan(
+                        children: [
+                          pw.TextSpan(
+                            text: 'Amount in Words: ',
+                            style: pw.TextStyle(
+                              fontSize: 9,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.TextSpan(
+                            text: convertAmountToWords(roundedtotalBillAmount),
+                            style: pw.TextStyle(fontSize: 9),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (bills.isNotEmpty) ...[
+                pw.SizedBox(height: 10),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      'Bill Allocations:',
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 4),
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 6,
+                  ),
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(
+                      left: pw.BorderSide(width: 1),
+                      right: pw.BorderSide(width: 1),
+                      top: pw.BorderSide(width: 2),
+                      bottom: pw.BorderSide(width: 2),
+                    ),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      billRow('Sr. #', 'Document No.', 'Invoice Value', bold: true),
+                      pw.SizedBox(height: 3),
+                      pw.Divider(thickness: 0.75),
+                      pw.SizedBox(height: 3),
+                      for (var bill in bills.asMap().entries)
+                        billRow(
+                          '${bill.key + 1}',
+                          cleanOrNotAvailable(bill.value.billNo),
+                          formatAmount(bill.value.billAmount),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+              pw.SizedBox(height: 10),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(6),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(width: 1),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text(
+                          'PAYER SIGNATURE',
+                          style: pw.TextStyle(
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.Text(
+                          'توقيع الدافع',
+                          textDirection: pw.TextDirection.rtl,
+                          style: pw.TextStyle(fontSize: 8, font: arabicFont),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 6),
+                    pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Container(
+                          width: 60,
+                          height: 60,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border.all(width: 1),
+                          ),
+                        ),
+                        pw.SizedBox(width: 10),
+                        pw.Expanded(
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text('Name:', style: pw.TextStyle(fontSize: 9)),
+                              pw.SizedBox(height: 20),
+                              pw.Text('Phone:', style: pw.TextStyle(fontSize: 9)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'Please ensure the payment amount matches this receipt before signing',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 8),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'Electronic receipt. No signature or stamp required from issuer',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 8),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'Thank you for your business!',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final dir = await getApplicationDocumentsDirectory();
+    final formattedDate = DateFormat('yyyyMMdd_HHmmss').format(now);
+    final filePath = '${dir.path}/Receipt_$formattedDate.pdf';
+    final file = File(filePath);
+    await file.writeAsBytes(pdfData);
+
+    await Share.shareXFiles([
+      XFile(filePath, mimeType: 'application/pdf'),
+    ], text: 'Sharing Receipt for $_selectedparty');
+
+    _resetReceiptFormAfterShare();
   }
 
   void updateChequeAmount() {
@@ -2469,7 +3003,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   String? HttpURL_loadData,
       HttpURL_receiptEntry,
       HttpURL_fetchvchnos,
-      HttpURL_fetchoutstanding;
+      HttpURL_fetchoutstanding,
+      HttpURL_loadLedgerData;
 
   final DateFormat _dateFormat = DateFormat('yyyyMMdd');
 
@@ -2870,25 +3405,40 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           _selectedbankcashname != null ? _selectedbankcashname!['name']! : "";
 
 
-          if (_selectedbankcashname != null && _selectedbankcashname!['type'] == 'Cash-in-Hand') {
+          // Only recalculate Payment Mode visibility when a bank/cash
+          // ledger actually got auto-selected above - otherwise leave it
+          // at its default (hidden) instead of falling through to the
+          // "not Cash-in-Hand" else branch for a null ledger.
+          if (_selectedbankcashname != null) {
+            if (isSelectedBankCashInHand) {
+              isPaymentModeVisible = false;
+              _selectedpaymentmode = paymentmode_data.first;
+              cheque.clear();
+              updateChequeAmount();
 
-            isPaymentModeVisible = false;
-            _selectedpaymentmode = paymentmode_data.first;
-            cheque.clear();
-            updateChequeAmount();
-
-            isVisibleChequeHeading = false;
-            isChequeVisible = false;
-          }
-          else
-          {
-            if(bills.isNotEmpty)
+              isVisibleChequeHeading = false;
+              isChequeVisible = false;
+            }
+            else
             {
-              if(cheque.isNotEmpty)
+              if(bills.isNotEmpty)
               {
-                isPaymentModeVisible = true;
-                isChequeVisible = true;
-                isVisibleChequeHeading = true;
+                if(cheque.isNotEmpty)
+                {
+                  isPaymentModeVisible = true;
+                  isChequeVisible = true;
+                  isVisibleChequeHeading = true;
+                }
+                else
+                {
+                  isPaymentModeVisible = true;
+                  _selectedpaymentmode = paymentmode_data.first;
+                  cheque.clear();
+                  updateChequeAmount();
+
+                  isVisibleChequeHeading = false;
+                  isChequeVisible = true;
+                }
               }
               else
               {
@@ -2898,18 +3448,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                 updateChequeAmount();
 
                 isVisibleChequeHeading = false;
-                isChequeVisible = true;
+                isChequeVisible = false;
               }
-            }
-            else
-            {
-              isPaymentModeVisible = false;
-              _selectedpaymentmode = paymentmode_data.first;
-              cheque.clear();
-              updateChequeAmount();
-
-              isVisibleChequeHeading = false;
-              isChequeVisible = false;
             }
           }
 
@@ -3079,30 +3619,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               ? _selectedbankcashname!['name']!
               : "";
 
-          if (_selectedbankcashname != null && isSelectedBankCashInHand) {
-            isPaymentModeVisible = false;
-            _selectedpaymentmode = paymentmode_data.first;
-            cheque.clear();
-            updateChequeAmount();
-
-            isVisibleChequeHeading = false;
-            isChequeVisible = false;
-          } else {
-            if (bills.isNotEmpty) {
-              if (cheque.isNotEmpty) {
-                isPaymentModeVisible = true;
-                isChequeVisible = true;
-                isVisibleChequeHeading = true;
-              } else {
-                isPaymentModeVisible = true;
-                _selectedpaymentmode = paymentmode_data.first;
-                cheque.clear();
-                updateChequeAmount();
-
-                isVisibleChequeHeading = false;
-                isChequeVisible = true;
-              }
-            } else {
+          // Only recalculate Payment Mode visibility when a bank/cash
+          // ledger actually got auto-selected above - otherwise leave it
+          // at its default (hidden) instead of falling through to the
+          // "not Cash-in-Hand" else branch for a null ledger.
+          if (_selectedbankcashname != null) {
+            if (isSelectedBankCashInHand) {
               isPaymentModeVisible = false;
               _selectedpaymentmode = paymentmode_data.first;
               cheque.clear();
@@ -3110,6 +3632,30 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
               isVisibleChequeHeading = false;
               isChequeVisible = false;
+            } else {
+              if (bills.isNotEmpty) {
+                if (cheque.isNotEmpty) {
+                  isPaymentModeVisible = true;
+                  isChequeVisible = true;
+                  isVisibleChequeHeading = true;
+                } else {
+                  isPaymentModeVisible = true;
+                  _selectedpaymentmode = paymentmode_data.first;
+                  cheque.clear();
+                  updateChequeAmount();
+
+                  isVisibleChequeHeading = false;
+                  isChequeVisible = true;
+                }
+              } else {
+                isPaymentModeVisible = true;
+                _selectedpaymentmode = paymentmode_data.first;
+                cheque.clear();
+                updateChequeAmount();
+
+                isVisibleChequeHeading = false;
+                isChequeVisible = false;
+              }
             }
           }
         });
@@ -5206,8 +5752,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             (_selectedbill == 'New Ref' || _selectedbill == "Agst Ref");
         isVisibleBillNo =
             (_selectedbill == "Agst Ref" || _selectedbill == 'New Ref');
-        if (_selectedbankcashname != null &&
-            _selectedbankcashname!['type'] == 'Cash-in-Hand') {
+        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
           _selectedpaymentmode = paymentmode_data.first;
           cheque.clear();
@@ -5498,6 +6043,9 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
       HttpURL_receiptEntry = '$hostname/api/entry/create/$company/$serial_no';
       /*HttpURL_receiptEntry = 'http://192.168.2.110:4999/api/entry/create/demonewformobilepp/767060064';*/
+
+      HttpURL_loadLedgerData =
+          '$hostname/api/ledger/getLedger/$company_lowercase/$serial_no';
 
       controller_totalamt.text = 0.toString();
 
@@ -6085,6 +6633,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                       : (suggestion) {
                                           setState(() {
                                             _selectedbankcashname = suggestion;
+                                            debugPrint('cash in hand -> ${_selectedbankcashname!['type']}');
                                             _bankcashnameController.text =
                                                 suggestion['name']!;
                                           });
@@ -6099,6 +6648,24 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                               updateChequeAmount();
                                               isVisibleChequeHeading = false;
                                               isChequeVisible = false;
+                                            });
+                                          } else {
+                                            setState(() {
+                                              if (bills.isNotEmpty &&
+                                                  cheque.isNotEmpty) {
+                                                isPaymentModeVisible = true;
+                                                isChequeVisible = true;
+                                                isVisibleChequeHeading = true;
+                                              } else {
+                                                isPaymentModeVisible = true;
+                                                _selectedpaymentmode =
+                                                    paymentmode_data.first;
+                                                cheque.clear();
+                                                updateChequeAmount();
+                                                isVisibleChequeHeading = false;
+                                                isChequeVisible =
+                                                    bills.isNotEmpty;
+                                              }
                                             });
                                           }
                                         },

@@ -164,7 +164,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
   // Customer mobile/email for the selected party ledger - fetched in
   // loadLedgerData() alongside TRN/address/emirate/country, used by the
-  // UniGas POS-receipt PDF format.
+  // UniGas POS delivery note PDF format.
   String? _selectedPartyMobile;
   String? _selectedPartyEmail;
   double ledgerVatAmount = 0,
@@ -925,11 +925,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     String emirate,
     String country,
   ) async {
-    // UniGas now uses a completely separate POS-receipt format (the old
+    // UniGas now uses a completely separate POS delivery note format (the old
     // A4-style layout with hidden rate/amount columns is retired for
-    // this serial type) - see _generateUniGasReceiptPDF.
+    // this serial type) - see _generateUniGasDeliveryNotePDF.
     if (isUniGasMeterReadingSerial) {
-      await _generateUniGasReceiptPDF(trn, address, emirate, country);
+      await _generateUniGasDeliveryNotePDF(trn, address, emirate, country);
       return;
     }
 
@@ -2339,7 +2339,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     _resetDeliveryNoteFormAfterShare();
   }
 
-  // Shared by both the standard A4 PDF path and the UniGas POS-receipt path:
+  // Shared by both the standard A4 PDF path and the UniGas POS delivery note path:
   // clears the form and recomputes totals after a delivery note is shared.
   void _resetDeliveryNoteFormAfterShare() {
     setState(() {
@@ -2486,7 +2486,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     });
   }
 
-  // Narrow POS-receipt format required by UniGas for their thermal
+  // Narrow POS delivery note format required by UniGas for their thermal
   // printer/POS device (~76mm / 216pt wide, single continuous page).
   // Company header details (name, tagline, branch locations, tel/email/
   // web/TRN) are hardcoded here because this format is only ever used
@@ -2497,7 +2497,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   // label. The bundled NotoSans.ttf has no Arabic glyphs, so it's
   // omitted here rather than rendering as blank boxes - add an
   // Arabic-capable font asset to restore it.
-  Future<void> _generateUniGasReceiptPDF(
+  Future<void> _generateUniGasDeliveryNotePDF(
     String trn,
     String address,
     String emirate,
@@ -2513,7 +2513,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         'spectra_allocations',
       );
       debugPrint(
-        "UNIGAS RECEIPT VEHICLE LOOKUP (prefs): $spectraAllocationsString",
+        "UNIGAS DELIVERY NOTE VEHICLE LOOKUP (prefs): $spectraAllocationsString",
       );
 
       if (spectraAllocationsString != null &&
@@ -2529,7 +2529,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         }
       }
     } catch (e) {
-      debugPrint("UNIGAS RECEIPT VEHICLE LOOKUP ERROR: $e");
+      debugPrint("UNIGAS DELIVERY NOTE VEHICLE LOOKUP ERROR: $e");
     }
 
     final logoBytes = await rootBundle.load("assets/uigas-logo.jpeg");
@@ -2644,8 +2644,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     }
 
     // Item name plus, when this is a UniGas meter-reading item, a small
-    // "Meter Reading: X - Y" line underneath - same pattern used in the
-    // Sales Invoice PDF.
+    // "X - Y" meter-reading values line underneath.
     pw.Widget itemCell(SaleItem item) {
       return pw.Padding(
         padding: const pw.EdgeInsets.symmetric(horizontal: 2, vertical: 3),
@@ -2655,7 +2654,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
             pw.Text(item.itemName, style: pw.TextStyle(fontSize: 10)),
             if (item.meterFrom.isNotEmpty && item.meterTo.isNotEmpty)
               pw.Text(
-                'Meter Reading: ${item.meterFrom} - ${item.meterTo}',
+                '${item.meterFrom} - ${item.meterTo}',
                 style: pw.TextStyle(
                   fontSize: 7,
                   fontStyle: pw.FontStyle.italic,
@@ -2684,11 +2683,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
     pdf.addPage(
       pw.Page(
-        // Sunmi V2 Pro's built-in thermal printer takes 58mm paper
-        // (~164.4pt); left/right margins keep content off the printer's
-        // physical no-print edge, matching the reference receipt.
+        // Shared/viewed only (not printed on the Sunmi's 58mm thermal
+        // paper), so widened to 76mm to match the Tax Invoice format and
+        // give the item table/signature box more breathing room.
         pageFormat: PdfPageFormat(
-          58 * PdfPageFormat.mm,
+          76 * PdfPageFormat.mm,
           double.infinity,
           marginLeft: 10,
           marginRight: 10,
@@ -2762,8 +2761,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                 border: pw.TableBorder(
                   left: const pw.BorderSide(width: 0.5),
                   right: const pw.BorderSide(width: 0.5),
-                  horizontalInside: const pw.BorderSide(width: 0.5),
-                  verticalInside: const pw.BorderSide(width: 0.5),
                   top: const pw.BorderSide(width: 1.5),
                   bottom: const pw.BorderSide(width: 1.5),
                 ),
@@ -2775,6 +2772,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                 },
                 children: [
                   pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      border: pw.Border(
+                        bottom: pw.BorderSide(width: 0.75),
+                      ),
+                    ),
                     children: [
                       cell('SN', bold: true),
                       cell('ITEM', bold: true),
@@ -2796,7 +2798,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
               pw.SizedBox(height: 10),
               spaceBetweenLine(
                 'Delivered by:',
-                cleanOrNotAvailable(username),
+                cleanOrNotAvailable(name),
               ),
               pw.SizedBox(height: 2),
               spaceBetweenLine(
@@ -2819,29 +2821,23 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Container(
-                      width: double.infinity,
-                      child: pw.Row(
-                        mainAxisSize: pw.MainAxisSize.max,
-                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
-                          pw.Text(
-                            'CUSTOMER SIGNATURE',
-                            style: pw.TextStyle(
-                              fontSize: 9,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text(
+                          'CUSTOMER SIGNATURE',
+                          style: pw.TextStyle(
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
                           ),
-                          pw.Text(
-                            'توقيع العميل',
-                            textDirection: pw.TextDirection.rtl,
-                            style: pw.TextStyle(
-                              fontSize: 9,
-                              font: arabicFont,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        pw.Text(
+                          'توقيع العميل',
+                          textDirection: pw.TextDirection.rtl,
+                          style: pw.TextStyle(fontSize: 8, font: arabicFont),
+                        ),
+                      ],
                     ),
                     pw.SizedBox(height: 6),
                     pw.Row(

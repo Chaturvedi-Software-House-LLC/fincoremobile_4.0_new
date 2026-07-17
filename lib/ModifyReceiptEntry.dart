@@ -452,6 +452,22 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
   Map<String, String>? _selectedbankcashname;
 
+  // The 'type' value comes straight from the synced Tally ledger's
+  // ledgroup column (backend entry.js), so its exact casing/spacing can
+  // vary per company (e.g. "Cash-in-hand" vs "Cash-in-Hand") even though
+  // MySQL's case-insensitive collation lets it through the same
+  // "ledgroup in (...)" filter - normalize before comparing instead of
+  // an exact string match.
+  bool get isSelectedBankCashInHand {
+    final type = _selectedbankcashname?['type']
+        ?.toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll('-', ' ');
+
+    return type == 'cash in hand';
+  }
+
   late dynamic _selectedpaymentmode = '';
 
   late final TextEditingController controller_totalamt =
@@ -608,8 +624,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         isVisibleChequeHeading = false;
       } else {
         isVisibleBillHeading = true;
-        if (_selectedbankcashname != null &&
-            _selectedbankcashname!['type'] == 'Cash-in-Hand') {
+        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
           _selectedpaymentmode = paymentmode_data.first;
           cheque.clear();
@@ -2062,7 +2077,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       allLedgerEntriesList.add(bankAllocation);
 
       // If the selected bank/cash type is not 'Cash-in-Hand', add cheque details to bank allocation list
-      if (_selectedbankcashname!['type'] != 'Cash-in-Hand') {
+      if (!isSelectedBankCashInHand) {
         bankAllocation["BANKALLOCATIONS.LIST"] = cheque.map((cheque) {
           return {
             "DATE": cheque.date,
@@ -2327,8 +2342,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             isVisibleBillHeading = true;
           }
 
-          if (_selectedbankcashname != null &&
-              _selectedbankcashname!['type'] == 'Cash-in-Hand') {
+          if (_selectedbankcashname != null && isSelectedBankCashInHand) {
             isPaymentModeVisible = false;
             _selectedpaymentmode = paymentmode_data.first;
             cheque.clear();
@@ -2433,8 +2447,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         receiptdatetxt = formatlastsaledate(receiptdatestring);
         _dateController.text = receiptdatetxt;
 
-        if (_selectedbankcashname != null &&
-            _selectedbankcashname!['type'] == 'Cash-in-Hand') {
+        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
           _selectedpaymentmode = paymentmode_data.first;
           cheque.clear();
@@ -4498,8 +4511,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             (_selectedbill == 'New Ref' || _selectedbill == "Agst Ref");
         isVisibleBillNo =
             (_selectedbill == "Agst Ref" || _selectedbill == 'New Ref');
-        if (_selectedbankcashname != null &&
-            _selectedbankcashname!['type'] == 'Cash-in-Hand') {
+        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
           _selectedpaymentmode = paymentmode_data.first;
           cheque.clear();
@@ -5404,31 +5416,31 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                         );
                                     _bankcashnameController.text =
                                         _selectedbankcashname!['name'] ?? '';
-                                  });
 
-                                  if (_selectedbankcashname != null &&
-                                      _selectedbankcashname!['type'] ==
-                                          'Cash-in-Hand') {
-                                    isPaymentModeVisible = false;
-                                    _selectedpaymentmode =
-                                        paymentmode_data.first;
-                                    cheque.clear();
-                                    updateChequeAmount();
-                                    isVisibleChequeHeading = false;
-                                    isChequeVisible = false;
-                                  } else if (bills.isNotEmpty) {
-                                    isPaymentModeVisible = true;
-                                    isChequeVisible = true;
-                                    isVisibleChequeHeading = cheque.isNotEmpty;
-                                  } else {
-                                    isPaymentModeVisible = true;
-                                    _selectedpaymentmode =
-                                        paymentmode_data.first;
-                                    cheque.clear();
-                                    updateChequeAmount();
-                                    isVisibleChequeHeading = false;
-                                    isChequeVisible = false;
-                                  }
+                                    if (_selectedbankcashname != null &&
+                                        isSelectedBankCashInHand) {
+                                      isPaymentModeVisible = false;
+                                      _selectedpaymentmode =
+                                          paymentmode_data.first;
+                                      cheque.clear();
+                                      updateChequeAmount();
+                                      isVisibleChequeHeading = false;
+                                      isChequeVisible = false;
+                                    } else if (bills.isNotEmpty) {
+                                      isPaymentModeVisible = true;
+                                      isChequeVisible = true;
+                                      isVisibleChequeHeading =
+                                          cheque.isNotEmpty;
+                                    } else {
+                                      isPaymentModeVisible = true;
+                                      _selectedpaymentmode =
+                                          paymentmode_data.first;
+                                      cheque.clear();
+                                      updateChequeAmount();
+                                      isVisibleChequeHeading = false;
+                                      isChequeVisible = false;
+                                    }
+                                  });
                                 },
                                 emptyBuilder: (context) => Padding(
                                   padding: const EdgeInsets.all(8.0),
@@ -5645,9 +5657,8 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                       ),
 
                       Visibility(
-                        visible:
-                            isPaymentModeVisible &&
-                            _selectedbankcashname?['type'] != 'Cash-in-Hand',
+                        visible: isPaymentModeVisible &&
+                            !isSelectedBankCashInHand,
                         child: EntrySection(
                           icon: Icons.payment_outlined,
                           title: "Payment Mode",
