@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "download-page",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8090", "-d", "download-page"],
+      "port": 8090
+    },
+    {
+      "name": "fincore-website",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8091", "-d", "/Users/saadan/Desktop/Saadan_Work/fincore-go-website"],
+      "port": 8091
+    }
+  ]
+}
