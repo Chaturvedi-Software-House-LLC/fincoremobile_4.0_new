@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'widgets/entry_widgets.dart';
 
 class FastMovingInactiveItemsCriteria extends StatefulWidget {
   final bool fastmoving_visible, slowmoving_visible, inactive_visible;
@@ -115,39 +116,7 @@ class _FastMovingInactiveItemsState
 
   void showToast(String message) {
     final bool isSuccess = message.toLowerCase().contains('saved');
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        elevation: 0,
-        backgroundColor: isSuccess
-            ? const Color(0xFF138A63)
-            : const Color(0xFFB42318),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        content: Row(
-          children: [
-            Icon(
-              isSuccess
-                  ? Icons.check_circle_outline_rounded
-                  : Icons.error_outline_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                message,
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    showAppMessage(context, message, isError: !isSuccess);
   }
 
   void savePreferences() async {

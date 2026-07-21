@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'RolesView.dart';
@@ -9,6 +8,7 @@ import 'SerialSelect.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class ModifyRole extends StatefulWidget {
   final String role_name;
@@ -333,21 +333,9 @@ class _ModifyRolePageState extends State<ModifyRole>
       final responsee = response.body;
       if (responsee != null) {
         if (responsee == "Role already exists") {
-          Fluttertoast.showToast(
-            msg: "Role already exists",
-            toastLength: Toast.LENGTH_SHORT,
-            gravity: ToastGravity.BOTTOM,
-            backgroundColor: Colors.redAccent,
-            textColor: Colors.white,
-          );
+          showAppMessage(context, "Role already exists");
         } else {
-          Fluttertoast.showToast(
-            msg: "Role updated successfully",
-            toastLength: Toast.LENGTH_SHORT,
-            gravity: ToastGravity.BOTTOM,
-            backgroundColor: Colors.green,
-            textColor: Colors.white,
-          );
+          showAppMessage(context, "Role updated successfully", isError: false);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             SchedulerBinding.instance.addPostFrameCallback((_) {
               Navigator.pushReplacement(
@@ -375,7 +363,7 @@ class _ModifyRolePageState extends State<ModifyRole>
         error = 'Something went wrong!!!';
       }
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
     setState(() {
       _isLoading = false;
@@ -574,9 +562,7 @@ class _ModifyRolePageState extends State<ModifyRole>
   Future<void> modifyrolefn() async {
     new_rolename = _textEditingController.text;
     if (new_rolename.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Enter Role Name")));
+      showAppMessage(context, "Enter Role Name");
     } else {
       setState(() {
         if (isSalesAccessCheck) {

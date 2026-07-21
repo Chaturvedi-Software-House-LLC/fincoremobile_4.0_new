@@ -3,7 +3,6 @@ import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/ModifySalesEntry.dart';
 import 'package:FincoreGo/SalesRegistration.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -296,9 +295,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
 
     if (response.statusCode == 200) {
       final response_data = response.body;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(response_data)));
+      showAppMessage(context, response_data);
       if (response_data == "Entry deleted successfully") {
         setState(() {
           _isLoading = true;
@@ -321,7 +318,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
         error = 'Server Error!!!';
       }
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
       setState(() {
         _isLoading = false;
       });
@@ -428,7 +425,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
         }
       } catch (_) {}
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
 
       setState(() {
         if (filteredSalesEntries.isEmpty) {
@@ -510,7 +507,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
         error = 'Server Error!!!';
       }
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
 
     setState(() {

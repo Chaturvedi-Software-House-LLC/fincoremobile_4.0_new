@@ -4,7 +4,6 @@ import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/PendingReceiptEntry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
@@ -159,7 +158,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       isVisibleBillHeading = bills.isNotEmpty;
     });
 
-    // Fluttertoast.showToast(msg: "Bill removed from receipt");
+    // showAppMessage(context, "Bill removed from receipt");
   }
 
   String getBillDueDays(dynamic bill) {
@@ -194,7 +193,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     );
 
     if (alreadyAdded) {
-      Fluttertoast.showToast(msg: "Bill already added");
+      showAppMessage(context, "Bill already added", isError: false);
       return;
     }
 
@@ -230,7 +229,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       }
     });
 
-    // Fluttertoast.showToast(msg: "Bill added to receipt");
+    // showAppMessage(context, "Bill added to receipt", isError: false);
   }
 
   Future<void> fetchPartyOutstanding(String ledgerName) async {
@@ -3131,7 +3130,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   Future<void> saveEntry() async {
     // ❌ Prevent save if party not selected
     if (_selectedparty == null || _selectedparty.toString().trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Party");
+      showAppMessage(context, "Please select Party");
       return;
     }
 
@@ -3139,14 +3138,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     if (_selectedbankcashname == null ||
         _selectedbankcashname!['name'] == null ||
         _selectedbankcashname!['name']!.trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Bank / Cash Ledger");
+      showAppMessage(context, "Please select Bank / Cash Ledger");
       return;
     }
 
     if (bills.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Atleast add 1 bill')));
+      showAppMessage(context, 'Atleast add 1 bill');
     } else {
       setState(() {
         _isLoading = true;
@@ -3272,7 +3269,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           if (response_receiptentry.body == 'Entry created successfully') {
             showReceiptVoucherDialog(context);
           } else {
-            Fluttertoast.showToast(msg: 'an error occoured');
+            showAppMessage(context, 'an error occoured');
           }
         } else {
           Map<String, dynamic> data = json.decode(response_receiptentry.body);
@@ -3285,7 +3282,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           } else {
             error = "Error in data fetching!!!";
           }
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       } catch (e) {
         setState(() {
@@ -3487,7 +3484,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     }
     catch (e)
@@ -3691,7 +3688,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       /*print(e);*/
@@ -3705,11 +3702,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   Future<void> _selectreceiptDate(BuildContext context) async {
     if (isUniGasSerial) {
       closeKeyboard(context);
-      Fluttertoast.showToast(
-        msg: "Voucher date cannot be changed",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Voucher date cannot be changed");
       return;
     }
     final DateTime? picked = await showDatePicker(
@@ -6208,7 +6201,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       vchnos.clear();
@@ -7074,10 +7067,9 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                     _selectedpaymentmode = value!;
                                   });
                                   if (bills.isEmpty) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('At least add 1 bill'),
-                                      ),
+                                    showAppMessage(
+                                      context,
+                                      'At least add 1 bill',
                                     );
                                     isChequeVisible = false;
                                     selectedbankname = bankname_data.first;

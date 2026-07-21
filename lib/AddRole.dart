@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'RolesView.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class Roles {
   final String serial;
@@ -879,21 +879,9 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
       final responseBody = response.body;
 
       if (responseBody == "Role already exists") {
-        Fluttertoast.showToast(
-          msg: "Role already exists",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.BOTTOM,
-          backgroundColor: Colors.redAccent,
-          textColor: Colors.white,
-        );
+        showAppMessage(context, "Role already exists");
       } else {
-        Fluttertoast.showToast(
-          msg: "Role added successfully",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.BOTTOM,
-          backgroundColor: Colors.green,
-          textColor: Colors.white,
-        );
+        showAppMessage(context, "Role added successfully", isError: false);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           SchedulerBinding.instance.addPostFrameCallback((_) {
             Navigator.pushReplacement(
@@ -918,7 +906,7 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
         error = 'Something went wrong!!!';
       }
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
     setState(() {
       _isLoading = false;
@@ -1115,9 +1103,7 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
   Future<void> addrolefn() async {
     rolename = _textEditingController.text;
     if (rolename.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Enter Role Name")));
+      showAppMessage(context, "Enter Role Name");
     } else {
       setState(() {
         if (isSalesAccessCheck) {
@@ -1784,9 +1770,7 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
 
             fetchRolesData(selectedRole, serial_no!);
           } catch (e) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text("No Role Found")));
+            showAppMessage(context, "No Role Found");
           }
         });
       } else {

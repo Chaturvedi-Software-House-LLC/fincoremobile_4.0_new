@@ -335,6 +335,10 @@ class EntryItemCard extends StatelessWidget {
   final VoidCallback onDecrement;
   final VoidCallback onDelete;
   final VoidCallback? onTap;
+  // When true, the qty stepper is disabled (shows a lock icon instead of
+  // +/- controls) - used for meter-reading items whose quantity is
+  // derived from the start/end reading, not manually editable.
+  final bool quantityLocked;
 
   const EntryItemCard({
     super.key,
@@ -347,6 +351,7 @@ class EntryItemCard extends StatelessWidget {
     required this.onDecrement,
     required this.onDelete,
     this.onTap,
+    this.quantityLocked = false,
   });
 
   @override
@@ -430,6 +435,7 @@ class EntryItemCard extends StatelessWidget {
                     quantity: quantity,
                     onIncrement: onIncrement,
                     onDecrement: onDecrement,
+                    locked: quantityLocked,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -500,11 +506,13 @@ class _QtyControl extends StatelessWidget {
   final String quantity;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
+  final bool locked;
 
   const _QtyControl({
     required this.quantity,
     required this.onIncrement,
     required this.onDecrement,
+    this.locked = false,
   });
 
   @override
@@ -520,36 +528,53 @@ class _QtyControl extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           InkWell(
-            onTap: onDecrement,
+            onTap: locked ? null : onDecrement,
             borderRadius: const BorderRadius.horizontal(
               left: Radius.circular(10),
             ),
             child: Container(
               padding: const EdgeInsets.all(6),
-              child: Icon(Icons.remove, size: 18, color: Colors.redAccent),
+              child: Icon(
+                Icons.remove,
+                size: 18,
+                color: locked ? Colors.grey.shade400 : Colors.redAccent,
+              ),
             ),
           ),
           Container(
             constraints: const BoxConstraints(minWidth: 36),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Text(
-              quantity,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (locked) ...[
+                  Icon(Icons.lock, size: 12, color: Colors.grey.shade500),
+                  const SizedBox(width: 4),
+                ],
+                Text(
+                  quantity,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              ],
             ),
           ),
           InkWell(
-            onTap: onIncrement,
+            onTap: locked ? null : onIncrement,
             borderRadius: const BorderRadius.horizontal(
               right: Radius.circular(10),
             ),
             child: Container(
               padding: const EdgeInsets.all(6),
-              child: Icon(Icons.add, size: 18, color: app_color),
+              child: Icon(
+                Icons.add,
+                size: 18,
+                color: locked ? Colors.grey.shade400 : app_color,
+              ),
             ),
           ),
         ],
@@ -1501,4 +1526,95 @@ Future<void> printUniGasPdf(
     onLayout: (format) async => pdfBytes,
     name: documentName,
   );
+}
+
+// ─── App-wide message banner ──────────────────────────────────────
+// Replaces Fluttertoast across the app: Android's native Toast is capped
+// at ~3.5s (LENGTH_LONG) with no way to extend it - too quick for a
+// layman user to comfortably read. This renders into the ROOT overlay
+// instead (so it's visible above any open dialog/modal bottom sheet),
+// stays up for a duration we control, and has a manual close (X).
+OverlayEntry? _appMessageOverlay;
+
+void showAppMessage(
+  BuildContext context,
+  String message, {
+  bool isError = true,
+  int seconds = 3,
+}) {
+  if (!context.mounted) return;
+
+  _appMessageOverlay?.remove();
+  _appMessageOverlay = null;
+
+  final Color bg = isError ? Colors.redAccent : Colors.teal;
+  final IconData icon = isError
+      ? Icons.error_outline
+      : Icons.check_circle_outline;
+
+  final OverlayState overlayState = Overlay.of(context, rootOverlay: true);
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (overlayContext) => Positioned(
+      left: 16,
+      right: 16,
+      // Clear the bottom nav bar + device safe-area inset, not just a
+      // small fixed gap that ends up nearly touching the screen edge.
+      bottom: 24 + MediaQuery.of(overlayContext).padding.bottom,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: Colors.white, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () {
+                  if (_appMessageOverlay == entry) {
+                    entry.remove();
+                    _appMessageOverlay = null;
+                  }
+                },
+                child: const Icon(Icons.close, color: Colors.white, size: 20),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  _appMessageOverlay = entry;
+  overlayState.insert(entry);
+
+  Future.delayed(Duration(seconds: seconds), () {
+    if (_appMessageOverlay == entry) {
+      entry.remove();
+      _appMessageOverlay = null;
+    }
+  });
 }

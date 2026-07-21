@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SerialSelect.dart';
@@ -9,6 +8,7 @@ import 'UserView.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class ModifyUser extends StatefulWidget {
   final String user_name, email_address, rolename;
@@ -248,7 +248,7 @@ class _ModifyUserPageState extends State<ModifyUser>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
 
       /* setState(() {
         _isLoading = false;
@@ -297,7 +297,7 @@ class _ModifyUserPageState extends State<ModifyUser>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
 
       /*setState(() {
         _isLoading = false;
@@ -371,7 +371,7 @@ class _ModifyUserPageState extends State<ModifyUser>
           /*_isLoading = false;*/
         });
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
   }
 
@@ -560,21 +560,13 @@ class _ModifyUserPageState extends State<ModifyUser>
 
         if (responsee ==
             "Kindly Modify Atleast 1 Detail Against Selected User") {
-          Fluttertoast.showToast(
-            msg: "Please modify at least one detail",
-            toastLength: Toast.LENGTH_SHORT,
-            gravity: ToastGravity.BOTTOM,
-            backgroundColor: Colors.orangeAccent,
-            textColor: Colors.white,
+          showAppMessage(
+            context,
+            "Please modify at least one detail",
+            isError: false,
           );
         } else {
-          Fluttertoast.showToast(
-            msg: "User updated successfully",
-            toastLength: Toast.LENGTH_SHORT,
-            gravity: ToastGravity.BOTTOM,
-            backgroundColor: Colors.green,
-            textColor: Colors.white,
-          );
+          showAppMessage(context, "User updated successfully", isError: false);
           modifyAllowedCompanies(email, serial_no!, _selectedCompanies);
         }
       } else {
@@ -588,7 +580,7 @@ class _ModifyUserPageState extends State<ModifyUser>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
       setState(() {
         _isLoading = false;
@@ -1063,28 +1055,20 @@ class _ModifyUserPageState extends State<ModifyUser>
       fetched_role = _selectedrole;
 
       if (fetched_name!.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Enter Name")));
+        showAppMessage(context, "Enter Name");
       } else if (fetched_email!.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Enter Username or Email")));
+        showAppMessage(context, "Enter Username or Email");
       } else {
         _isFocused_email = false;
         _isFocus_name = false;
         if (!isEmail(fetched_email!)) {
           if (controller_password.text.trim().isEmpty) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text("Enter password")));
+            showAppMessage(context, "Enter password");
             return;
           }
 
           if (controller_password.text.trim().length < 4) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text("Password too short")));
+            showAppMessage(context, "Password too short");
             return;
           }
         }

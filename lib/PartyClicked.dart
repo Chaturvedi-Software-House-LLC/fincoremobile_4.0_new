@@ -21,6 +21,7 @@ import 'dart:io';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'widgets/entry_widgets.dart';
 
 class Summary {
   final String vchtype, totalInvoice, averageAmount, lastdate, totalAmount;
@@ -1721,11 +1722,7 @@ class _PartyClickedPageState extends State<PartyClicked>
           if (response_salepurc.statusCode == 200) {
             if (response_salepurc.body == '[]') {
             } else if (response_salepurc.body.contains('Connection')) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text("Error in Fetching Sale/Purchase Order"),
-                ),
-              );
+              showAppMessage(context, "Error in Fetching Sale/Purchase Order");
             } else {
               final List<dynamic> salepurc_list = jsonDecode(
                 response_salepurc.body,

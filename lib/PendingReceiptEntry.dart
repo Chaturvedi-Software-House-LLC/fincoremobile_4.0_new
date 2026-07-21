@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/ReceiptRegistration.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -286,11 +285,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
     if (response.statusCode == 200) {
       final responsee = response.body;
       if (responsee != null) {
-        /*ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(responsee),
-          ),
-        );*/
+        /*showAppMessage(context, responsee);*/
         if (responsee == "Entry deleted successfully") {
           setState(() {
             _isLoading = true;
@@ -318,7 +313,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
       setState(() {
         _isLoading = false;
       });
@@ -424,7 +419,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
     setState(() {
       if (filteredReceiptEntries.isEmpty) {

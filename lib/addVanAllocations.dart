@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class VanAllocationScreen extends StatefulWidget {
   const VanAllocationScreen({super.key});
@@ -470,9 +471,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
 
   Future<void> _saveAllocation() async {
     if (!isFormValid) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please fill all fields')));
+      showAppMessage(context, 'Please fill all fields');
       return;
     }
 
@@ -517,11 +516,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
       debugPrint("SAVE ALLOCATION RESPONSE: ${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        /*ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Allocation saved successfully'),
-          ),
-        );*/
+        /*showAppMessage(context, 'Allocation saved successfully', isError: false);*/
 
         fetchUsers(serial_no!);
         fetchVanAllocationData();
@@ -549,29 +544,12 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
           errorMessage = response.body.toString();
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.red.shade500,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            content: Text(
-              errorMessage,
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        );
+        showAppMessage(context, errorMessage);
       }
     } catch (e) {
       debugPrint("SAVE ALLOCATION ERROR: $e");
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      showAppMessage(context, 'Error: $e');
     } finally {
       setState(() {
         isSaving = false;

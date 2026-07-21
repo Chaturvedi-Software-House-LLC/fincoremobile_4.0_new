@@ -12,7 +12,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'utils/currency_helper.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,6 +20,7 @@ import 'PendingSalesOrderEntry.dart';
 import 'SerialSelect.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
+import 'widgets/entry_widgets.dart';
 
 List<String> months_chart = [];
 List<String> months_chart_line_graph = [
@@ -1210,7 +1210,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           } else {
             error = "Error in data fetching!!!";
           }
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       } catch (e) {
         String error = '';
@@ -1222,7 +1222,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
         } else {
           error = "Error in data fetching!!!";
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
 
       try {
@@ -1347,7 +1347,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               } else {
                 error = "Something went wrong!!!";
               }
-              Fluttertoast.showToast(msg: error);
+              showAppMessage(context, error);
             }
           } else {
             setState(() {
@@ -1427,7 +1427,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               } else {
                 error = "Something went wrong!!!";
               }
-              Fluttertoast.showToast(msg: error);
+              showAppMessage(context, error);
             }
           }
           setState(() {
@@ -1439,9 +1439,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           });
         }
       } catch (e) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
+        showAppMessage(context, e.toString());
       }
 
       setState(() {
@@ -1542,9 +1540,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
         prefs.setString('enddate', endDateString);
       } else {
         if (!_isRefreshing) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text("Swipe Down to Refresh Data")));
+          showAppMessage(context, "Swipe Down to Refresh Data");
         }
 
         /*String? sales = prefs.getString('sales');
@@ -1690,9 +1686,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
         prefs.setString('enddate', endDateString);
       } else {
         if (!_isRefreshing) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text("Swipe Down to Refresh Data")));
+          showAppMessage(context, "Swipe Down to Refresh Data");
         }
 
         double? sales = prefs.getDouble('sales');
@@ -1989,7 +1983,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       } else {
         error = "Something went wrong!!!";
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
   }
 

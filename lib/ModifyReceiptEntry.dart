@@ -3,7 +3,6 @@ import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/constants.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
@@ -249,7 +248,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       vchnos.clear();
@@ -1981,7 +1980,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
   Future<void> updateEntry(int id) async {
     // ❌ Prevent save if party not selected
     if (_selectedparty == null || _selectedparty.toString().trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Party");
+      showAppMessage(context, "Please select Party");
       return;
     }
 
@@ -1989,14 +1988,12 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     if (_selectedbankcashname == null ||
         _selectedbankcashname!['name'] == null ||
         _selectedbankcashname!['name']!.trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Bank / Cash Ledger");
+      showAppMessage(context, "Please select Bank / Cash Ledger");
       return;
     }
 
     if (bills.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Atleast add 1 bill')));
+      showAppMessage(context, 'Atleast add 1 bill');
     } else {
       setState(() {
         _isLoading = true;
@@ -2118,7 +2115,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             data = Map<String, dynamic>.from(jsonEntryData);
             showReceiptVoucherUpdatedDialog(context);
           } else {
-            Fluttertoast.showToast(msg: 'an error occoured');
+            showAppMessage(context, 'an error occoured');
           }
         } else {
           Map<String, dynamic> data = json.decode(response_receiptentry.body);
@@ -2131,7 +2128,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
           } else {
             error = "Error in data fetching!!!";
           }
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       } catch (e) {
         setState(() {
@@ -2402,7 +2399,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       /*print(e);*/
@@ -2416,11 +2413,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
   Future<void> _selectreceiptDate(BuildContext context) async {
     if (isUniGasSerial(serial_no)) {
       closeKeyboard(context);
-      Fluttertoast.showToast(
-        msg: "Voucher date cannot be changed",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Voucher date cannot be changed");
       return;
     }
     final DateTime? picked = await showDatePicker(
@@ -5693,10 +5686,9 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                   _selectedpaymentmode = value!;
                                 });
                                 if (bills.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('At least add 1 bill'),
-                                    ),
+                                  showAppMessage(
+                                    context,
+                                    'At least add 1 bill',
                                   );
                                   isChequeVisible = false;
                                   selectedbankname = bankname_data.first;

@@ -18,6 +18,7 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
+import 'widgets/entry_widgets.dart';
 
 class items {
   final String itemname;
@@ -199,9 +200,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   void showToast(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppMessage(context, message);
   }
 
   TextEditingController searchController = TextEditingController();

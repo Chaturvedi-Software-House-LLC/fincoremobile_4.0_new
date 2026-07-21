@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class ModifyVanAllocationScreen extends StatefulWidget {
   final Map<String, dynamic> allocation;
@@ -531,23 +532,14 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
       debugPrint("UPDATE RESPONSE: ${response.body}");
 
       if (response.statusCode == 200) {
-        /*ScaffoldMessenger.of(context)
-            .showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Allocation updated successfully',
-            ),
-          ),
-        );*/
+        /*showAppMessage(context, 'Allocation updated successfully');*/
 
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => ViewVanAllocationScreen()),
         );
       } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(response.body)));
+        showAppMessage(context, response.body);
       }
     } catch (e) {
       debugPrint(e.toString());

@@ -5,7 +5,6 @@ import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
@@ -73,8 +72,6 @@ class SaleItem {
   final String itemUnit;
   late Map<String, dynamic> accountingAllocationList;
   late Map<String, dynamic> batchAllocationList;
-  final String meterFrom;
-  final String meterTo;
 
   SaleItem({
     required this.itemName,
@@ -85,8 +82,6 @@ class SaleItem {
     required this.itemUnit,
     required this.accountingAllocationList,
     required this.batchAllocationList,
-    this.meterFrom = '',
-    this.meterTo = '',
   });
 
   SaleItem updateQuantity(String newQuantity) {
@@ -99,8 +94,6 @@ class SaleItem {
       itemUnit: this.itemUnit,
       accountingAllocationList: this.accountingAllocationList,
       batchAllocationList: this.batchAllocationList,
-      meterFrom: this.meterFrom,
-      meterTo: this.meterTo,
     );
   }
 
@@ -114,8 +107,6 @@ class SaleItem {
       itemUnit: this.itemUnit,
       accountingAllocationList: this.accountingAllocationList,
       batchAllocationList: this.batchAllocationList,
-      meterFrom: this.meterFrom,
-      meterTo: this.meterTo,
     );
   }
 }
@@ -1911,11 +1902,47 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                           alignment: pw.Alignment.center,
                           decoration: pw.BoxDecoration(
                             border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
                               bottom: pw.BorderSide(width: 1.0),
                             ),
                           ),
                           child: pw.Text(
                             'Amount',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                      // FTA UAE VAT requires the VAT % and VAT amount to be
+                      // shown per line item, not just as an invoice total.
+                      pw.Expanded(
+                        flex: 1,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              right: pw.BorderSide(width: 1.0),
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'VAT %',
+                            style: pw.TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Container(
+                          padding: pw.EdgeInsets.fromLTRB(5, 5, 5, 5),
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border(
+                              bottom: pw.BorderSide(width: 1.0),
+                            ),
+                          ),
+                          child: pw.Text(
+                            'VAT Amt',
                             style: pw.TextStyle(fontSize: 10),
                           ),
                         ),
@@ -1973,10 +2000,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         pw.Expanded(
                           flex: 3,
                           child: pw.Container(
+                            // Left/right margin trimmed to 2 (from 5) so long
+                            // item names get more usable width and wrap onto
+                            // fewer lines; top/bottom untouched.
                             padding: pw.EdgeInsets.fromLTRB(
+                              2,
                               5,
-                              5,
-                              5,
+                              2,
                               (item.key == saleItems.length - 1
                                   ? _estimateInvoiceLastRowFillerPadding(
                                       saleItems.length,
@@ -1992,17 +2022,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                   item.value.itemName,
                                   style: pw.TextStyle(fontSize: 10),
                                 ),
-                                if (isUniGasSerial &&
-                                    item.value.meterFrom.isNotEmpty &&
-                                    item.value.meterTo.isNotEmpty)
-                                  pw.Text(
-                                    'Meter Reading: ${item.value.meterFrom} - ${item.value.meterTo}',
-                                    style: pw.TextStyle(
-                                      fontSize: 7,
-                                      fontStyle: pw.FontStyle.italic,
-                                      color: PdfColors.grey500,
-                                    ),
-                                  ),
                               ],
                             ),
                           ),
@@ -2117,6 +2136,60 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             child: pw.Text(
                               formatAmountInvoice(
                                 item.value.itemAmount.toStringAsFixed(decimal!),
+                              ),
+                              textAlign: pw.TextAlign.right,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        // FTA UAE VAT requires the VAT % and VAT amount to
+                        // be shown per line item. VAT is a single flat rate
+                        // for the whole invoice (vatperc), gated by whether
+                        // a VAT ledger is selected at all.
+                        pw.Expanded(
+                          flex: 1,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
+                            alignment: pw.Alignment.center,
+                            child: pw.Text(
+                              _selectedvatledger != 'Not Applicable'
+                                  ? '${vatperc.toStringAsFixed(vatperc.truncateToDouble() == vatperc ? 0 : 2)}%'
+                                  : '0%',
+                              textAlign: pw.TextAlign.center,
+                              style: pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        pw.Expanded(
+                          flex: 2,
+                          child: pw.Container(
+                            padding: pw.EdgeInsets.fromLTRB(
+                              5,
+                              5,
+                              5,
+                              (item.key == saleItems.length - 1
+                                  ? _estimateInvoiceLastRowFillerPadding(
+                                      saleItems.length,
+                                    )
+                                  : 5.0),
+                            ),
+                            alignment: pw.Alignment.centerRight,
+                            child: pw.Text(
+                              formatAmountInvoice(
+                                (_selectedvatledger != 'Not Applicable'
+                                        ? item.value.itemAmount *
+                                              (vatperc / 100)
+                                        : 0.0)
+                                    .toStringAsFixed(decimal!),
                               ),
                               textAlign: pw.TextAlign.right,
                               style: pw.TextStyle(fontSize: 10),
@@ -3122,11 +3195,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   children: [
                     itemRow([
                       _Col('SN', 1.2, bold: true),
-                      _Col('ITEM', 2.7, bold: true),
-                      _Col('QTY', 1.6, bold: true, gapAfter: 2, center: true),
-                      _Col('UNIT', 1.7, bold: true, center: true),
-                      _Col('RATE', 2.3, bold: true, center: true),
-                      _Col('AMOUNT (AED)', 3.5, bold: true, center: true),
+                      _Col('ITEM', 2.3, bold: true),
+                      _Col('QTY', 1.4, bold: true, gapAfter: 2, center: true),
+                      _Col('UNIT', 1.4, bold: true, center: true),
+                      _Col('RATE', 1.8, bold: true, center: true),
+                      _Col('AMOUNT (AED)', 2.6, bold: true, center: true),
+                      // FTA UAE VAT requires the VAT % and VAT amount to be
+                      // shown per line item, not just as an invoice total.
+                      _Col('VAT %', 1.1, bold: true, center: true),
+                      _Col('VAT AMT (AED)', 1.8, bold: true, center: true),
                     ]),
                     pw.SizedBox(height: 3),
                     pw.Divider(thickness: 0.75),
@@ -3134,30 +3211,39 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                     for (var item in saleItems.asMap().entries)
                       itemRow([
                         _Col('${item.key + 1}', 1.2),
-                        _Col(
-                          item.value.itemName,
-                          2.7,
-                          subText:
-                              item.value.meterFrom.isNotEmpty &&
-                                  item.value.meterTo.isNotEmpty
-                              ? '${item.value.meterFrom} - ${item.value.meterTo}'
-                              : null,
-                        ),
+                        _Col(item.value.itemName, 2.3),
                         _Col(
                           item.value.itemQuantity,
-                          1.6,
+                          1.4,
                           gapAfter: 2,
                           center: true,
                         ),
-                        _Col(item.value.itemUnit, 1.7, center: true),
+                        _Col(item.value.itemUnit, 1.4, center: true),
                         _Col(
                           formatAmountInvoice(item.value.itemPrice.toString()),
-                          2.3,
+                          1.8,
                           center: true,
                         ),
                         _Col(
                           formatAmountInvoice(item.value.itemAmount.toString()),
-                          3.5,
+                          2.6,
+                          center: true,
+                        ),
+                        _Col(
+                          _selectedvatledger != 'Not Applicable'
+                              ? '${vatperc.toStringAsFixed(vatperc.truncateToDouble() == vatperc ? 0 : 2)}%'
+                              : '0%',
+                          1.1,
+                          center: true,
+                        ),
+                        _Col(
+                          formatAmountInvoice(
+                            (_selectedvatledger != 'Not Applicable'
+                                    ? item.value.itemAmount * (vatperc / 100)
+                                    : 0.0)
+                                .toString(),
+                          ),
+                          1.8,
                           center: true,
                         ),
                       ]),
@@ -3169,7 +3255,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                     ),
                     pw.SizedBox(height: 4),
                     spaceBetweenLine(
-                      'VAT (5%)',
+                      'VAT (${vatperc.toStringAsFixed(vatperc.truncateToDouble() == vatperc ? 0 : 2)}%)',
                       formatAmountInvoice(totalVatAmount.toString()),
                       bold: false,
                     ),
@@ -3653,15 +3739,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
         _selectedpartyledger.toString().trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Party Ledger");
+      showAppMessage(context, "Please select Party Ledger");
 
       return;
     }
 
     if (saleItems.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Atleast add 1 item')));
+      showAppMessage(context, 'Atleast add 1 item');
     } else {
       setState(() {
         _isLoading = true;
@@ -3798,13 +3882,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
         if (response_salesentry.statusCode == 200) {
           if (response_salesentry.body == 'Entry created successfully') {
-            /*Fluttertoast.showToast(msg: response_salesentry. );*/
+            /*showAppMessage(context, response_salesentry.);*/
 
             loadLedgerData();
 
             /*showSalesInvoiceBottomSheet(context);*/ // show screen bottom message for sharing invoice
           } else {
-            Fluttertoast.showToast(msg: 'an error occoured');
+            showAppMessage(context, 'an error occoured');
           }
         } else {
           Map<String, dynamic> data = json.decode(response_salesentry.body);
@@ -3817,7 +3901,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           } else {
             error = "Error in data fetching!!!";
           }
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       } catch (e) {
         setState(() {
@@ -4353,7 +4437,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       print(e);
@@ -4637,7 +4721,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       print(e);
@@ -4692,7 +4776,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       print(e);
@@ -4781,7 +4865,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       vchnos.clear();
@@ -4884,36 +4968,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     itemAmountController.text = formattedAmount.toString();
   }
 
-  // When both start/end meter readings are entered and valid, quantity is
-  // derived from them (end - start) and the field is locked to prevent it
-  // drifting out of sync with the readings. If both readings are cleared,
-  // quantity goes back to being user-editable and resets to '1'.
-  bool _isQtyLockedByMeterReading(String startText, String endText) {
-    final start = double.tryParse(startText.trim());
-    final end = double.tryParse(endText.trim());
-    return start != null && end != null && end > start;
-  }
-
-  void _syncQtyWithMeterReading({
-    required TextEditingController startController,
-    required TextEditingController endController,
-    required TextEditingController qtyController,
-  }) {
-    final startText = startController.text.trim();
-    final endText = endController.text.trim();
-    final start = double.tryParse(startText);
-    final end = double.tryParse(endText);
-
-    if (start != null && end != null && end > start) {
-      final qty = end - start;
-      qtyController.text = qty == qty.roundToDouble()
-          ? qty.toInt().toString()
-          : qty.toString();
-    } else if (startText.isEmpty && endText.isEmpty) {
-      qtyController.text = '1';
-    }
-  }
-
   void updateAmount() {
     String qtyValue = itemQuantityController.text;
 
@@ -4940,11 +4994,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   Future<void> _selectsaleDate(BuildContext context) async {
     if (isUniGasSerial) {
       closeKeyboard(context);
-      Fluttertoast.showToast(
-        msg: "Voucher date cannot be changed",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Voucher date cannot be changed");
       return;
     }
     setState(() {
@@ -5626,11 +5676,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     final Map<String, TextEditingController> rateEditControllers = {};
     // Editable quantity per item, defaults to "1".
     final Map<String, TextEditingController> qtyEditControllers = {};
-    // Meter start/end reading per item — only used/shown for UniGas
-    // serials, same fields and validation as the single-item flow.
-    final Map<String, TextEditingController> startReadingControllers = {};
-    final Map<String, TextEditingController> endReadingControllers = {};
-    final Map<String, String?> meterReadingErrors = {};
     // Selected unit per item — matches the single-item flow's unit
     // dropdown. Switching units resets qty to "1" (same behavior; rate
     // is intentionally NOT recomputed on unit change, mirroring the
@@ -5689,37 +5734,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       final int next = (current + delta) < 1 ? 1 : current + delta;
       setStateDialog(() {
         controller.text = next.toString();
-      });
-    }
-
-    // Mirrors addItem()'s meter reading validation exactly: both fields
-    // must be filled together, and end must be greater than start.
-    void validateMeterReading(String name, StateSetter setStateDialog) {
-      final String meterFrom = startReadingControllers[name]?.text.trim() ?? '';
-      final String meterTo = endReadingControllers[name]?.text.trim() ?? '';
-
-      String? error;
-      if ((meterFrom.isNotEmpty && meterTo.isEmpty) ||
-          (meterFrom.isEmpty && meterTo.isNotEmpty)) {
-        error = "Please enter both start and end readings";
-      } else if (meterFrom.isNotEmpty && meterTo.isNotEmpty) {
-        final start = double.tryParse(meterFrom);
-        final end = double.tryParse(meterTo);
-        if (start == null || end == null || end <= start) {
-          error = "End reading must be greater than start reading";
-        }
-      }
-
-      setStateDialog(() {
-        meterReadingErrors[name] = error;
-        final qtyController = qtyEditControllers[name];
-        if (qtyController != null) {
-          _syncQtyWithMeterReading(
-            startController: startReadingControllers[name]!,
-            endController: endReadingControllers[name]!,
-            qtyController: qtyController,
-          );
-        }
       });
     }
 
@@ -5909,16 +5923,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                         selectedUnitPerItem.putIfAbsent(
                                           name,
                                           () => itemUnits.first.name,
-                                        );
-                                      }
-                                      if (isUniGasSerial) {
-                                        startReadingControllers.putIfAbsent(
-                                          name,
-                                          () => TextEditingController(),
-                                        );
-                                        endReadingControllers.putIfAbsent(
-                                          name,
-                                          () => TextEditingController(),
                                         );
                                       }
                                     } else {
@@ -6141,16 +6145,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                               setStateDialog(
                                                                 () {},
                                                               ),
-                                                          enabled:
-                                                              !(isUniGasSerial &&
-                                                                  _isQtyLockedByMeterReading(
-                                                                    startReadingControllers[name]
-                                                                            ?.text ??
-                                                                        '',
-                                                                    endReadingControllers[name]
-                                                                            ?.text ??
-                                                                        '',
-                                                                  )),
                                                         ),
                                                         const SizedBox(
                                                           width: 10,
@@ -6254,116 +6248,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                         ),
                                                       ],
                                                     ),
-                                                    if (isUniGasSerial) ...[
-                                                      const SizedBox(
-                                                        height: 10,
-                                                      ),
-                                                      Row(
-                                                        children: [
-                                                          Expanded(
-                                                            child: TextField(
-                                                              controller:
-                                                                  startReadingControllers[name],
-                                                              keyboardType:
-                                                                  TextInputType
-                                                                      .number,
-                                                              style:
-                                                                  GoogleFonts.poppins(
-                                                                    fontSize:
-                                                                        13,
-                                                                  ),
-                                                              onChanged: (_) =>
-                                                                  validateMeterReading(
-                                                                    name,
-                                                                    setStateDialog,
-                                                                  ),
-                                                              decoration: _inputDecoration(
-                                                                label:
-                                                                    "Start Reading",
-                                                                icon:
-                                                                    Icons.speed,
-                                                                gradientColors:
-                                                                    const [
-                                                                      Colors
-                                                                          .orange,
-                                                                      Colors
-                                                                          .deepOrangeAccent,
-                                                                    ],
-                                                              ),
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 10,
-                                                          ),
-                                                          Expanded(
-                                                            child: TextField(
-                                                              controller:
-                                                                  endReadingControllers[name],
-                                                              keyboardType:
-                                                                  TextInputType
-                                                                      .number,
-                                                              style:
-                                                                  GoogleFonts.poppins(
-                                                                    fontSize:
-                                                                        13,
-                                                                  ),
-                                                              onChanged: (_) =>
-                                                                  validateMeterReading(
-                                                                    name,
-                                                                    setStateDialog,
-                                                                  ),
-                                                              decoration: _inputDecoration(
-                                                                label:
-                                                                    "End Reading",
-                                                                icon: Icons
-                                                                    .speed_outlined,
-                                                                gradientColors:
-                                                                    const [
-                                                                      Colors
-                                                                          .red,
-                                                                      Colors
-                                                                          .deepOrange,
-                                                                    ],
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      if (meterReadingErrors[name] !=
-                                                          null)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                top: 6,
-                                                                left: 4,
-                                                              ),
-                                                          child: Row(
-                                                            children: [
-                                                              const Icon(
-                                                                Icons
-                                                                    .error_outline,
-                                                                size: 14,
-                                                                color: Colors
-                                                                    .redAccent,
-                                                              ),
-                                                              const SizedBox(
-                                                                width: 4,
-                                                              ),
-                                                              Expanded(
-                                                                child: Text(
-                                                                  meterReadingErrors[name]!,
-                                                                  style: GoogleFonts.poppins(
-                                                                    color: Colors
-                                                                        .redAccent,
-                                                                    fontSize:
-                                                                        11,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                    ],
                                                     const SizedBox(height: 12),
                                                     Row(
                                                       mainAxisAlignment:
@@ -6509,11 +6393,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             ),
                           ),
                           onPressed:
-                              selectedItemNames.isEmpty ||
-                                  isAdding ||
-                                  meterReadingErrors.values.any(
-                                    (e) => e != null,
-                                  )
+                              selectedItemNames.isEmpty || isAdding
                               ? null
                               : () async {
                                   // Same qty>0 check addItem() does, run for
@@ -6529,11 +6409,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                         ) ??
                                         0;
                                     if (qty <= 0) {
-                                      Fluttertoast.showToast(
-                                        msg:
-                                            "Quantity must be greater than 0 for $name",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Quantity must be greater than 0 for $name",
                                       );
                                       return;
                                     }
@@ -6545,10 +6423,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                             .trim() ??
                                         '';
                                     if (rateText.isEmpty) {
-                                      Fluttertoast.showToast(
-                                        msg: "Rate is required for $name",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Rate is required for $name",
                                       );
                                       return;
                                     }
@@ -6559,8 +6436,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                     selectedItemNames,
                                     rateEditControllers,
                                     qtyEditControllers,
-                                    startReadingControllers,
-                                    endReadingControllers,
                                     selectedUnitPerItem,
                                   );
                                   if (context.mounted) {
@@ -6584,8 +6459,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     Set<String> selectedItemNames,
     Map<String, TextEditingController> rateEditControllers,
     Map<String, TextEditingController> qtyEditControllers,
-    Map<String, TextEditingController> startReadingControllers,
-    Map<String, TextEditingController> endReadingControllers,
     Map<String, String> selectedUnitPerItem,
   ) async {
     for (final name in selectedItemNames) {
@@ -6615,13 +6488,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       final double amount = double.parse(
         (resolvedRate * double.parse(qty)).toStringAsFixed(decimal!),
       );
-      final String meterFrom = isUniGasSerial
-          ? (startReadingControllers[name]?.text.trim() ?? '')
-          : '';
-      final String meterTo = isUniGasSerial
-          ? (endReadingControllers[name]?.text.trim() ?? '')
-          : '';
-
       final int existingIndex = saleItems.indexWhere(
         (i) =>
             i.itemName == name &&
@@ -6653,8 +6519,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               'ACTUALQTY': '$qty $unitName',
               'BILLEDQTY': '$qty $unitName',
             },
-            meterFrom: meterFrom,
-            meterTo: meterTo,
           ),
         );
       }
@@ -8131,11 +7995,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     final qty = double.tryParse(itemQuantity.replaceAll(',', '').trim()) ?? 0;
 
     if (itemQuantity.trim().isEmpty || qty <= 0) {
-      Fluttertoast.showToast(
-        msg: "Quantity must be greater than 0",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Quantity must be greater than 0");
       return;
     }
 
@@ -9012,12 +8872,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             itemCount: saleItems.length,
                             itemBuilder: (context, index) {
                               final item = saleItems[index];
-                              final itemUnit = [
-                                if (item.itemUnit.isNotEmpty) item.itemUnit,
-                                if (item.meterFrom.isNotEmpty ||
-                                    item.meterTo.isNotEmpty)
-                                  'Meter: ${item.meterFrom} - ${item.meterTo}',
-                              ].join(' | ');
+                              final itemUnit = item.itemUnit;
                               return EntryItemCard(
                                 itemName: item.itemName,
                                 quantity: item.itemQuantity,

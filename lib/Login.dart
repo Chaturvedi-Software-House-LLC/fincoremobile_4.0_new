@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/widgets.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
@@ -20,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
+import 'widgets/entry_widgets.dart';
 // import 'package:firebase_messaging/firebase_messaging.dart';
 
 class Login extends StatefulWidget {
@@ -130,7 +130,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         isOTPVerified = false;
         isAnotherDevice = false;
 
-        Fluttertoast.showToast(msg: 'Incorrect OTP');
+        showAppMessage(context, 'Incorrect OTP');
 
         otpController.clear();
         currentText = '';
@@ -141,7 +141,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         });
       }
     } else {
-      Fluttertoast.showToast(msg: 'Please enter a 4-digit OTP');
+      showAppMessage(context, 'Please enter a 4-digit OTP');
     }
   }
 
@@ -213,9 +213,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       } else {
         if (!mounted) return;
 
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          const SnackBar(content: Text('An error occured.')),
-        );
+        showAppMessage(context, 'An error occured.');
       }
     });
   }
@@ -455,8 +453,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         await _sendPasswordResetEmail(enteredemail, token, name);
 
         // Show success message
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Password reset email sent successfully')),
+        showAppMessage(
+          context,
+          'Password reset email sent successfully',
+          isError: false,
         );
         setState(() {
           usernameController.text = resetemailController.text;
@@ -467,14 +467,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       } else {
         final error = decodedBody['error'];
         /*print(error);*/
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        showAppMessage(context, '$error');
       }
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      showAppMessage(context, e.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -569,17 +565,11 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     try {
       final sendReport = await send(message, smtpServer); // send mail
 
-      /*_scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('Message sent'),
-        ),
-      );*/
+      /*showAppMessage(context, 'Message sent', isError: false);*/
 
       /*print('Reset Email sent: ${sendReport.toString()}');*/
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      showAppMessage(context, e.toString());
       /*print('$e');*/
     }
   }
@@ -692,9 +682,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         responsee = responsee.trim();
 
         if (responsee == expectedBody) {
-          _scaffoldMessengerKey.currentState?.showSnackBar(
-            SnackBar(content: Text(responsee)),
-          );
+          showAppMessage(context, responsee);
           _usernameFocusNode.unfocus();
           _passwordFocusNode.unfocus();
         } else {
@@ -707,17 +695,13 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             /*print('emitting');*/
             socket.emit('myId', jsonPayload);
           } catch (e) {
-            _scaffoldMessengerKey.currentState?.showSnackBar(
-              SnackBar(content: Text(e.toString())),
-            );
+            showAppMessage(context, e.toString());
           }
         }
       } else {
         final error = jsonDecode(response_getusers.body)['error'];
         /*print(error);*/
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        showAppMessage(context, '$error');
       }
       if (mounted) {
         setState(() {
@@ -725,9 +709,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      showAppMessage(context, e.toString());
       print(e.toString());
       if (mounted) {
         setState(() {
@@ -783,9 +765,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         String responsee = response_getusers.body;
         responsee = responsee.trim();
         if (responsee == expectedBody) {
-          _scaffoldMessengerKey.currentState?.showSnackBar(
-            SnackBar(content: Text(responsee)),
-          );
+          showAppMessage(context, responsee);
 
           _usernameFocusNode.unfocus();
           _passwordFocusNode.unfocus();
@@ -801,17 +781,13 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
             socket.emit('myId', jsonPayload);
           } catch (e) {
-            _scaffoldMessengerKey.currentState?.showSnackBar(
-              SnackBar(content: Text(e.toString())),
-            );
+            showAppMessage(context, e.toString());
           }
         }
       } else {
         final error = jsonDecode(response_getusers.body)['error'];
         /*print(error);*/
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        showAppMessage(context, error);
       }
       if (mounted) {
         setState(() {
@@ -819,9 +795,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      showAppMessage(context, e.toString());
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -1090,9 +1064,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           prefs_login.remove('username_remember');
           prefs_login.remove('password_remember');
 
-          _scaffoldMessengerKey.currentState?.showSnackBar(
-            SnackBar(content: Text('User is active on another device.')),
-          );
+          showAppMessage(context, 'User is active on another device.');
         }
       } else if (data && isOTPLogin && isOTPVerified == false) {
         isValidId = data;
@@ -1160,26 +1132,20 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           prefs_login.remove('username_remember');
           prefs_login.remove('password_remember');
 
-          _scaffoldMessengerKey.currentState?.showSnackBar(
-            SnackBar(content: Text('User is active on another device.')),
-          );
+          showAppMessage(context, 'User is active on another device.');
         }
       } else {
         prefs_login.remove('username_remember');
         prefs_login.remove('password_remember');
 
-        _scaffoldMessengerKey.currentState?.showSnackBar(
-          SnackBar(content: Text('User is active on another device.')),
-        );
+        showAppMessage(context, 'User is active on another device.');
       }
     });
 
     try {
       socket.connect();
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      showAppMessage(context, e.toString());
     }
     _initSharedPreferences();
   }
@@ -1237,19 +1203,13 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 </div>''';
 
     try {
-      await send(message, smtpServer);
+      // await send(message, smtpServer);
 
-      /*_scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('Message sent'),
-        ),
-      );*/
+      /*showAppMessage(context, 'Message sent', isError: false);*/
 
       /*print('Message sent: ${sendReport.toString()}');*/
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      showAppMessage(context, e.toString());
       /*print('$e');*/
     }
   }
@@ -1357,9 +1317,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
               if (lastBackPressedTime == null ||
                   now.difference(lastBackPressedTime!) > Duration(seconds: 2)) {
                 lastBackPressedTime = now;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Press back again to exit')),
-                );
+                showAppMessage(context, 'Press back again to exit');
                 return false;
               }
               return true;
@@ -1868,12 +1826,9 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                             if (_resetformKey.currentState!.validate()) {
                               if (resetemailController.text.trim() ==
                                   'demouser@ca-eim.com') {
-                                _scaffoldMessengerKey.currentState?.showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Reset password is not allowed for Demo User',
-                                    ),
-                                  ),
+                                showAppMessage(
+                                  context,
+                                  'Reset password is not allowed for Demo User',
                                 );
                               } else {
                                 _resetpass();

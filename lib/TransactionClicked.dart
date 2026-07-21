@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:FincoreGo/utils/currency_helper.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'widgets/entry_widgets.dart';
 
 class LedgerEntries {
   final String ledger, amount;
@@ -316,7 +316,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
             error = 'Something went wrong!!!';
           }
 
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       }
 
@@ -424,7 +424,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
             error = 'Something went wrong!!!';
           }
 
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       }
 
@@ -478,7 +478,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
             error = 'Something went wrong!!!';
           }
 
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       }
 
@@ -533,7 +533,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
             error = 'Something went wrong!!!';
           }
 
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       }
 
@@ -595,9 +595,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       isUserVisible = false;
     }
 
-    _scaffoldMessengerKey.currentState?.showSnackBar(
-      SnackBar(content: Text(masterid)),
-    );
+    showAppMessage(context, masterid);
 
     fetchData("LedgerEntry", "Bills", "Inventory", "CostCentre", masterid);
   }

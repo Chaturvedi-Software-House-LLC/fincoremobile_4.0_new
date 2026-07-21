@@ -9,8 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'UserView.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class CreateUser extends StatefulWidget {
   const CreateUser({Key? key}) : super(key: key);
@@ -202,9 +202,7 @@ class _CreateUserPageState extends State<CreateUser>
       await send(message, smtpServer); // ✅ DO NOT assign it to a variable
       print('Credential email sent to $email');
     } catch (e) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Failed to send email: $e')),
-      );
+      showAppMessage(context, 'Failed to send email: $e');
     }
   }
 
@@ -241,13 +239,7 @@ class _CreateUserPageState extends State<CreateUser>
         String responsee = response.body;
 
         if (responsee == "User Registered Successfully") {
-          Fluttertoast.showToast(
-            msg: "User created successfully",
-            toastLength: Toast.LENGTH_SHORT,
-            gravity: ToastGravity.BOTTOM,
-            backgroundColor: Colors.green,
-            textColor: Colors.white,
-          );
+          showAppMessage(context, "User created successfully", isError: false);
           addAllowedCompanies(email, serial_no!, _selectedCompanies);
 
           controller_username.clear();
@@ -288,7 +280,7 @@ class _CreateUserPageState extends State<CreateUser>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
       setState(() {
         _isLoading = false;
@@ -374,7 +366,7 @@ class _CreateUserPageState extends State<CreateUser>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
 
       setState(() {
         _isLoading = false;
@@ -422,7 +414,7 @@ class _CreateUserPageState extends State<CreateUser>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
 
       setState(() {
         _isLoading = false;
@@ -1024,9 +1016,7 @@ class _CreateUserPageState extends State<CreateUser>
     final role = _selectedrole?["role_name"];
 
     if (name.isEmpty || username.isEmpty || role == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please fill all required fields.")),
-      );
+      showAppMessage(context, "Please fill all required fields.");
       return;
     }
 
@@ -1041,16 +1031,12 @@ class _CreateUserPageState extends State<CreateUser>
       finalPassword = controller_password.text.trim();
 
       if (finalPassword.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Please enter password")));
+        showAppMessage(context, "Please enter password");
         return;
       }
 
       if (finalPassword.length < 4) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Password too short")));
+        showAppMessage(context, "Password too short");
         return;
       }
     }
@@ -1067,7 +1053,7 @@ class _CreateUserPageState extends State<CreateUser>
     final role = _selectedrole?["role_name"];
 
     if (name.isEmpty || email.isEmpty || role == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Please fill all required fields.")));
+      showAppMessage(context, "Please fill all required fields.");
       return;
     }
 

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'widgets/entry_widgets.dart';
 
 class Help extends StatefulWidget {
   final bool showBottomNavigation;
@@ -92,7 +92,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
-      Fluttertoast.showToast(msg: 'Could not open Google Maps');
+      showAppMessage(context, 'Could not open Google Maps');
     }
   }
 
@@ -113,9 +113,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     if (await canLaunch(url)) {
       await launch(url);
     } else {
-      Fluttertoast.showToast(
-        msg: 'Could not launch $url. Kindly dial manually',
-      );
+      showAppMessage(context, 'Could not launch $url. Kindly dial manually');
       throw 'Could not launch $url';
     }
   }
@@ -130,7 +128,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
     } else {
-      Fluttertoast.showToast(msg: 'Could not open email app');
+      showAppMessage(context, 'Could not open email app');
     }
   }
 
@@ -156,7 +154,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
     } else {
-      Fluttertoast.showToast(msg: 'Could not open email app');
+      showAppMessage(context, 'Could not open email app');
     }
   }
 

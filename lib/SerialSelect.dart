@@ -5,7 +5,6 @@ import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/Login.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -14,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:url_launcher/url_launcher.dart';
 import 'constants.dart';
+import 'widgets/entry_widgets.dart';
 // import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class Serial {
@@ -1999,12 +1999,7 @@ class _MyHomePageState extends State<SerialSelect>
         prefs.setString("billsentries", BillsEntriesHolder);
         prefs.setString("costcentreentries", CostCentreEntriesHolder);
 
-        /*Fluttertoast.showToast(
-          msg: "Auto-login to $company_name (Serial: $serial_no)",
-          backgroundColor: Theme.of(context).colorScheme.onSurface,
-          textColor: Colors.white,
-          fontSize: 14.0,
-        );*/
+        /*showAppMessage(context, "Auto-login to $company_name (Serial: $serial_no)", isError: false);*/
 
         // ✅ Fade transition to Dashboard
         if (mounted) {
@@ -2035,7 +2030,7 @@ class _MyHomePageState extends State<SerialSelect>
         error = 'Something went wrong!!!';
       }
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
 
     setState(() {
@@ -2117,8 +2112,9 @@ class _MyHomePageState extends State<SerialSelect>
             prefs.remove(
               "token",
             ); // removing token from internal memory incase token is empty, null or not available
-            Fluttertoast.showToast(
-              msg: 'Authorization Error. Contact your administrator',
+            showAppMessage(
+              context,
+              'Authorization Error. Contact your administrator',
             );
           }
         }
@@ -2137,7 +2133,7 @@ class _MyHomePageState extends State<SerialSelect>
         error = 'Something went wrong!!!';
       }
 
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
       setState(() {
         _isVisibleCompany = false;
       });
@@ -2289,7 +2285,7 @@ class _MyHomePageState extends State<SerialSelect>
     } else {
       Map<String, dynamic> data = json.decode(response.body);
       String error = data['error'] ?? 'Something went wrong!!!';
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
     setState(() {
       _isLoading = false;
@@ -2436,7 +2432,7 @@ class _MyHomePageState extends State<SerialSelect>
     } else {
       Map<String, dynamic> data = json.decode(response.body);
       String error = data['error'] ?? 'Something went wrong!!!';
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
 
     setState(() {

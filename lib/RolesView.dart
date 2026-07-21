@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:FincoreGo/AddRole.dart';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ModifyRole.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,6 +10,7 @@ import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'widgets/entry_widgets.dart';
 
 class RoleModel {
   final String role_name;
@@ -256,9 +256,7 @@ class _RolesViewPageState extends State<RolesView>
     if (response.statusCode == 200) {
       final responsee = response.body;
       if (responsee != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(responsee)));
+        showAppMessage(context, responsee);
         if (responsee == "Unable to Delete! User Exists Against This Role.") {
           setState(() {
             _isLoading = false;
@@ -283,7 +281,7 @@ class _RolesViewPageState extends State<RolesView>
       } else {
         error = 'Something went wrong!!!';
       }
-      Fluttertoast.showToast(msg: error);
+      showAppMessage(context, error);
     }
     setState(() {
       _isLoading = false;

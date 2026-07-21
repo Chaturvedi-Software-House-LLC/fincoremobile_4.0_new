@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'ModifyVanAllocation.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class ViewVanAllocationScreen extends StatefulWidget {
   const ViewVanAllocationScreen({super.key});
@@ -123,26 +124,16 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
       debugPrint("DELETE RESPONSE: ${response.body}");
 
       if (response.statusCode == 200) {
-        /*ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Allocation deleted successfully',
-            ),
-          ),
-        );*/
+        /*showAppMessage(context, 'Allocation deleted successfully', isError: false);*/
 
         fetchAllocations();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Delete failed: ${response.body}')),
-        );
+        showAppMessage(context, 'Delete failed: ${response.body}');
       }
     } catch (e) {
       debugPrint("DELETE ERROR: $e");
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      showAppMessage(context, 'Error: $e');
     }
   }
 

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'widgets/entry_widgets.dart';
 
 class ChangePassword extends StatefulWidget {
   @override
@@ -199,7 +200,7 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
   }
 
   void _showMessage(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    showAppMessage(context, msg);
   }
 
   Widget _buildRule(String text, bool valid) {

@@ -5,7 +5,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -518,7 +517,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       vchnos.clear();
@@ -2490,15 +2489,13 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
         _selectedpartyledger.toString().trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Party Ledger");
+      showAppMessage(context, "Please select Party Ledger");
 
       return;
     }
 
     if (saleItems.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Atleast add 1 item')));
+      showAppMessage(context, 'Atleast add 1 item');
     } else {
       setState(() {
         _isLoading = true;
@@ -2636,10 +2633,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
               _isLoading = false;
             });
 
-            Fluttertoast.showToast(msg: 'an error occoured');
+            showAppMessage(context, 'an error occoured');
           }
         } else {
-          Fluttertoast.showToast(msg: response_salesentry.body);
+          showAppMessage(context, response_salesentry.body);
         }
       } catch (e) {
         setState(() {
@@ -2958,8 +2955,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
   /*Future<void> saveEntry(int id) async {
 
     if (saleItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Atleast add 1 item')));
+      showAppMessage(context, 'Atleast add 1 item');
     }
     else
     {
@@ -3090,12 +3086,12 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
               showProgressDialog_SaveData(context, _isLoading_saveData);
 
             });
-            Fluttertoast.showToast(msg: 'an error occoured');
+            showAppMessage(context, 'an error occoured');
           }
         }
         else
         {
-          Fluttertoast.showToast(msg: response_salesentry.body);
+          showAppMessage(context, response_salesentry.body);
 
         }
       }
@@ -3726,11 +3722,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
   Future<void> _selectsaleDate(BuildContext context) async {
     if (isUniGasSerial(serial_no)) {
       closeKeyboard(context);
-      Fluttertoast.showToast(
-        msg: "Voucher date cannot be changed",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Voucher date cannot be changed");
       return;
     }
     setState(() {
@@ -6609,11 +6601,9 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                         ) ??
                                         0;
                                     if (qty <= 0) {
-                                      Fluttertoast.showToast(
-                                        msg:
-                                            "Quantity must be greater than 0 for $name",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Quantity must be greater than 0 for $name",
                                       );
                                       return;
                                     }
@@ -6625,10 +6615,9 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                             .trim() ??
                                         '';
                                     if (rateText.isEmpty) {
-                                      Fluttertoast.showToast(
-                                        msg: "Rate is required for $name",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Rate is required for $name",
                                       );
                                       return;
                                     }
@@ -6754,11 +6743,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
     final qty = double.tryParse(itemQuantity.replaceAll(',', '').trim()) ?? 0;
 
     if (itemQuantity.trim().isEmpty || qty <= 0) {
-      Fluttertoast.showToast(
-        msg: "Quantity must be greater than 0",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Quantity must be greater than 0");
       return;
     }
     if (itemName.isNotEmpty && itemPrice.isNotEmpty) {

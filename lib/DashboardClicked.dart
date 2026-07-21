@@ -23,6 +23,7 @@ import 'constants.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'widgets/entry_widgets.dart';
 
 class LedgerGroup {
   final String ledger;
@@ -978,9 +979,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   void showToast(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppMessage(context, message);
   }
 
   String allparties = 'All Parties', allvchtypes = 'All Voucher Types';

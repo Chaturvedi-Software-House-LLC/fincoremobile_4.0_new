@@ -5,7 +5,6 @@ import 'package:FincoreGo/utils/currency_helper.dart';
 /*import 'package:FincoreGo/currencyFormat.dart';*/
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,6 +21,7 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
+import 'widgets/entry_widgets.dart';
 
 class transactions {
   final String ledger;
@@ -769,7 +769,7 @@ class _TransactionsPageState extends State<Transactions>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
         setState(() {
           _isLoading = false;
         });
@@ -1214,7 +1214,7 @@ class _TransactionsPageState extends State<Transactions>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
 
         setState(() {
           transactions_count = filteredItems_transactions.length.toString();

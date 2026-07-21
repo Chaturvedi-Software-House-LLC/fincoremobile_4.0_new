@@ -5,7 +5,6 @@ import 'package:FincoreGo/constants.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,6 +20,7 @@ import 'dart:io';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
+import 'widgets/entry_widgets.dart';
 
 class party {
   final String partyname;
@@ -1780,12 +1780,10 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                       onPressed: () {
                         String inputText = _inactivedayscontroller.text;
                         if (inputText.isEmpty) {
-                          Fluttertoast.showToast(
-                            msg: 'Please enter no. of days',
-                            toastLength: Toast.LENGTH_SHORT,
-                            gravity: ToastGravity.BOTTOM,
-                            backgroundColor: app_color,
-                            textColor: Colors.white,
+                          showAppMessage(
+                            context,
+                            'Please enter no. of days',
+                            isError: false,
                           );
                         } else {
                           int? days = int.tryParse(inputText);
@@ -1800,12 +1798,10 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                             fetchInactivePartyData(_selectedparty!, date);
                             Navigator.of(context).pop();
                           } else {
-                            Fluttertoast.showToast(
-                              msg: 'Please enter a valid number',
-                              toastLength: Toast.LENGTH_SHORT,
-                              gravity: ToastGravity.BOTTOM,
-                              backgroundColor: app_color,
-                              textColor: Colors.white,
+                            showAppMessage(
+                              context,
+                              'Please enter a valid number',
+                              isError: false,
                             );
                           }
                         }

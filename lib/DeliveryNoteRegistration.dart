@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/PendingDeliveryNoteEntry.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
@@ -176,6 +178,28 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   bool showRateField = true;
 
   bool isVoucherTypeLocked = false;
+
+  // UniGas-only: whether this Delivery Note entry is a bulk (tanker) gas
+  // delivery - null means "not asked yet this entry". Bulk deliveries are
+  // metered (single item, start/end reading required); non-bulk cylinder
+  // deliveries are counted by quantity with no meter reading at all.
+  bool? _isBulkDelivery;
+
+  // UniGas bulk delivery only - Receiver Information shown on the printed
+  // Bulk Gas Delivery Note. Name/Signature is mandatory before saving;
+  // Mobile/EID# are optional. Left blank, the PDF just shows dotted
+  // pen-fill lines instead (see _generateUniGasBulkDeliveryNotePDF).
+  final TextEditingController bulkReceiverNameController =
+      TextEditingController();
+  final TextEditingController bulkReceiverMobileController =
+      TextEditingController();
+  final TextEditingController bulkReceiverEidController =
+      TextEditingController();
+
+  // UniGas bulk delivery only - the receiver's on-screen drawn signature,
+  // captured via _showSignatureCapturePad(), embedded as an image in the
+  // printed Bulk Gas Delivery Note. Null until captured.
+  Uint8List? bulkReceiverSignatureBytes;
 
   double totalPriceOfItems = 0,
       totalAmountForVatAppEntries = 0,
@@ -926,9 +950,20 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   ) async {
     // UniGas now uses a completely separate POS delivery note format (the old
     // A4-style layout with hidden rate/amount columns is retired for
-    // this serial type) - see _generateUniGasDeliveryNotePDF.
+    // this serial type) - see _generateUniGasDeliveryNotePDF. Bulk (tanker)
+    // deliveries use a wholly different "Delivery Note - Bulk Gas" format -
+    // see _generateUniGasBulkDeliveryNotePDF.
     if (isUniGasMeterReadingSerial) {
-      await _generateUniGasDeliveryNotePDF(trn, address, emirate, country);
+      if (_isBulkDelivery == true) {
+        await _generateUniGasBulkDeliveryNotePDF(
+          trn,
+          address,
+          emirate,
+          country,
+        );
+      } else {
+        await _generateUniGasDeliveryNotePDF(trn, address, emirate, country);
+      }
       return;
     }
 
@@ -2369,6 +2404,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       _partyLedgerController.clear();
       voucherStartReadingController.clear();
       voucherEndReadingController.clear();
+      // Next entry should be asked again whether it's bulk or not.
+      _isBulkDelivery = null;
+      bulkReceiverNameController.clear();
+      bulkReceiverMobileController.clear();
+      bulkReceiverEidController.clear();
+      bulkReceiverSignatureBytes = null;
 
       _selectedsalesledger = salesledger_data[0];
 
@@ -2932,6 +2973,394 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     }
   }
 
+  // UniGas bulk (tanker) gas delivery format - "DELIVERY NOTE - BULK GAS".
+  // Wholly different layout from the cylinder format above: single metered
+  // item (Product/Unit/Start-End Reading/Total Quantity) and vehicle
+  // details from the app, plus a Receiver Signature/Mobile/EID#/Signature
+  // block left entirely blank for the recipient to fill in by hand -
+  // there's no in-app field for any of that, by design.
+  Future<void> _generateUniGasBulkDeliveryNotePDF(
+    String trn,
+    String address,
+    String emirate,
+    String country,
+  ) async {
+    String vehicleName = '';
+    try {
+      final String? spectraAllocationsString = prefs.getString(
+        'spectra_allocations',
+      );
+      if (spectraAllocationsString != null &&
+          spectraAllocationsString.isNotEmpty) {
+        final List<dynamic> spectraAllocations = jsonDecode(
+          spectraAllocationsString,
+        );
+        if (spectraAllocations.isNotEmpty) {
+          final first = Map<String, dynamic>.from(spectraAllocations.first);
+          vehicleName = first['godown']?.toString() ?? '';
+        }
+      }
+    } catch (e) {
+      debugPrint("UNIGAS BULK DELIVERY NOTE VEHICLE LOOKUP ERROR: $e");
+    }
+
+    final logoBytes = await rootBundle.load("assets/uigas-logo.jpeg");
+    final uniGasLogo = pw.MemoryImage(logoBytes.buffer.asUint8List());
+
+    String cleanOrNotAvailable(String? value) {
+      if (value == null) return 'Not Available';
+      final trimmed = value.trim();
+      return (trimmed.isEmpty || trimmed.toLowerCase() == 'null')
+          ? 'Not Available'
+          : trimmed;
+    }
+
+    List<String> placeParts = [];
+    if (address != "null" && address.trim().isNotEmpty) {
+      placeParts.add(address.trim());
+    }
+    if (emirate != "null" && emirate.trim().isNotEmpty) {
+      placeParts.add(emirate.trim());
+    }
+    if (country != "null" && country.trim().isNotEmpty) {
+      placeParts.add(country.trim());
+    }
+    final String customerAddress = placeParts.isEmpty
+        ? 'Not Available'
+        : placeParts.join(", ");
+    final String customerTrn = cleanOrNotAvailable(trn);
+
+    // Bulk deliveries are single-item only (enforced at selection time),
+    // so the first sale item is the metered product.
+    final SaleItem? bulkItem = saleItems.isNotEmpty ? saleItems.first : null;
+    final double meterFrom = double.tryParse(bulkItem?.meterFrom ?? '') ?? 0;
+    final double meterTo = double.tryParse(bulkItem?.meterTo ?? '') ?? 0;
+    final double totalQuantity = meterTo - meterFrom;
+    final NumberFormat qtyFormatter = NumberFormat('#,##0.##');
+
+    final now = DateTime.now();
+    final dateTimeText = DateFormat('dd-MMM-yyyy HH:mm:ss').format(now);
+
+    pw.Widget leftText(String text, {double size = 9, pw.FontWeight? weight}) {
+      return pw.Align(
+        alignment: pw.Alignment.centerLeft,
+        child: pw.Text(
+          text,
+          style: pw.TextStyle(fontSize: size, fontWeight: weight),
+        ),
+      );
+    }
+
+    pw.Widget detailLine(String label, String value, {double size = 8}) {
+      return pw.Align(
+        alignment: pw.Alignment.centerLeft,
+        child: pw.RichText(
+          text: pw.TextSpan(
+            children: [
+              pw.TextSpan(
+                text: '$label: ',
+                style: pw.TextStyle(
+                  fontSize: size,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.TextSpan(
+                text: value,
+                style: pw.TextStyle(fontSize: size),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    pw.Widget centeredDetailLine(String label, String value) {
+      return pw.Align(
+        alignment: pw.Alignment.center,
+        child: pw.RichText(
+          textAlign: pw.TextAlign.center,
+          text: pw.TextSpan(
+            children: [
+              pw.TextSpan(
+                text: '$label: ',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.TextSpan(text: value, style: pw.TextStyle(fontSize: 9)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // A dotted line for pen-fill fields (Receiver Signature block, blank
+    // Notes) - the pdf package has no built-in dashed-border widget, so
+    // this is faked with a clipped run of periods.
+    pw.Widget dots({int count = 80, pw.TextAlign align = pw.TextAlign.left}) {
+      return pw.Text(
+        '.' * count,
+        maxLines: 1,
+        overflow: pw.TextOverflow.clip,
+        textAlign: align,
+        style: pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+      );
+    }
+
+    // Label bold on the left, value (regular weight) on the right -
+    // matches the reference's Start/End Reading, Vehicle No. etc. An
+    // empty value renders a dotted line instead, for the Receiver
+    // Signature block's pen-fill fields.
+    pw.Widget kv(String label, String value) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 3),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          // Bottom-align label with the value/dotted line so blank rows'
+          // extra handwriting space appears above both, not just above
+          // the dots while the label stays pinned to the top.
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Text(
+              label,
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(width: 6),
+            value.isEmpty
+                // Blank fields push the dotted line to the bottom of a
+                // taller box, leaving natural handwriting space between
+                // the label and the line instead of the line sitting
+                // right on the label's baseline.
+                ? pw.Expanded(
+                    child: pw.SizedBox(
+                      height: 22,
+                      child: pw.Column(
+                        mainAxisAlignment: pw.MainAxisAlignment.end,
+                        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                        children: [dots(align: pw.TextAlign.right)],
+                      ),
+                    ),
+                  )
+                : pw.Flexible(
+                    child: pw.Text(
+                      value,
+                      textAlign: pw.TextAlign.right,
+                      style: pw.TextStyle(fontSize: 9),
+                    ),
+                  ),
+          ],
+        ),
+      );
+    }
+
+    pw.Widget bulkBox(List<pw.Widget> children) {
+      return pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(8),
+        decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: children,
+        ),
+      );
+    }
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat(
+          76 * PdfPageFormat.mm,
+          double.infinity,
+          marginLeft: 10,
+          marginRight: 10,
+          marginTop: 8,
+          marginBottom: 8,
+        ),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Image(uniGasLogo, height: 60),
+              pw.SizedBox(height: 4),
+              pw.Text(
+                'UNITED GAS CO. LLC',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                  fontSize: 10,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Divider(thickness: 1),
+              leftText('A Partner You Can Trust.'),
+              leftText('Sharjah | Dubai | RAK | UAQ | Fujairah', size: 8),
+              pw.SizedBox(height: 6),
+              detailLine('Tel', '800 864427'),
+              detailLine('Email', 'info@unigastt.com'),
+              detailLine('Web', 'www.unigastt.com'),
+              detailLine('TRN#', '100206964700003'),
+              pw.SizedBox(height: 6),
+              pw.Divider(thickness: 1),
+              leftText(
+                'DELIVERY NOTE - BULK GAS',
+                size: 10,
+                weight: pw.FontWeight.bold,
+              ),
+              pw.SizedBox(height: 4),
+              kv('DO Number:', cleanOrNotAvailable(_vchnoController.text)),
+              kv('Date & Time:', dateTimeText),
+              pw.SizedBox(height: 10),
+              bulkBox([
+                centeredDetailLine(
+                  'Customer',
+                  cleanOrNotAvailable(_selectedpartyledger),
+                ),
+                pw.SizedBox(height: 6),
+                centeredDetailLine('Address', customerAddress),
+                pw.SizedBox(height: 6),
+                centeredDetailLine('TRN#', customerTrn),
+              ]),
+              pw.SizedBox(height: 10),
+              bulkBox([
+                kv('Start Reading:', bulkItem?.meterFrom ?? 'Not Available'),
+                kv('End Reading:', bulkItem?.meterTo ?? 'Not Available'),
+                kv('Total Quantity:', qtyFormatter.format(totalQuantity)),
+                kv('Unit:', cleanOrNotAvailable(bulkItem?.itemUnit)),
+                kv('Product:', cleanOrNotAvailable(bulkItem?.itemName)),
+              ]),
+              pw.SizedBox(height: 10),
+              bulkBox([
+                kv('Vehicle No.:', cleanOrNotAvailable(vehicleName)),
+                kv('Driver / Operator:', cleanOrNotAvailable(name)),
+              ]),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'I confirm that quantity in this delivery order is correct '
+                'with good condition and quality.',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 9),
+              ),
+              pw.SizedBox(height: 10),
+              bulkBox([
+                pw.Text(
+                  'Notes (if any):',
+                  style: pw.TextStyle(
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                if (controller_narration.text.trim().isNotEmpty) ...[
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    controller_narration.text.trim(),
+                    style: pw.TextStyle(fontSize: 9),
+                  ),
+                ] else ...[
+                  // Blank space to write in before the dotted line, same
+                  // idea as kv()'s blank fields - room for a natural
+                  // handwritten note, not just a line right under the label.
+                  pw.SizedBox(height: 22),
+                  pw.SizedBox(width: double.infinity, child: dots()),
+                ],
+              ]),
+              pw.SizedBox(height: 10),
+              // Receiver's own details - shows the typed value if the
+              // Receiver Information section was filled in, otherwise a
+              // blank dotted line for the recipient to fill in by pen.
+              bulkBox([
+                kv(
+                  'Receiver Name:',
+                  bulkReceiverNameController.text.trim(),
+                ),
+                kv('Mobile:', bulkReceiverMobileController.text.trim()),
+                kv(
+                  'EID#:',
+                  // The "784" prefix is auto-filled as soon as bulk is
+                  // chosen - if the user never typed anything past it,
+                  // treat it the same as not having filled EID# in at all.
+                  bulkReceiverEidController.text
+                              .replaceAll(RegExp(r'[^0-9]'), '')
+                              .length >
+                          3
+                      ? bulkReceiverEidController.text.trim()
+                      : '',
+                ),
+                pw.SizedBox(height: 6),
+                // Embeds the receiver's on-screen captured signature image
+                // when available, otherwise falls back to the blank
+                // dotted pen-fill line.
+                if (bulkReceiverSignatureBytes != null)
+                  pw.Row(
+                    // Bottom-aligned so the label sits level with the
+                    // bottom of the (much taller) signature image instead
+                    // of floating in the vertical middle of it.
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        'Signature:',
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(width: 8),
+                      // Placed right next to the label (not centered across
+                      // the remaining row width) and enlarged so the
+                      // signature reads clearly on the printed page. Both
+                      // dimensions are fixed so BoxFit.contain has a real
+                      // box to scale into without overflowing.
+                      pw.SizedBox(
+                        width: 220,
+                        height: 90,
+                        child: pw.Image(
+                          pw.MemoryImage(bulkReceiverSignatureBytes!),
+                          fit: pw.BoxFit.contain,
+                          alignment: pw.Alignment.centerLeft,
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  kv('Signature:', ''),
+              ]),
+              pw.SizedBox(height: 12),
+              pw.Text(
+                'Thank you for your business!',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final formattedDate =
+        "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}";
+    final dir = await getApplicationDocumentsDirectory();
+    final filePath = '${dir.path}/BulkDeliveryNote_$formattedDate.pdf';
+    final file = File(filePath);
+    await file.writeAsBytes(pdfData);
+
+    try {
+      await printUniGasPdf(
+        context,
+        pdfData,
+        documentName: 'BulkDeliveryNote_$formattedDate',
+      );
+    } catch (e) {
+      debugPrint('UNIGAS BULK DELIVERY NOTE PRINT ERROR: $e');
+    } finally {
+      _resetDeliveryNoteFormAfterShare();
+    }
+  }
+
   String getCurrencySymbol(String currencyCode) {
     NumberFormat format;
     Locale locale = Localizations.localeOf(context);
@@ -2961,15 +3390,60 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
         _selectedpartyledger.toString().trim().isEmpty) {
-      Fluttertoast.showToast(msg: "Please select Party Ledger");
+      showAppMessage(context, "Please select Party Ledger");
 
       return;
     }
 
-    if (saleItems.isEmpty) {
-      ScaffoldMessenger.of(
+    // UniGas bulk gas delivery: Receiver Name/Signature is mandatory.
+    if (isUniGasMeterReadingSerial &&
+        _isBulkDelivery == true &&
+        bulkReceiverNameController.text.trim().isEmpty) {
+      showAppMessage(
         context,
-      ).showSnackBar(SnackBar(content: Text('Atleast add 1 item')));
+        "Please enter the Receiver's Name before saving",
+      );
+      return;
+    }
+
+    // UniGas bulk gas delivery: start/end meter reading is mandatory -
+    // already enforced when adding the item in the picker, checked again
+    // here in case it was somehow left blank.
+    if (isUniGasMeterReadingSerial &&
+        _isBulkDelivery == true &&
+        saleItems.isNotEmpty &&
+        (saleItems.first.meterFrom.trim().isEmpty ||
+            saleItems.first.meterTo.trim().isEmpty)) {
+      showAppMessage(
+        context,
+        "Please enter both the Start Reading and End Reading",
+      );
+      return;
+    }
+
+    // UniGas bulk gas delivery: Receiver EID# is optional, but if entered
+    // must be a valid UAE Emirates ID - 15 digits starting with 784
+    // (784-YYYY-NNNNNNN-C), dashes/spaces allowed and ignored. The "784"
+    // prefix is auto-filled as soon as bulk is chosen, so only treat it
+    // as "entered" once the user has typed something past that prefix.
+    if (isUniGasMeterReadingSerial && _isBulkDelivery == true) {
+      final String eidDigitsOnly = bulkReceiverEidController.text.replaceAll(
+        RegExp(r'[\s-]'),
+        '',
+      );
+      if (eidDigitsOnly.length > 3 &&
+          !RegExp(r'^784\d{12}$').hasMatch(eidDigitsOnly)) {
+        showAppMessage(
+          context,
+          "Please enter a valid Emirates ID - it should start with 784 "
+          "and have 15 digits in total",
+        );
+        return;
+      }
+    }
+
+    if (saleItems.isEmpty) {
+      showAppMessage(context, 'Atleast add 1 item');
     } else {
       setState(() {
         _isLoading = true;
@@ -3125,13 +3599,13 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
         if (response_deliverynote.statusCode == 200) {
           if (response_deliverynote.body == 'Entry created successfully') {
-            /*Fluttertoast.showToast(msg: response_deliverynote. );*/
+            /*showAppMessage(context, response_deliverynote.);*/
 
             loadLedgerData();
 
             /*showSalesInvoiceBottomSheet(context);*/ // show screen bottom message for sharing invoice
           } else {
-            Fluttertoast.showToast(msg: 'an error occoured');
+            showAppMessage(context, 'an error occoured');
           }
         } else {
           Map<String, dynamic> data = json.decode(response_deliverynote.body);
@@ -3144,7 +3618,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           } else {
             error = "Error in data fetching!!!";
           }
-          Fluttertoast.showToast(msg: error);
+          showAppMessage(context, error);
         }
       } catch (e) {
         setState(() {
@@ -3235,6 +3709,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                             _textFieldFocusNodeNarration.unfocus();
                             voucherStartReadingController.clear();
                             voucherEndReadingController.clear();
+                            _isBulkDelivery = null;
+                            bulkReceiverNameController.clear();
+                            bulkReceiverMobileController.clear();
+                            bulkReceiverEidController.clear();
+                            bulkReceiverSignatureBytes = null;
 
                             saledate = DateTime.now();
                             saledatestring = _dateFormat.format(saledate);
@@ -3368,6 +3847,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                             _textFieldFocusNodeNarration.unfocus();
                             voucherStartReadingController.clear();
                             voucherEndReadingController.clear();
+                            _isBulkDelivery = null;
+                            bulkReceiverNameController.clear();
+                            bulkReceiverMobileController.clear();
+                            bulkReceiverEidController.clear();
+                            bulkReceiverSignatureBytes = null;
 
                             saledate = DateTime.now();
                             saledatestring = _dateFormat.format(saledate);
@@ -3705,7 +4189,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     }
     catch (e)
@@ -4008,7 +4492,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           error = 'Something went wrong!!!';
         }
 
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       print('error -> $e');
@@ -4063,7 +4547,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       print(e);
@@ -4150,7 +4634,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         } else {
           error = 'Something went wrong!!!';
         }
-        Fluttertoast.showToast(msg: error);
+        showAppMessage(context, error);
       }
     } catch (e) {
       vchnos.clear();
@@ -4309,11 +4793,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   Future<void> _selectsaleDate(BuildContext context) async {
     if (isUniGasSerial(serial_no)) {
       closeKeyboard(context);
-      Fluttertoast.showToast(
-        msg: "Voucher date cannot be changed",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Voucher date cannot be changed");
       return;
     }
     setState(() {
@@ -5308,6 +5788,114 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     );
   }
 
+  // UniGas-only: asks once per entry whether this is a bulk (tanker) gas
+  // delivery before opening the item picker, then remembers the answer
+  // for the rest of the entry (cleared on reset after share/print).
+  Future<void> _onAddItemTapped(BuildContext context) async {
+    if (isUniGasMeterReadingSerial && _isBulkDelivery == null) {
+      final bool? isBulk = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text('Bulk Delivery?'),
+          content: const Text(
+            'Is this a bulk (tanker) gas delivery? Bulk deliveries need a '
+            'meter start/end reading and allow only one item; non-bulk '
+            'deliveries let you pick multiple items with no meter reading.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('No, Non-Bulk'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: app_color),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text(
+                'Yes, Bulk',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (isBulk == null) return;
+      setState(() {
+        _isBulkDelivery = isBulk;
+        // Pre-fill the fixed UAE Emirates ID prefix so the user only
+        // ever types the remaining digits.
+        if (isBulk && bulkReceiverEidController.text.isEmpty) {
+          bulkReceiverEidController.text = '784-';
+          bulkReceiverEidController.selection = TextSelection.collapsed(
+            offset: bulkReceiverEidController.text.length,
+          );
+        }
+      });
+    }
+    // Bulk deliveries allow exactly one item for the whole entry - once
+    // it's added, block reopening the picker entirely rather than just
+    // restricting selection inside it.
+    if (isUniGasMeterReadingSerial &&
+        _isBulkDelivery == true &&
+        saleItems.isNotEmpty) {
+      showAppMessage(
+        context,
+        "Only one item can be added for a Bulk delivery. Remove the "
+        "current item first if you need a different one",
+      );
+      return;
+    }
+    _showMultiItemSelectPopup(context);
+  }
+
+  // Opens the full-screen signature pad and stores the captured PNG bytes
+  // once the receiver signs and taps Save.
+  Future<void> _captureBulkReceiverSignature(BuildContext context) async {
+    final Uint8List? bytes = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(builder: (_) => const SignatureCapturePage()),
+    );
+    if (bytes != null) {
+      setState(() {
+        bulkReceiverSignatureBytes = bytes;
+      });
+    }
+  }
+
+  // Receiver EID# so it always reads as a UAE Emirates ID:
+  // 784-YYYY-NNNNNNN-C (3-4-7-1 digit grouping, 15 digits total). The
+  // "784" prefix is fixed - typing over/deleting it just puts it back.
+  void _formatBulkReceiverEid(String raw) {
+    String digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (!digits.startsWith('784')) {
+      digits = digits.length >= 3 ? '784${digits.substring(3)}' : '784';
+    }
+    if (digits.length > 15) {
+      digits = digits.substring(0, 15);
+    }
+
+    final StringBuffer formatted = StringBuffer(digits.substring(0, 3));
+    if (digits.length > 3) {
+      formatted.write('-${digits.substring(3, digits.length.clamp(3, 7))}');
+    }
+    if (digits.length > 7) {
+      formatted.write('-${digits.substring(7, digits.length.clamp(7, 14))}');
+    }
+    if (digits.length > 14) {
+      formatted.write('-${digits.substring(14, 15)}');
+    }
+
+    final String result = formatted.toString();
+    if (result == bulkReceiverEidController.text) return;
+    bulkReceiverEidController.value = TextEditingValue(
+      text: result,
+      selection: TextSelection.collapsed(offset: result.length),
+    );
+  }
+
   Future<void> _showMultiItemSelectPopup(BuildContext context) async {
     final Set<String> selectedItemNames = {};
     // Shows exactly where each item's rate came from — Price Level,
@@ -5474,7 +6062,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              "Add Multiple Items",
+                              (isUniGasMeterReadingSerial &&
+                                      _isBulkDelivery == true)
+                                  ? "Select Bulk Item"
+                                  : "Add Multiple Items",
                               style: GoogleFonts.poppins(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
@@ -5591,8 +6182,18 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
                                 void toggle() {
                                   final bool next = !checked;
+                                  final bool isBulk =
+                                      isUniGasMeterReadingSerial &&
+                                      _isBulkDelivery == true;
                                   setStateDialog(() {
                                     if (next) {
+                                      // Bulk deliveries are single-item
+                                      // only - selecting a new item
+                                      // replaces whatever was picked
+                                      // before instead of adding to it.
+                                      if (isBulk) {
+                                        selectedItemNames.clear();
+                                      }
                                       selectedItemNames.add(name);
                                       qtyEditControllers.putIfAbsent(
                                         name,
@@ -5604,7 +6205,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                           () => itemUnits.first.name,
                                         );
                                       }
-                                      if (isUniGasMeterReadingSerial) {
+                                      if (isBulk) {
                                         startReadingControllers.putIfAbsent(
                                           name,
                                           () => TextEditingController(),
@@ -5947,7 +6548,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         ),
                                                       ],
                                                     ),
-                                                    if (isUniGasMeterReadingSerial) ...[
+                                                    if (isUniGasMeterReadingSerial &&
+                                                        _isBulkDelivery ==
+                                                            true) ...[
                                                       const SizedBox(
                                                         height: 10,
                                                       ),
@@ -6222,11 +6825,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                         ) ??
                                         0;
                                     if (qty <= 0) {
-                                      Fluttertoast.showToast(
-                                        msg:
-                                            "Quantity must be greater than 0 for $name",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Please enter a Quantity greater "
+                                        "than 0 for $name",
                                       );
                                       return;
                                     }
@@ -6238,12 +6840,35 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                             .trim() ??
                                         '';
                                     if (rateText.isEmpty) {
-                                      Fluttertoast.showToast(
-                                        msg: "Rate is required for $name",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Please enter a Rate for $name",
                                       );
                                       return;
+                                    }
+
+                                    // Bulk gas delivery is metered - start
+                                    // and end reading are mandatory, not
+                                    // just format-validated when present.
+                                    if (isUniGasMeterReadingSerial &&
+                                        _isBulkDelivery == true) {
+                                      final String meterFrom =
+                                          startReadingControllers[name]?.text
+                                              .trim() ??
+                                          '';
+                                      final String meterTo =
+                                          endReadingControllers[name]?.text
+                                              .trim() ??
+                                          '';
+                                      if (meterFrom.isEmpty ||
+                                          meterTo.isEmpty) {
+                                        showAppMessage(
+                                          context,
+                                          "Please enter both the Start "
+                                          "Reading and End Reading for $name",
+                                        );
+                                        return;
+                                      }
                                     }
                                   }
 
@@ -6308,10 +6933,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       final double amount = double.parse(
         (resolvedRate * double.parse(qty)).toStringAsFixed(decimal!),
       );
-      final String meterFrom = isUniGasMeterReadingSerial
+      final bool isBulk = isUniGasMeterReadingSerial && _isBulkDelivery == true;
+      final String meterFrom = isBulk
           ? (startReadingControllers[name]?.text.trim() ?? '')
           : '';
-      final String meterTo = isUniGasMeterReadingSerial
+      final String meterTo = isBulk
           ? (endReadingControllers[name]?.text.trim() ?? '')
           : '';
 
@@ -8232,11 +8858,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     final qty = double.tryParse(itemQuantity.replaceAll(',', '').trim()) ?? 0;
 
     if (itemQuantity.trim().isEmpty || qty <= 0) {
-      Fluttertoast.showToast(
-        msg: "Quantity must be greater than 0",
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      showAppMessage(context, "Quantity must be greater than 0");
       return;
     }
 
@@ -8247,11 +8869,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       // ✅ If one field is entered and other is empty, restrict saving
       if ((meterFrom.isNotEmpty && meterTo.isEmpty) ||
           (meterFrom.isEmpty && meterTo.isNotEmpty)) {
-        Fluttertoast.showToast(
-          msg: "Please enter both start and end readings",
-          backgroundColor: Colors.redAccent,
-          textColor: Colors.white,
-        );
+        showAppMessage(context, "Please enter both start and end readings");
         return;
       }
 
@@ -8261,10 +8879,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         final end = double.tryParse(meterTo);
 
         if (start == null || end == null || end <= start) {
-          Fluttertoast.showToast(
-            msg: "End reading must be greater than start reading",
-            backgroundColor: Colors.redAccent,
-            textColor: Colors.white,
+          showAppMessage(
+            context,
+            "End reading must be greater than start reading",
           );
           return;
         }
@@ -9199,7 +9816,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                   // and addItem() are left intact below).
                                   GestureDetector(
                                     onTap: () {
-                                      _showMultiItemSelectPopup(context);
+                                      _onAddItemTapped(context);
                                     },
                                     child: Container(
                                       width: 34,
@@ -9256,6 +9873,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                           "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)))}",
                                       amount:
                                           "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)) * double.parse(item.itemQuantity))}",
+                                      quantityLocked:
+                                          _isQtyLockedByMeterReading(
+                                            item.meterFrom,
+                                            item.meterTo,
+                                          ),
                                       onIncrement: () {
                                         int currentQty =
                                             int.tryParse(item.itemQuantity) ??
@@ -9291,6 +9913,222 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                 ),
                               ],
                             ),
+
+                            if (isUniGasMeterReadingSerial &&
+                                _isBulkDelivery == true)
+                              EntrySection(
+                                icon: Icons.assignment_ind_outlined,
+                                title: "Receiver Information",
+                                iconGradient: [Colors.teal, Colors.tealAccent],
+                                children: [
+                                  EntryFormField(
+                                    label: "Receiver Name *",
+                                    icon: Icons.person_outline,
+                                    iconGradient: [
+                                      Colors.teal,
+                                      Colors.tealAccent,
+                                    ],
+                                    controller: bulkReceiverNameController,
+                                  ),
+                                  EntryFormField(
+                                    label: "Receiver Mobile",
+                                    icon: Icons.phone_outlined,
+                                    iconGradient: [
+                                      Colors.blue,
+                                      Colors.blueAccent,
+                                    ],
+                                    controller: bulkReceiverMobileController,
+                                    keyboardType: TextInputType.phone,
+                                    validator: (value) => null,
+                                  ),
+                                  EntryFormField(
+                                    label: "Receiver EID#",
+                                    icon: Icons.badge_outlined,
+                                    iconGradient: [
+                                      Colors.purple,
+                                      Colors.deepPurpleAccent,
+                                    ],
+                                    controller: bulkReceiverEidController,
+                                    keyboardType: TextInputType.number,
+                                    onChanged: _formatBulkReceiverEid,
+                                    validator: (value) => null,
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                      left: 16,
+                                      right: 16,
+                                      top: 2,
+                                      bottom: 6,
+                                    ),
+                                    child: Text(
+                                      "Format: 784-****-*******-*",
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        fontStyle: FontStyle.italic,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant
+                                            .withValues(alpha: 0.7),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      4,
+                                      16,
+                                      6,
+                                    ),
+                                    child: GestureDetector(
+                                      onTap: () =>
+                                          _captureBulkReceiverSignature(
+                                            context,
+                                          ),
+                                      child: Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color:
+                                              bulkReceiverSignatureBytes == null
+                                              ? (Theme.of(context).brightness ==
+                                                        Brightness.dark
+                                                    ? Colors.white.withValues(
+                                                        alpha: 0.05,
+                                                      )
+                                                    : Colors.grey.shade100)
+                                              : Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          border: Border.all(
+                                            color:
+                                                bulkReceiverSignatureBytes ==
+                                                    null
+                                                ? Colors.grey.shade400
+                                                : Colors.teal,
+                                            width: 1.4,
+                                            style: BorderStyle.solid,
+                                          ),
+                                        ),
+                                        child:
+                                            bulkReceiverSignatureBytes == null
+                                            ? Row(
+                                                children: [
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(
+                                                      gradient:
+                                                          const LinearGradient(
+                                                            colors: [
+                                                              Colors.teal,
+                                                              Colors.tealAccent,
+                                                            ],
+                                                          ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            10,
+                                                          ),
+                                                    ),
+                                                    child: const Icon(
+                                                      Icons.draw_outlined,
+                                                      color: Colors.white,
+                                                      size: 20,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          "Tap to Capture Receiver Signature",
+                                                          style:
+                                                              GoogleFonts.poppins(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                        ),
+                                                        Text(
+                                                          "Hand the device to the receiver to sign",
+                                                          style: GoogleFonts.poppins(
+                                                            fontSize: 11,
+                                                            color: Theme.of(context)
+                                                                .colorScheme
+                                                                .onSurfaceVariant,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  const Icon(
+                                                    Icons.chevron_right,
+                                                  ),
+                                                ],
+                                              )
+                                            : Row(
+                                                children: [
+                                                  ClipRRect(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                    child: Container(
+                                                      color:
+                                                          Colors.grey.shade200,
+                                                      width: 70,
+                                                      height: 45,
+                                                      child: Image.memory(
+                                                        bulkReceiverSignatureBytes!,
+                                                        fit: BoxFit.contain,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Expanded(
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(
+                                                          Icons.check_circle,
+                                                          color: Colors.teal,
+                                                          size: 18,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 6,
+                                                        ),
+                                                        Text(
+                                                          "Signature captured",
+                                                          style:
+                                                              GoogleFonts.poppins(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    "Retake",
+                                                    style: GoogleFonts.poppins(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: app_color,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
 
                             EntrySection(
                               icon: Icons.list,
@@ -9651,11 +10489,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                             "Please enter both start and end reading";
                                       });
 
-                                      Fluttertoast.showToast(
-                                        msg:
-                                            "Please enter both start and end reading",
-                                        backgroundColor: Colors.redAccent,
-                                        textColor: Colors.white,
+                                      showAppMessage(
+                                        context,
+                                        "Please enter both start and end reading",
                                       );
 
                                       return;
@@ -9677,11 +10513,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                               "Please enter valid meter readings";
                                         });
 
-                                        Fluttertoast.showToast(
-                                          msg:
-                                              "Please enter valid meter readings",
-                                          backgroundColor: Colors.redAccent,
-                                          textColor: Colors.white,
+                                        showAppMessage(
+                                          context,
+                                          "Please enter valid meter readings",
                                         );
 
                                         return;
@@ -9693,11 +10527,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                               "End reading must be greater than start reading";
                                         });
 
-                                        Fluttertoast.showToast(
-                                          msg:
-                                              "End reading must be greater than start reading",
-                                          backgroundColor: Colors.redAccent,
-                                          textColor: Colors.white,
+                                        showAppMessage(
+                                          context,
+                                          "End reading must be greater than start reading",
                                         );
 
                                         return;
@@ -9720,6 +10552,237 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
             Visibility(
               visible: _isLoading,
               child: Center(child: AppLogoLoader()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── UniGas Bulk Delivery - Receiver Signature Capture ─────────────
+// Draws the receiver's on-screen signature (finger/stylus) and hands
+// back a PNG image of it, embedded directly into the printed Bulk Gas
+// Delivery Note in place of the blank "Signature:" pen-fill line.
+class _SignatureStrokePainter extends CustomPainter {
+  final List<List<Offset>> strokes;
+  _SignatureStrokePainter(this.strokes);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    for (final stroke in strokes) {
+      for (int i = 0; i < stroke.length - 1; i++) {
+        canvas.drawLine(stroke[i], stroke[i + 1], paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignatureStrokePainter oldDelegate) => true;
+}
+
+class SignatureCapturePage extends StatefulWidget {
+  const SignatureCapturePage({super.key});
+
+  @override
+  State<SignatureCapturePage> createState() => _SignatureCapturePageState();
+}
+
+class _SignatureCapturePageState extends State<SignatureCapturePage> {
+  final List<List<Offset>> _strokes = [];
+  final GlobalKey _repaintKey = GlobalKey();
+  bool _isSaving = false;
+
+  void _handlePanStart(DragStartDetails details) {
+    setState(() {
+      _strokes.add([details.localPosition]);
+    });
+  }
+
+  void _handlePanUpdate(DragUpdateDetails details) {
+    setState(() {
+      _strokes.last.add(details.localPosition);
+    });
+  }
+
+  void _clear() {
+    setState(() {
+      _strokes.clear();
+    });
+  }
+
+  Future<void> _save() async {
+    if (_strokes.isEmpty) return;
+    setState(() => _isSaving = true);
+    try {
+      final boundary =
+          _repaintKey.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = byteData!.buffer.asUint8List();
+      if (mounted) Navigator.of(context).pop(bytes);
+    } catch (e) {
+      debugPrint('SIGNATURE CAPTURE ERROR: $e');
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: app_color,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          "Receiver Signature",
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 18, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Please hand the device to the receiver and ask "
+                      "them to sign in the box below with their finger.",
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: Colors.grey.shade400, width: 1.5),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: RepaintBoundary(
+                      key: _repaintKey,
+                      child: Container(
+                        color: Colors.white,
+                        width: double.infinity,
+                        height: double.infinity,
+                        child: Stack(
+                          children: [
+                            if (_strokes.isEmpty)
+                              Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.draw_outlined,
+                                      size: 48,
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      "Sign here",
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.grey.shade400,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            GestureDetector(
+                              onPanStart: _handlePanStart,
+                              onPanUpdate: _handlePanUpdate,
+                              child: CustomPaint(
+                                painter: _SignatureStrokePainter(_strokes),
+                                size: Size.infinite,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _strokes.isEmpty ? null : _clear,
+                      icon: const Icon(Icons.refresh),
+                      label: Text(
+                        "Clear",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: (_strokes.isEmpty || _isSaving) ? null : _save,
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.check, color: Colors.white),
+                      label: Text(
+                        "Save Signature",
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: app_color,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
