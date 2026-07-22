@@ -5633,9 +5633,17 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
       final controller = qtyEditControllers[name];
       if (controller == null) return;
       final int current = int.tryParse(controller.text.trim()) ?? 1;
-      final int next = (current + delta) < 1 ? 1 : current + delta;
+      final int next = current + delta;
       setStateDialog(() {
-        controller.text = next.toString();
+        if (next < 1) {
+          // Decrementing below 1 unselects the item instead of clamping
+          // at 1 - reset its qty back to 1 so it starts fresh if picked
+          // again later.
+          selectedItemNames.remove(name);
+          controller.text = '1';
+        } else {
+          controller.text = next.toString();
+        }
       });
     }
 
@@ -5681,7 +5689,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             bool isAdding = false;
-            final List<dynamic> filteredItems = searchQuery.isEmpty
+            final List<dynamic> searchedItems = searchQuery.isEmpty
                 ? itemdata
                 : itemdata
                       .where(
@@ -5690,6 +5698,22 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                             .contains(searchQuery.toLowerCase()),
                       )
                       .toList();
+
+            // Selected items bubble to the top (in their original relative
+            // order among themselves); unselected items stay below (also
+            // in original order). Since this recomputes on every toggle,
+            // checking an item moves it up immediately, and unchecking it
+            // drops it right back into its natural position among the
+            // other unselected items - not to some arbitrary spot.
+            final List<dynamic> filteredItems = [
+              ...searchedItems.where(
+                (i) => selectedItemNames.contains(i['name']?.toString() ?? ''),
+              ),
+              ...searchedItems.where(
+                (i) =>
+                    !selectedItemNames.contains(i['name']?.toString() ?? ''),
+              ),
+            ];
 
             return DraggableScrollableSheet(
               expand: false,
@@ -5879,6 +5903,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                 }
 
                                 return Container(
+                                  key: ValueKey(name),
                                   margin: const EdgeInsets.symmetric(
                                     vertical: 6,
                                   ),

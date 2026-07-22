@@ -2732,7 +2732,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
 
-      _selectedvatledger = vatledgerdata[0];
+      _selectedvatledger = _defaultVatLedger();
 
       _selecteditem = '${itemdata[0]['name']}';
       _itemController.text = _selecteditem;
@@ -3141,8 +3141,19 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               padding: const pw.EdgeInsets.symmetric(horizontal: 1),
               child: pw.Row(
                 children: [
-                  pw.Text(unit, style: style),
-                  pw.SizedBox(width: 14),
+                  // Fixed width (not intrinsic sizing) - a plain pw.Text
+                  // here made everything after it (the gap + VAT % box)
+                  // start at whatever pixel width THIS specific unit
+                  // string happened to render at, which drifts slightly
+                  // between different unit strings even at equal
+                  // character count (glyph widths vary per letter). VAT %
+                  // must land at the exact same x every time regardless
+                  // of what UNIT says.
+                  pw.SizedBox(
+                    width: 32,
+                    child: pw.Text(unit, style: style),
+                  ),
+                  pw.SizedBox(width: 2),
                   // Fixed width shared between the "VAT %" heading and
                   // every item's actual percentage, so a short value like
                   // "5%" centers under the wider heading text instead of
@@ -3566,7 +3577,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       _partyLedgerController.clear();
 
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-      _selectedvatledger = vatledgerdata[0];
+      _selectedvatledger = _defaultVatLedger();
 
       _selecteditem = '${itemdata[0]['name']}';
       _itemController.text = _selecteditem;
@@ -3757,7 +3768,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       _partyLedgerController.text = _selectedpartyledger;
       _selectedsalesledger = salesledger_data[0];
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-      _selectedvatledger = vatledgerdata[0];
+      _selectedvatledger = _defaultVatLedger();
       _selecteditem = '${itemdata[0]['name']}';
 
       if (locationsdata.isNotEmpty) {
@@ -4127,7 +4138,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             _selectedledger = ledgerdata.isNotEmpty
                                 ? ledgerdata[0]['name']
                                 : null;
-                            _selectedvatledger = vatledgerdata[0];
+                            _selectedvatledger = _defaultVatLedger();
 
                             _selecteditem = '${itemdata[0]['name']}';
                             _itemController.text = _selecteditem;
@@ -4256,7 +4267,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             _partyLedgerController.clear();
                             // _selectedsalesledger = salesledger_data[0];
                             _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-                            _selectedvatledger = vatledgerdata[0];
+                            _selectedvatledger = _defaultVatLedger();
                             _selecteditem = '${itemdata[0]['name']}';
                             _itemController.text = _selecteditem;
 
@@ -4512,9 +4523,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
             ),
           );
 
-          _selectedvatledger = vatledgerdata.isNotEmpty
-              ? vatledgerdata[0]
-              : null;
+          _selectedvatledger = _defaultVatLedger();
 
           itemdata = jsonResponse["items"] ?? [];
 
@@ -4749,8 +4758,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
             ),
           );
 
-          _selectedvatledger =
-          vatledgerdata.isNotEmpty ? vatledgerdata[0] : null;
+          _selectedvatledger = _defaultVatLedger();
 
           itemdata = jsonResponse["items"] ?? [];
 
@@ -5850,9 +5858,17 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       final controller = qtyEditControllers[name];
       if (controller == null) return;
       final int current = int.tryParse(controller.text.trim()) ?? 1;
-      final int next = (current + delta) < 1 ? 1 : current + delta;
+      final int next = current + delta;
       setStateDialog(() {
-        controller.text = next.toString();
+        if (next < 1) {
+          // Decrementing below 1 unselects the item instead of clamping
+          // at 1 - reset its qty back to 1 so it starts fresh if picked
+          // again later.
+          selectedItemNames.remove(name);
+          controller.text = '1';
+        } else {
+          controller.text = next.toString();
+        }
       });
     }
 
@@ -5867,7 +5883,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             bool isAdding = false;
-            final List<dynamic> filteredItems = searchQuery.isEmpty
+            final List<dynamic> searchedItems = searchQuery.isEmpty
                 ? itemdata
                 : itemdata
                       .where(
@@ -5876,6 +5892,22 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             .contains(searchQuery.toLowerCase()),
                       )
                       .toList();
+
+            // Selected items bubble to the top (in their original relative
+            // order among themselves); unselected items stay below (also
+            // in original order). Since this recomputes on every toggle,
+            // checking an item moves it up immediately, and unchecking it
+            // drops it right back into its natural position among the
+            // other unselected items - not to some arbitrary spot.
+            final List<dynamic> filteredItems = [
+              ...searchedItems.where(
+                (i) => selectedItemNames.contains(i['name']?.toString() ?? ''),
+              ),
+              ...searchedItems.where(
+                (i) =>
+                    !selectedItemNames.contains(i['name']?.toString() ?? ''),
+              ),
+            ];
 
             return DraggableScrollableSheet(
               expand: false,
@@ -6055,6 +6087,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                 }
 
                                 return Container(
+                                  key: ValueKey(name),
                                   margin: const EdgeInsets.symmetric(
                                     vertical: 6,
                                   ),
@@ -8491,6 +8524,19 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     // 👇 put only that one serial here
 
     return currentSerial == uniGasSerialNumber;
+  }
+
+  // vatledgerdata[0] is always the synthetic "Not Applicable" entry added
+  // ahead of the API's real VAT ledgers. For UniGas, default to the first
+  // real ledger (vatledgerdata[1]) instead of "Not Applicable" - UniGas
+  // sales/deliveries are always VAT-applicable in practice. Every other
+  // serial keeps the existing "Not Applicable" default.
+  String? _defaultVatLedger() {
+    if (vatledgerdata.isEmpty) return null;
+    if (isUniGasSerial && vatledgerdata.length > 1) {
+      return vatledgerdata[1];
+    }
+    return vatledgerdata[0];
   }
 
   @override
