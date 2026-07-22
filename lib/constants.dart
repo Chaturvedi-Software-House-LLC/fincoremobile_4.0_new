@@ -16,6 +16,20 @@ const String BASE_URL_config = "$prodServer/main";
 // uni gas serial number
 const String uniGasSerialNumber = '772976358';
 
+// Backend-supplied boolean flags (e.g. an allocation's "is_bulk" tag) come
+// back from the login/spectra_allocations response as 1/0 rather than
+// true/false, so a plain `== true` check silently reads as always-false.
+// Handles bool, num (1/0), and String ("1"/"true") shapes.
+bool parseBoolFlag(dynamic value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    return normalized == '1' || normalized == 'true';
+  }
+  return false;
+}
+
 // Dev Environment
 // const String BASE_URL_config = "$devServer:5000";
 const String authTokenBase =

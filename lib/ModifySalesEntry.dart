@@ -3048,145 +3048,18 @@ _itemController.text = _selecteditem;
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Sale Invoice for $_selectedpartyledger');
 
-    setState(() {
-      controller_narration.clear();
-      controller_refno.clear();
-
-      _textFieldFocusNodeNarration.unfocus(); // Unfocus the TextField
-
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-      refdate = DateTime.now();
-      refdatestring = _dateFormat.format(refdate);
-      refdatetxt = formatlastsaledate(refdatestring);
-      _refdateController.text = refdatetxt;
-      // _selectedvchtypename = vchtypenamedata[0];
-      fetchvchnos(_selectedvchtypename);
-      _selectedpartyledger = null;
-      _partyLedgerController.clear();
-      // _selectedsalesledger = salesledger_data[0];
-
-      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-
-      _selectedvatledger = vatledgerdata[0];
-
-      _selecteditem = '${itemdata[0]['name']}';
-      _itemController.text = _selecteditem;
-      if (locationsdata.isNotEmpty) {
-        selectedLocation = locationsdata[0];
-        isVisibleLocation = true;
-      } else {
-        isVisibleLocation = false;
-      }
-      _updateUnitDropdown(_selecteditem);
-
-      saleItems.clear();
-      ledgerEntries.clear();
-
-      // making sales list empty and setting values
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (saleItems.isEmpty) {
-        isVisibleItemHeading = false;
-      } else {
-        isVisibleItemHeading = true;
-      }
-      // making ledger list empty and setting values
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (ledgerEntries.isEmpty) {
-        isVisibleLedgerHeading = false;
-      } else {
-        isVisibleLedgerHeading = true;
-      }
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedtotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedtotal.toString();
-      _isFocused_vchno = false;
-      _isFocused_item = false;
-      _isFocused_unit = false;
-      _isFocused_ledger = false;
-      _isFocused_narration = false;
-      _isFocused_totalamt = false;
-      _isFocused_vatamt = false;
-    });
+    // This is a Modify screen, not a new-entry screen - after sharing the
+    // updated invoice there's nothing left to edit here, so go to the view
+    // screen (matching "No, Thanks") instead of resetting fields in place.
+    // The in-place reset used to leave the Party Ledger TypeAheadField
+    // focused while its controller was cleared, which reopened its
+    // suggestions dropdown right after save/share.
+    if (context.mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => PendingSalesEntry()),
+      );
+    }
   }
 
   Future<void> loadLedgerData() async {

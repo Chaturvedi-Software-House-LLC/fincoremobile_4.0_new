@@ -5788,41 +5788,38 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     );
   }
 
-  // UniGas-only: asks once per entry whether this is a bulk (tanker) gas
-  // delivery before opening the item picker, then remembers the answer
-  // for the rest of the entry (cleared on reset after share/print).
+  // Reads whether this device's vehicle allocation is tagged "is_bulk" -
+  // set in Add/Modify Allocation on the backend and returned per-allocation
+  // in the "spectra_allocations" login response (cached in prefs, same
+  // record used for the vehicle/godown lookups elsewhere in this file).
+  Future<bool> _resolveIsBulkFromSpectraAllocation() async {
+    try {
+      final String? spectraAllocationsString = prefs.getString(
+        'spectra_allocations',
+      );
+      if (spectraAllocationsString != null &&
+          spectraAllocationsString.isNotEmpty) {
+        final List<dynamic> spectraAllocations = jsonDecode(
+          spectraAllocationsString,
+        );
+        if (spectraAllocations.isNotEmpty) {
+          final first = Map<String, dynamic>.from(spectraAllocations.first);
+          return parseBoolFlag(first['is_bulk']);
+        }
+      }
+    } catch (e) {
+      debugPrint("UNIGAS IS_BULK ALLOCATION LOOKUP ERROR: $e");
+    }
+    return false;
+  }
+
+  // UniGas-only: resolves once per entry whether this is a bulk (tanker)
+  // gas delivery from the allocation's "is_bulk" tag before opening the
+  // item picker, then remembers the answer for the rest of the entry
+  // (cleared on reset after share/print). No user confirmation popup.
   Future<void> _onAddItemTapped(BuildContext context) async {
     if (isUniGasMeterReadingSerial && _isBulkDelivery == null) {
-      final bool? isBulk = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: const Text('Bulk Delivery?'),
-          content: const Text(
-            'Is this a bulk (tanker) gas delivery? Bulk deliveries need a '
-            'meter start/end reading and allow only one item; non-bulk '
-            'deliveries let you pick multiple items with no meter reading.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('No, Non-Bulk'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: app_color),
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text(
-                'Yes, Bulk',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-      );
-      if (isBulk == null) return;
+      final bool isBulk = await _resolveIsBulkFromSpectraAllocation();
       setState(() {
         _isBulkDelivery = isBulk;
         // Pre-fill the fixed UAE Emirates ID prefix so the user only

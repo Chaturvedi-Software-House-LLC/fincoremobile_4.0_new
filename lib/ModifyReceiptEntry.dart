@@ -1932,49 +1932,18 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Receipt Voucher for $_selectedparty');
 
-    setState(() {
-      controller_narration.clear();
-      _textFieldFocusNodeNarration.unfocus(); // Unfocus the TextField
-
-      receiptdate = DateTime.now();
-      receiptdatestring = _dateFormat.format(receiptdate);
-      receiptdatetxt = formatlastsaledate(receiptdatestring);
-      _dateController.text = receiptdatetxt;
-      _selectedvchtypename = vchtypenamedata.first;
-      fetchvchnos(_selectedvchtypename);
-      _selectedparty = partydata.first;
-
-      if (serial_no != uniGasSerialNumber) {
-        _selectedbankcashname = bankcashname_data.first;
-      }
-
-      bills.clear();
-      cheque.clear();
-
-      updateChequeAmount();
-
-      totalBillAmount = bills.fold(0.0, (double previousAmount, Bills bill) {
-        return previousAmount + bill.billAmount;
-      });
-      roundedtotalBillAmount = double.parse(
-        totalBillAmount.toStringAsFixed(decimal),
+    // This is a Modify screen, not a new-entry screen - after sharing the
+    // updated voucher there's nothing left to edit here, so go to the view
+    // screen (matching the dialog's "No, Thanks") instead of resetting
+    // fields in place. The in-place reset used to leave the Party
+    // TypeAheadField focused while its controller was cleared/updated,
+    // which reopened its suggestions dropdown right after save/share.
+    if (context.mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => PendingReceiptEntry()),
       );
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal}', 'en_US');
-      String formattedtotal = formatter.format(roundedtotalBillAmount);
-      controller_totalamt.text = formattedtotal.toString();
-
-      if (bills.isEmpty) {
-        isVisibleBillHeading = false;
-      } else {
-        isVisibleBillHeading = true;
-      }
-
-      if (cheque.isEmpty) {
-        isVisibleChequeHeading = false;
-      } else {
-        isVisibleChequeHeading = true;
-      }
-    });
+    }
   }
 
   Future<void> updateEntry(int id) async {

@@ -600,6 +600,11 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 'D/O Voucher',
                 allocation['voucher_type_name'] ?? '',
               ),
+              _infoChip(
+                Icons.local_shipping_outlined,
+                'Bulk',
+                parseBoolFlag(allocation['is_bulk']) ? 'Yes' : 'No',
+              ),
             ],
           ),
 

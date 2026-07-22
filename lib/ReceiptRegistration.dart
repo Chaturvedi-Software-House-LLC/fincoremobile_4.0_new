@@ -1048,6 +1048,13 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                     children: <Widget>[
                       ElevatedButton.icon(
                         onPressed: () {
+                          // Drop focus first - otherwise clearing
+                          // _partyController's text below while the Party
+                          // TypeAheadField still has focus makes it re-run
+                          // its suggestionsCallback('') (which matches
+                          // everything) and pop its suggestions overlay
+                          // back open right after reset.
+                          FocusManager.instance.primaryFocus?.unfocus();
                           setState(() {
                             _selectedparty = null;
                             _partyController.clear();

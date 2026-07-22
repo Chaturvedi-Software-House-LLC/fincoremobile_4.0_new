@@ -25,30 +25,6 @@ class SalesRegistration extends StatefulWidget {
   _SalesRegistrationPageState createState() => _SalesRegistrationPageState();
 }
 
-// One column's text + flex share, for the UniGas Tax Invoice's
-// borderless item table (built from Expanded rows instead of pw.Table).
-class _Col {
-  final String text;
-  final double flex;
-  final bool bold;
-  final bool right;
-  final bool center;
-  final double gapAfter;
-  // Small italic grey line under the main text - used for the ITEM
-  // column's "X - Y" meter-reading values, same as the Delivery Note's
-  // itemCell().
-  final String? subText;
-  _Col(
-    this.text,
-    this.flex, {
-    this.bold = false,
-    this.right = false,
-    this.center = false,
-    this.gapAfter = 0,
-    this.subText,
-  });
-}
-
 // Debug helper for the bulk multi-item add: records which source
 // (Price Level / Item Rate / Manual) an item's rate came from.
 class _ResolvedRateInfo {
@@ -2732,6 +2708,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Sale Invoice for $_selectedpartyledger');
 
+    _dropFocusBeforeReset();
+
     setState(() {
       controller_narration.clear();
       controller_refno.clear();
@@ -3026,53 +3004,165 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       );
     }
 
-    // Builds one row of the borderless item table from Expanded/flex
-    // columns (no pw.Table, no cell grid lines - matches the reference's
-    // plain-row look inside the single bordered box).
-    pw.Widget itemRow(List<_Col> cols) {
-      return pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(vertical: 2),
-        child: pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            for (final c in cols)
-              pw.Expanded(
-                flex: (c.flex * 10).round(),
-                child: pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 1),
-                  child: pw.Padding(
-                    padding: pw.EdgeInsets.only(right: c.gapAfter),
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          c.text,
-                          textAlign: c.center
-                              ? pw.TextAlign.center
-                              : (c.right
-                                    ? pw.TextAlign.right
-                                    : pw.TextAlign.left),
-                          style: pw.TextStyle(
-                            fontSize: 9,
-                            fontWeight: c.bold ? pw.FontWeight.bold : null,
-                          ),
-                        ),
-                        if (c.subText != null && c.subText!.isNotEmpty)
-                          pw.Text(
-                            c.subText!,
-                            style: pw.TextStyle(
-                              fontSize: 7,
-                              fontStyle: pw.FontStyle.italic,
-                              color: PdfColors.grey500,
-                            ),
-                          ),
-                      ],
+    // A dotted line under the item table headers, matching the reference
+    // exactly - the pdf package has no built-in dashed-border widget, so
+    // this is faked with a clipped run of periods. Must be wrapped in an
+    // explicit-width SizedBox at the call site (same as the Delivery
+    // Note's dots()) - a bare pw.Text has no bounded width to clip against
+    // here, so the dashes never actually appeared.
+    pw.Widget dots({int count = 400}) {
+      return pw.Text(
+        '.' * count,
+        maxLines: 1,
+        softWrap: false,
+        overflow: pw.TextOverflow.clip,
+        style: pw.TextStyle(fontSize: 9, color: PdfColors.grey600, height: 1),
+      );
+    }
+
+    // One cell in an item-table row. Only ITEM/UNIT text can span more
+    // than one line (long item names) - every other cell is short enough
+    // to stay single-line in practice.
+    pw.Widget cell(
+      String text,
+      double flex, {
+      bool bold = false,
+      bool center = false,
+      bool right = false,
+      double fontSize = 9,
+      // Fixed-pixel nudge, not a flex change - shifts the rendered text
+      // within its own box without touching the column's own flex share/
+      // boundary/width, so the column's true position (and anything
+      // aligned to it, like a sibling row's matching column) is completely
+      // unaffected. Negative moves the text left, closer to the previous
+      // column, purely visually.
+      double leftShift = 0,
+    }) {
+      final align = center
+          ? pw.TextAlign.center
+          : (right ? pw.TextAlign.right : pw.TextAlign.left);
+      return pw.Expanded(
+        flex: (flex * 10).round(),
+        child: pw.Padding(
+          padding: pw.EdgeInsets.only(left: 1 + leftShift, right: 1),
+          child: pw.Text(
+            text,
+            textAlign: align,
+            style: pw.TextStyle(
+              fontSize: fontSize,
+              fontWeight: bold ? pw.FontWeight.bold : null,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // One full row of the item table's top line (SN/ITEM/QTY/RATE) or
+    // bottom line (blank/UNIT/VAT %/VALUE). Built as two independent
+    // pw.Rows rather than stacking a top+bottom pw.Text inside each
+    // column: when the ITEM name wraps onto a second line, a per-column
+    // stack pushes that column's own "bottom" line down with it while its
+    // siblings (UNIT/VAT %/VALUE) stay put, throwing the whole row out of
+    // alignment. Two literal rows keep UNIT/VAT %/VALUE always on their
+    // own shared single line, however tall the ITEM row above them grows.
+    pw.Widget itemTableRow(
+      String col1,
+      String col2,
+      String col3,
+      String col4, {
+      bool bold = false,
+      bool col4Center = false,
+      // col1Flex/col2Flex are overridable per call so data rows can start
+      // ITEM closer to SN without touching the header - only their SUM
+      // matters for QTY's position, so col1Flex + col2Flex must add up to
+      // the same total (5.9) in every call. col3Flex (QTY) is shared
+      // unchanged by both header and data calls on purpose: QTY's own
+      // value must sit centered under its own "QTY" heading, which only
+      // holds if QTY's column position AND width are identical between
+      // the two rows. It was previously too narrow (0.8) for the bold
+      // "QTY" heading itself to fit on one line - widened to 1.3, with
+      // RATE/VALUE trimmed from 2.2 to 1.8 (numbers there are short) to
+      // give that width back without shrinking ITEM.
+      double col1Flex = 1,
+      double col2Flex = 4.9,
+      double col3Flex = 1.3,
+      double fontSize = 9,
+      // Fixed-pixel nudge for QTY's text only - lets data rows pull QTY's
+      // rendered value visually closer to ITEM without changing col3Flex
+      // (so QTY's column position/width, and its alignment with the
+      // header's own QTY column, stay exactly where they are).
+      double col3LeftShift = 0,
+    }) {
+      return pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          cell(col1, col1Flex, bold: bold, fontSize: fontSize),
+          cell(col2, col2Flex, bold: bold, fontSize: fontSize),
+          cell(
+            col3,
+            col3Flex,
+            bold: bold,
+            center: true,
+            fontSize: fontSize,
+            leftShift: col3LeftShift,
+          ),
+          col4Center
+              ? cell(col4, 1.8, bold: bold, center: true, fontSize: fontSize)
+              : cell(col4, 1.8, bold: bold, right: true, fontSize: fontSize),
+        ],
+      );
+    }
+
+    // The UNIT/VAT %/VALUE line specifically: UNIT and VAT % are laid out
+    // as direct siblings in one merged region (ITEM+QTY's combined flex)
+    // with only a small fixed gap between them, instead of each living in
+    // its own wide flex column - that's what keeps VAT % sitting right
+    // next to UNIT regardless of how wide the ITEM column is. VALUE stays
+    // on the same flex/alignment as RATE above it so the two line up.
+    pw.Widget unitVatValueRow(
+      String unit,
+      String vatPercent,
+      String value, {
+      bool bold = false,
+      bool col4Center = false,
+      double fontSize = 9,
+    }) {
+      final style = pw.TextStyle(
+        fontSize: fontSize,
+        fontWeight: bold ? pw.FontWeight.bold : null,
+      );
+      return pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          cell('', 1, bold: bold, fontSize: fontSize),
+          pw.Expanded(
+            flex: 62,
+            child: pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 1),
+              child: pw.Row(
+                children: [
+                  pw.Text(unit, style: style),
+                  pw.SizedBox(width: 14),
+                  // Fixed width shared between the "VAT %" heading and
+                  // every item's actual percentage, so a short value like
+                  // "5%" centers under the wider heading text instead of
+                  // just starting flush at its left edge.
+                  pw.SizedBox(
+                    width: 30,
+                    child: pw.Text(
+                      vatPercent,
+                      textAlign: pw.TextAlign.center,
+                      style: style,
                     ),
                   ),
-                ),
+                ],
               ),
-          ],
-        ),
+            ),
+          ),
+          col4Center
+              ? cell(value, 1.8, bold: bold, center: true, fontSize: fontSize)
+              : cell(value, 1.8, bold: bold, right: true, fontSize: fontSize),
+        ],
       );
     }
 
@@ -3088,14 +3178,25 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           double.infinity,
           marginLeft: 10,
           marginRight: 10,
-          marginTop: 8,
-          marginBottom: 8,
+          marginTop: 50,
+          marginBottom: 30,
         ),
         build: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
-              pw.Image(uniGasLogo, height: 60),
+              // Explicit width+height (matching the asset's ~1:1 aspect
+              // ratio) and BoxFit.contain, instead of height-only: with
+              // only height set, this pw.Column hands the Image the full
+              // page content width as its constraint, and letting the fit
+              // calculation infer the box from that (rather than a fixed
+              // width) was cropping the top of the logo.
+              pw.Image(
+                uniGasLogo,
+                width: 61,
+                height: 60,
+                fit: pw.BoxFit.contain,
+              ),
               pw.SizedBox(height: 4),
               pw.Text(
                 'UNITED GAS CO. LLC',
@@ -3193,61 +3294,76 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    itemRow([
-                      _Col('SN', 1.2, bold: true),
-                      _Col('ITEM', 2.3, bold: true),
-                      _Col('QTY', 1.4, bold: true, gapAfter: 2, center: true),
-                      _Col('UNIT', 1.4, bold: true, center: true),
-                      _Col('RATE', 1.8, bold: true, center: true),
-                      _Col('AMOUNT (AED)', 2.6, bold: true, center: true),
-                      // FTA UAE VAT requires the VAT % and VAT amount to be
-                      // shown per line item, not just as an invoice total.
-                      _Col('VAT %', 1.1, bold: true, center: true),
-                      _Col('VAT AMT (AED)', 1.8, bold: true, center: true),
-                    ]),
-                    pw.SizedBox(height: 3),
+                    // Reference format packs each item into 2 stacked
+                    // lines across 4 columns (SN | ITEM/UNIT | QTY/VAT% |
+                    // RATE/VALUE) rather than one row of 8 flat columns.
+                    // Top line (SN/ITEM/QTY/RATE) is normal weight, bottom
+                    // line (UNIT/VAT %/VALUE) is bold - same for header and
+                    // every item row. The dotted rule sits between the two
+                    // header lines, not below both.
+                    itemTableRow('SN', 'ITEM', 'QTY', 'RATE', fontSize: 8.5),
+                    pw.Row(
+                      children: [
+                        // Empty placeholder matching the SN column's own
+                        // flex share, so the dotted rule starts under ITEM
+                        // instead of under SN.
+                        pw.Expanded(flex: 10, child: pw.SizedBox()),
+                        pw.Expanded(flex: 78, child: dots()),
+                      ],
+                    ),
+                    unitVatValueRow(
+                      'UNIT',
+                      'VAT %',
+                      // Forced onto 2 lines (heading only) to match the
+                      // reference exactly, regardless of column width.
+                      // Right-aligned (not centered) so it lines up with
+                      // RATE above and the right-aligned numbers below.
+                      'VALUE\n(AED)',
+                      bold: true,
+                      // Smaller than the top header line (fontSize 8.5),
+                      // matching the same reduction applied to the value
+                      // rows' second line.
+                      fontSize: 7.5,
+                    ),
                     pw.Divider(thickness: 0.75),
-                    pw.SizedBox(height: 3),
-                    for (var item in saleItems.asMap().entries)
-                      itemRow([
-                        _Col('${item.key + 1}', 1.2),
-                        _Col(item.value.itemName, 2.3),
-                        _Col(
-                          item.value.itemQuantity,
-                          1.4,
-                          gapAfter: 2,
-                          center: true,
-                        ),
-                        _Col(item.value.itemUnit, 1.4, center: true),
-                        _Col(
-                          formatAmountInvoice(item.value.itemPrice.toString()),
-                          1.8,
-                          center: true,
-                        ),
-                        _Col(
-                          formatAmountInvoice(item.value.itemAmount.toString()),
-                          2.6,
-                          center: true,
-                        ),
-                        _Col(
-                          _selectedvatledger != 'Not Applicable'
-                              ? '${vatperc.toStringAsFixed(vatperc.truncateToDouble() == vatperc ? 0 : 2)}%'
-                              : '0%',
-                          1.1,
-                          center: true,
-                        ),
-                        _Col(
-                          formatAmountInvoice(
-                            (_selectedvatledger != 'Not Applicable'
-                                    ? item.value.itemAmount * (vatperc / 100)
-                                    : 0.0)
-                                .toString(),
-                          ),
-                          1.8,
-                          center: true,
-                        ),
-                      ]),
-                    pw.SizedBox(height: 48),
+                    pw.SizedBox(height: 2),
+                    for (var item in saleItems.asMap().entries) ...[
+                      itemTableRow(
+                        '${item.key + 1}',
+                        item.value.itemName,
+                        item.value.itemQuantity,
+                        formatAmountInvoice(item.value.itemPrice.toString()),
+                        // Item name starts closer to the SN value here
+                        // (header keeps its own default spacing). QTY's
+                        // own flex is left at the shared default so its
+                        // value stays centered under the "QTY" heading.
+                        col1Flex: 0.6,
+                        col2Flex: 5.8,
+                        // Matches the header's own top-line font size.
+                        fontSize: 8.5,
+                        // Pulls QTY's rendered value a few points closer to
+                        // ITEM, purely visually - QTY's column itself is
+                        // untouched, so it stays exactly where the header
+                        // has it.
+                        col3LeftShift: -6,
+                      ),
+                      pw.SizedBox(height: 2),
+                      unitVatValueRow(
+                        item.value.itemUnit,
+                        _selectedvatledger != 'Not Applicable'
+                            ? '${vatperc.toStringAsFixed(vatperc.truncateToDouble() == vatperc ? 0 : 2)}%'
+                            : '0%',
+                        formatAmountInvoice(item.value.itemAmount.toString()),
+                        bold: true,
+                        // Matches the header's own second-line font size.
+                        fontSize: 7.5,
+                      ),
+                      pw.SizedBox(height: 6),
+                    ],
+                    // Small gap before the totals, matching the reference's
+                    // handful of blank lines - not the large fixed filler
+                    // used elsewhere for thermal-printer last-row padding.
+                    pw.SizedBox(height: 24),
                     spaceBetweenLine(
                       'Taxable Value (AED)',
                       formatAmountInvoice(totalPriceOfItems.toString()),
@@ -3409,14 +3525,25 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     }
   }
 
+  // Drops focus before a form reset that clears _partyLedgerController's
+  // text. A single unfocus() isn't enough here: when this runs right after
+  // Navigator.pop(context) closes the success dialog, Flutter's own route
+  // focus-restoration (which reassigns focus back to whatever had it
+  // before the dialog opened - often the Party Ledger field) runs on the
+  // next frame, AFTER our synchronous unfocus() call, silently re-focusing
+  // the field and reopening its suggestions overlay. Unfocusing again in a
+  // post-frame callback wins that race.
+  void _dropFocusBeforeReset() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    });
+  }
+
   // Mirrors showSalesInvoiceDialog's "No, Thanks" reset - used after the
   // UniGas direct-print flow, which skips that dialog entirely.
   void _resetSalesInvoiceFormAfterPrint() {
-    // Drop focus first - otherwise clearing _partyLedgerController's text
-    // below while the Party Ledger TypeAheadField still has focus makes
-    // it re-run its suggestionsCallback('') (which matches everything)
-    // and pop its suggestions overlay back open right after reset.
-    FocusManager.instance.primaryFocus?.unfocus();
+    _dropFocusBeforeReset();
 
     setState(() {
       controller_narration.clear();
@@ -3473,15 +3600,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       _isFocused_narration = false;
       _isFocused_totalamt = false;
       _isFocused_vatamt = false;
-    });
-
-    // The print flow's full-screen animation dialog can restore focus to
-    // whatever field was active before it was shown once its route pops -
-    // that restoration lands a frame after the unfocus() above, so it can
-    // win the race and pop the Party Ledger suggestions back open. Unfocus
-    // again once that settles to make sure it sticks.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      FocusManager.instance.primaryFocus?.unfocus();
     });
   }
 
@@ -3985,6 +4103,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                       ElevatedButton.icon(
                         onPressed: () {
                           Navigator.pop(context);
+                          _dropFocusBeforeReset();
                           setState(() {
                             controller_narration.clear();
                             controller_refno.clear();

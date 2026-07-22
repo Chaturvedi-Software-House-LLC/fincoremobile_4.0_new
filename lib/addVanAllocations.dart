@@ -98,6 +98,11 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
   List<Map<String, dynamic>> allocations = [];
   bool isSaving = false;
   bool isLoading = true;
+  // Whether this allocation is for bulk (tanker) gas delivery - saved as
+  // "is_bulk" and read back from the "spectra_allocations" login response
+  // to drive UniGas's bulk-vs-non-bulk delivery note flow without asking
+  // the user each time in DeliveryNoteRegistration.dart.
+  bool isBulkAllocation = false;
   late SharedPreferences prefs;
   String email = "";
   int formResetKey = 0;
@@ -457,6 +462,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
       selectedCashLedger = null;
       selectedReceiptVchType = null;
       selectedSalesVchType = null;
+      isBulkAllocation = false;
 
       // This will reset Autocomplete field also
       formResetKey++;
@@ -498,6 +504,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
             (selectedCashLedger == null || selectedCashLedger!.isEmpty)
             ? null
             : selectedCashLedger,
+        "is_bulk": isBulkAllocation,
       };
 
       debugPrint("SAVE ALLOCATION URL: '$url'");
@@ -863,6 +870,8 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 18),
+          _bulkAllocationToggle(),
           const SizedBox(height: 24),
           Row(
             children: [
@@ -1451,6 +1460,63 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(15),
         borderSide: BorderSide(color: primaryColor, width: 1.4),
+      ),
+    );
+  }
+
+  Widget _bulkAllocationToggle() {
+    // Container color/border react to the current value so OFF reads as
+    // clearly "off" (neutral grey) rather than just a dim copy of ON, and
+    // an explicit ON/OFF badge removes any ambiguity from the switch alone.
+    final Color stateColor = isBulkAllocation ? primaryColor : Colors.grey;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: isBulkAllocation
+            ? primaryColor.withOpacity(0.08)
+            : Colors.grey.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: stateColor.withOpacity(0.45), width: 1.2),
+      ),
+      child: SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        activeColor: primaryColor,
+        inactiveThumbColor: Colors.grey.shade500,
+        inactiveTrackColor: Colors.grey.shade300,
+        value: isBulkAllocation,
+        onChanged: (val) => setState(() => isBulkAllocation = val),
+        title: Row(
+          children: [
+            Text(
+              'Bulk (Tanker) Delivery',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: stateColor.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                isBulkAllocation ? 'ON' : 'OFF',
+                style: GoogleFonts.poppins(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: stateColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+        subtitle: Text(
+          'Enable if this allocation is for bulk gas delivery instead of '
+          'cylinder delivery',
+          style: GoogleFonts.poppins(fontSize: 11, color: textColor.withOpacity(0.6)),
+        ),
       ),
     );
   }
