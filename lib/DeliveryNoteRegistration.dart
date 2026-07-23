@@ -10045,6 +10045,16 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                         child:
                                             bulkReceiverSignatureBytes == null
                                             ? Row(
+                                                // Top-aligned (not the Row
+                                                // default of center) so the
+                                                // icon/chevron stay pinned
+                                                // to the first line instead
+                                                // of re-centering against
+                                                // the text column once it
+                                                // wraps to 2-3 lines on
+                                                // narrower screens.
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
                                                 children: [
                                                   Container(
                                                     padding:
@@ -10077,6 +10087,15 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                       children: [
                                                         Text(
                                                           "Tap to Capture Receiver Signature",
+                                                          // No maxLines/
+                                                          // ellipsis - wraps
+                                                          // across as many
+                                                          // lines as it
+                                                          // needs instead of
+                                                          // truncating or
+                                                          // overflowing on
+                                                          // narrow screens.
+                                                          softWrap: true,
                                                           style:
                                                               GoogleFonts.poppins(
                                                                 fontSize: 13,
@@ -10087,6 +10106,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         ),
                                                         Text(
                                                           "Hand the device to the receiver to sign",
+                                                          softWrap: true,
                                                           style: GoogleFonts.poppins(
                                                             fontSize: 11,
                                                             color: Theme.of(context)
@@ -10097,6 +10117,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                       ],
                                                     ),
                                                   ),
+                                                  const SizedBox(width: 4),
                                                   const Icon(
                                                     Icons.chevron_right,
                                                   ),
@@ -10132,19 +10153,34 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         const SizedBox(
                                                           width: 6,
                                                         ),
-                                                        Text(
-                                                          "Signature captured",
-                                                          style:
-                                                              GoogleFonts.poppins(
-                                                                fontSize: 13,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                              ),
+                                                        // Flexible (not a
+                                                        // bare Text) so this
+                                                        // wraps/shrinks
+                                                        // instead of
+                                                        // overflowing into
+                                                        // "Retake" on
+                                                        // narrower screens -
+                                                        // the outer Expanded
+                                                        // only bounds the
+                                                        // whole inner Row,
+                                                        // not this Text on
+                                                        // its own.
+                                                        Flexible(
+                                                          child: Text(
+                                                            "Signature captured",
+                                                            softWrap: true,
+                                                            style: GoogleFonts.poppins(
+                                                              fontSize: 13,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                          ),
                                                         ),
                                                       ],
                                                     ),
                                                   ),
+                                                  const SizedBox(width: 8),
                                                   Text(
                                                     "Retake",
                                                     style: GoogleFonts.poppins(

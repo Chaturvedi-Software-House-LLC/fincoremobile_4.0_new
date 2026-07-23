@@ -530,7 +530,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
                   const SizedBox(height: 24),
 
                   Text(
-                    '© CSH LLC 2023-2026 • Version 4.0',
+                    '© CSH LLC 2023-2026 • Version 5.0',
                     style: GoogleFonts.poppins(
                       fontSize: 11.5,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -704,7 +704,10 @@ class _AppBottomNavState extends State<AppBottomNav> {
               Text(
                 title,
                 textAlign: TextAlign.center,
-                maxLines: 2,
+                // 1 line, not 2 - wrapping to a 2nd line was what
+                // overflowed the tile's fixed height for longer titles
+                // ("Companies", "Change Password"). Ellipsis instead.
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
                   fontSize: 12,
