@@ -62,6 +62,7 @@ dependencies:
   socket_io_client:
   pin_code_fields:
   device_info_plus:
+  sunmi_printer_plus: ^4.0.4
   mailer:
   fluttertoast:
   autocomplete_textfield:

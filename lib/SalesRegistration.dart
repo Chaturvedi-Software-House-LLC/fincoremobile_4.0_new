@@ -3349,9 +3349,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         // own flex is left at the shared default so its
                         // value stays centered under the "QTY" heading.
                         col1Flex: 0.6,
-                        col2Flex: 5.8,
+                        col2Flex: 6.0,
                         // Matches the header's own top-line font size.
-                        fontSize: 8.5,
+                        fontSize: 7.5,
                         // Pulls QTY's rendered value a few points closer to
                         // ITEM, purely visually - QTY's column itself is
                         // untouched, so it stays exactly where the header

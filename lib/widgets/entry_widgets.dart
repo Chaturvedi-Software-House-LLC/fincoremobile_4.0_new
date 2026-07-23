@@ -1,7 +1,10 @@
-import 'dart:typed_data';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:printing/printing.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:sunmi_printer_plus/sunmi_printer_plus.dart';
 import '../constants.dart';
 
 // ─── Section Header ──────────────────────────────────────────────
@@ -1502,11 +1505,19 @@ class _PrintingAnimationOverlayState extends State<_PrintingAnimationOverlay>
 }
 
 /// Plays a full-screen "document grows out, then ejects upward" animation
-/// using the ACTUAL generated PDF as the preview, then hands [pdfBytes]
-/// straight to the OS print flow (Android's print framework, where the
-/// Sunmi's built-in thermal printer should appear as a selectable
-/// target) - no share sheet involved, matching UniGas's direct-print
-/// flow.
+/// using the ACTUAL generated PDF as the preview, then prints [pdfBytes].
+///
+/// On a Sunmi device, this goes straight to the built-in thermal printer
+/// via its native SDK (sunmi_printer_plus) - no Android print dialog, no
+/// "choose a printer" step for the user. Every PDF page is rasterized to
+/// a bitmap and sent to the printer as-is, so the exact same invoice/
+/// receipt/delivery-note layout already built elsewhere in the app is
+/// reused untouched rather than re-implemented as raw print commands.
+///
+/// On any other device, or if the Sunmi print path fails for any reason
+/// (service not bound, plugin error, etc.), this falls back to the
+/// existing Android print framework flow (where the Sunmi's printer, or
+/// any other registered print service/PDF viewer, is still selectable).
 Future<void> printUniGasPdf(
   BuildContext context,
   Uint8List pdfBytes, {
@@ -1522,10 +1533,54 @@ Future<void> printUniGasPdf(
         _PrintingAnimationOverlay(pdfBytes: pdfBytes),
   );
 
+  final bool printedOnSunmi = await _tryPrintOnSunmiPrinter(pdfBytes);
+  if (printedOnSunmi) return;
+
   await Printing.layoutPdf(
     onLayout: (format) async => pdfBytes,
     name: documentName,
   );
+}
+
+/// Attempts the direct-to-Sunmi print path. Returns true only if every
+/// step (device check, printer status check, rasterizing, and sending
+/// each page) completed without error - false triggers the Android print
+/// dialog fallback in [printUniGasPdf].
+Future<bool> _tryPrintOnSunmiPrinter(Uint8List pdfBytes) async {
+  try {
+    // Only even attempt this on an actual Sunmi device - on anything else
+    // the native call would just fail anyway, and skipping it here avoids
+    // that pointless delay before falling back.
+    if (!kIsWeb && Platform.isAndroid) {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      final manufacturer = androidInfo.manufacturer.toLowerCase();
+      if (!manufacturer.contains('sunmi')) return false;
+    } else {
+      return false;
+    }
+
+    // Confirms the printer service is actually bound/responding before
+    // committing to this path - throws or returns null if the plugin/
+    // service has an issue, which is treated the same as "not available".
+    final status = await SunmiConfig.getStatus();
+    if (status == null) return false;
+
+    // 203 DPI matches standard thermal receipt printer resolution
+    // (including the Sunmi V2 Plus's built-in printer).
+    final pages = Printing.raster(pdfBytes, dpi: 203);
+    await for (final page in pages) {
+      final png = await page.toPng();
+      await SunmiPrinter.printImage(png, align: SunmiPrintAlign.CENTER);
+    }
+    await SunmiPrinter.lineWrap(3);
+    await SunmiPrinter.cutPaper();
+    return true;
+  } catch (e) {
+    debugPrint(
+      'SUNMI PRINT ERROR - falling back to Android print dialog: $e',
+    );
+    return false;
+  }
 }
 
 // ─── App-wide message banner ──────────────────────────────────────
