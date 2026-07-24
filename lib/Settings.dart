@@ -11,6 +11,7 @@ import 'SerialSelect.dart';
 import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'services/biometric_auth_service.dart';
+import 'widgets/entry_widgets.dart';
 
 class Settings extends StatefulWidget {
   Settings({Key? key}) : super(key: key);
