@@ -175,6 +175,20 @@ class _MyHomePageState extends State<SerialSelect>
     }
   }
 
+  // Safely parses a license_expiry value that may be null, the literal
+  // string "null" (from calling .toString() on an actual null), empty, or
+  // just plain malformed - returns null instead of letting DateTime.parse
+  // throw, so callers can treat "can't verify" as its own case rather than
+  // crashing.
+  DateTime? _tryParseLicenseExpiry(String? value) {
+    if (value == null || value.isEmpty || value == 'null') return null;
+    try {
+      return DateTime.parse(value);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void checkExpiryDate(String expiryDate, String serial_no) {
     final DateTime now = DateTime.now();
     final DateTime expiry = DateTime.parse(expiryDate);
@@ -363,6 +377,32 @@ class _MyHomePageState extends State<SerialSelect>
     } catch (e) {
       return Colors.grey; // fallback color
     }
+  }
+
+  // Only used from the expired-license dialog's "Got it" button when we
+  // auto-navigated here silently (single serial + single company, no
+  // serial/company picker UI for the user to fall back to) - there's
+  // nothing useful to return them to, so log them out to the Login screen
+  // instead of just dismissing the dialog back onto the silent loader.
+  Future<void> _logoutFromExpiredLicenseDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+
+    final jsonPayload = {
+      'username': username_prefs,
+      'password': password_prefs,
+      'macId': deviceIdentifier,
+    };
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    emitDeleteMyId(jsonPayload, () {
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => Login(username: '', password: '')),
+      );
+    });
   }
 
   void _showExpiredLicenseDialog(
@@ -623,7 +663,17 @@ class _MyHomePageState extends State<SerialSelect>
                       Align(
                         alignment: Alignment.center,
                         child: ElevatedButton.icon(
-                          onPressed: () => Navigator.pop(context),
+                          onPressed: () {
+                            // Single serial + single company auto-login -
+                            // there's no serial/company picker to fall
+                            // back to behind this dialog, so log out
+                            // instead of just dismissing it.
+                            if (_silentMode) {
+                              _logoutFromExpiredLicenseDialog();
+                            } else {
+                              Navigator.pop(context);
+                            }
+                          },
                           icon: const Icon(
                             Icons.check_circle_outline,
                             color: Colors.white,
@@ -2060,7 +2110,10 @@ class _MyHomePageState extends State<SerialSelect>
         _selectedadmin = myData_admin;
         admin_email = _selectedadmin[0]['email'];
         allowed_user = _selectedadmin[0]['allowed_user'].toString();
-        if (allowed_user != null || allowed_user != "null") {
+        // Was `!= null || != "null"` - always true (a string can't be both
+        // null and "null" at once), so the else branch below could never
+        // run.
+        if (allowed_user != null && allowed_user != "null") {
           int allowed_userr = 0;
           allowed_userr = int.parse(allowed_user);
           allowed_userr += 1;
@@ -2071,9 +2124,16 @@ class _MyHomePageState extends State<SerialSelect>
         }
         license_expiry = _selectedadmin[0]['license_expiry'].toString();
 
-        if (license_expiry != "null" || license_expiry != "") {
+        // Was `!= "null" || != ""` - always true, so this never actually
+        // guarded anything; a missing/invalid expiry fell straight through
+        // to DateTime.parse() and threw. _tryParseLicenseExpiry() returns
+        // null instead of throwing, and a null here is treated as "can't
+        // verify" -> blocked, same as an actually-expired license, rather
+        // than crashing or silently granting access.
+        final DateTime? expiry = _tryParseLicenseExpiry(license_expiry);
+
+        if (expiry != null) {
           DateTime today = DateTime.now();
-          DateTime expiry = DateTime.parse(license_expiry);
 
           DateTime todayDate = DateTime(today.year, today.month, today.day);
           DateTime expiryDate = DateTime(expiry.year, expiry.month, expiry.day);
@@ -2089,8 +2149,7 @@ class _MyHomePageState extends State<SerialSelect>
             if (!todayDate.isAfter(expiryDate)) {
               await fetchAllowedCompany(serial_no, username_prefs!);
 
-              DateTime dt1 = DateTime.parse(license_expiry);
-              license_expiry_text = DateFormat('dd-MMM-yyyy').format(dt1);
+              license_expiry_text = DateFormat('dd-MMM-yyyy').format(expiry);
               checkExpiryDate(license_expiry, serial_no);
             } else {
               _showExpiredLicenseDialog(context, serial_no, license_expiry);
@@ -2101,8 +2160,7 @@ class _MyHomePageState extends State<SerialSelect>
               });
             }
 
-            DateTime dt1 = DateTime.parse(license_expiry);
-            license_expiry_text = DateFormat('dd-MMM-yyyy').format(dt1);
+            license_expiry_text = DateFormat('dd-MMM-yyyy').format(expiry);
             prefs.setString("license_expiry", license_expiry);
           } else {
             setState(() {
@@ -2117,6 +2175,15 @@ class _MyHomePageState extends State<SerialSelect>
               'Authorization Error. Contact your administrator',
             );
           }
+        } else {
+          // Missing/invalid license_expiry - can't verify it, so treat the
+          // same as expired rather than crashing or granting unrestricted
+          // access.
+          _showExpiredLicenseDialog(context, serial_no, license_expiry);
+          setState(() {
+            _isVisibleCompany = false;
+            _isLoading = false;
+          });
         }
       } else {
         throw Exception('Failed to fetch data');

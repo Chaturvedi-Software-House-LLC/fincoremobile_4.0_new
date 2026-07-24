@@ -20,6 +20,7 @@ import 'PendingSalesOrderEntry.dart';
 import 'SerialSelect.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'widgets/entry_widgets.dart';
 
 List<String> months_chart = [];
@@ -1987,6 +1988,384 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     }
   }
 
+  // One label+icon+value row for the dialog's info section (e.g. "Serial
+  // No: 772976358", "Expires on: 26-Jul-2026") - same shape both dialogs
+  // use, just with different icons/colors/values.
+  Widget _licenseDialogInfoRow({
+    required String label,
+    required IconData icon,
+    required Color iconColor,
+    required String value,
+    required Color valueColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 14.5,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Icon(icon, size: 18, color: iconColor),
+            const SizedBox(width: 6),
+            Text(
+              value,
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                color: valueColor,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+      ],
+    );
+  }
+
+  // Email + website contact chips for renewal - identical to the ones on
+  // SerialSelect's expired-license dialog.
+  Widget _licenseDialogContactChips() {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(30),
+          onTap: () async {
+            final Uri emailUri = Uri(
+              scheme: 'mailto',
+              path: 'saadan@ca-eim.com',
+              query:
+                  'subject=License%20Renewal%20Request&body=Dear%20CSH%20LLC%20Support,%0A%0AMy%20license%20for%20Serial%20No%20$serial_no%20is%20expiring.%20Please%20assist%20with%20renewal.%0A%0ARegards,',
+            );
+            if (await canLaunchUrl(emailUri)) {
+              await launchUrl(emailUri);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(width: 1.3, color: Colors.teal.shade400),
+              gradient: LinearGradient(
+                colors: [
+                  Colors.teal.withValues(alpha: 0.05),
+                  Colors.teal.withValues(alpha: 0.1),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.email_outlined,
+                  size: 18,
+                  color: Colors.teal,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "saadan@ca-eim.com",
+                  style: GoogleFonts.poppins(
+                    fontSize: 13.5,
+                    color: Colors.teal.shade800,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        InkWell(
+          borderRadius: BorderRadius.circular(30),
+          onTap: () async {
+            const url = "https://cshllc.ae/contact-us/";
+            if (await canLaunchUrl(Uri.parse(url))) {
+              await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(width: 1.3, color: Colors.deepPurple.shade400),
+              gradient: LinearGradient(
+                colors: [
+                  Colors.deepPurple.withValues(alpha: 0.05),
+                  Colors.deepPurple.withValues(alpha: 0.1),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.language_rounded,
+                  size: 18,
+                  color: Colors.deepPurple,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "cshllc.ae/contact-us",
+                  style: GoogleFonts.poppins(
+                    fontSize: 13.5,
+                    color: Colors.deepPurple.shade800,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Shared layout for both license dialogs - same animated scale-in,
+  // gradient header, info rows, divider, message, contact chips and pill
+  // button as SerialSelect's expired-license dialog, just parameterized
+  // per use (title/icon/colors/message/action differ between "expired"
+  // and "expiring soon").
+  void _showStyledLicenseDialog({
+    required String title,
+    required IconData icon,
+    required List<Color> gradientColors,
+    required List<Widget> infoRows,
+    required String message,
+    required void Function(BuildContext dialogContext) onGotIt,
+    bool barrierDismissible = true,
+  }) {
+    if (!mounted) return;
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: barrierDismissible,
+      barrierLabel: '',
+      barrierColor: Colors.black.withValues(alpha: 0.4),
+      transitionDuration: const Duration(milliseconds: 400),
+      pageBuilder: (context, anim1, anim2) => const SizedBox.shrink(),
+      transitionBuilder: (context, anim1, anim2, child) {
+        final curvedValue = Curves.easeOutBack.transform(anim1.value);
+        return Transform.scale(
+          scale: curvedValue,
+          child: Opacity(
+            opacity: anim1.value,
+            child: AlertDialog(
+              elevation: 12,
+              backgroundColor: Theme.of(context).cardColor.withValues(alpha: 0.9),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+              titlePadding: EdgeInsets.zero,
+              title: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 16,
+                  horizontal: 20,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: gradientColors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(icon, color: Colors.white, size: 28),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              content: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 10),
+                      ...infoRows,
+                      const SizedBox(height: 8),
+                      Divider(thickness: 1, color: Colors.grey.shade300),
+                      const SizedBox(height: 12),
+                      Text(
+                        message,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14.5,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _licenseDialogContactChips(),
+                      const SizedBox(height: 26),
+                      Align(
+                        alignment: Alignment.center,
+                        child: ElevatedButton.icon(
+                          onPressed: () => onGotIt(context),
+                          icon: const Icon(
+                            Icons.check_circle_outline,
+                            color: Colors.white,
+                          ),
+                          label: Text(
+                            "Got it",
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 15,
+                              color: Colors.white,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: app_color,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 30,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Non-dismissible - a real hard block, matching SerialSelect's own
+  // expired-license dialog exactly (red/orange gradient, Serial No +
+  // Expired-on rows, contact chips for renewal).
+  void _showLicenseExpiredDialog() {
+    final String expiryDateText = license_expiry != null
+        ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(license_expiry!))
+        : 'Unknown';
+
+    _showStyledLicenseDialog(
+      title: "License Expired",
+      icon: Icons.warning_amber_rounded,
+      gradientColors: const [Color(0xFFF83600), Color(0xFFFE8C00)],
+      infoRows: [
+        _licenseDialogInfoRow(
+          label: "Serial No:",
+          icon: Icons.confirmation_number_outlined,
+          iconColor: Colors.deepOrange,
+          value: serial_no ?? '',
+          valueColor: Theme.of(context).colorScheme.onSurface,
+        ),
+        _licenseDialogInfoRow(
+          label: "Expired on:",
+          icon: Icons.calendar_month,
+          iconColor: Colors.redAccent,
+          value: expiryDateText,
+          valueColor: Colors.redAccent,
+        ),
+      ],
+      message:
+          "Your license has expired. To renew your access, please contact our support team below:",
+      barrierDismissible: false,
+      onGotIt: (dialogContext) {
+        Navigator.pop(dialogContext);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => SerialSelect()),
+        );
+      },
+    );
+  }
+
+  // Dismissible (unlike the expired dialog) - just a heads-up so the
+  // license doesn't lapse without warning. Shows every Dashboard load
+  // while 3 or fewer days remain, same as the hard-block check above.
+  // Same layout as the expired dialog, in an amber/orange "warning" tone
+  // instead of expired's red/orange, so the two read as related but
+  // distinct in severity.
+  void _showLicenseExpiringSoonDialog(int daysRemaining) {
+    final bool isToday = daysRemaining <= 0;
+    final String dayWord = daysRemaining == 1 ? 'day' : 'days';
+    final String expiryDateText = license_expiry != null
+        ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(license_expiry!))
+        : 'Unknown';
+
+    _showStyledLicenseDialog(
+      title: isToday ? "License Expires Today" : "License Expiring Soon",
+      icon: Icons.hourglass_bottom_rounded,
+      gradientColors: const [Colors.orangeAccent, Colors.deepOrange],
+      infoRows: [
+        _licenseDialogInfoRow(
+          label: "Serial No:",
+          icon: Icons.confirmation_number_outlined,
+          iconColor: Colors.deepOrange,
+          value: serial_no ?? '',
+          valueColor: Theme.of(context).colorScheme.onSurface,
+        ),
+        _licenseDialogInfoRow(
+          label: isToday ? "Expires:" : "Expires on:",
+          icon: Icons.calendar_month,
+          iconColor: Colors.orange,
+          value: isToday ? "Today" : expiryDateText,
+          valueColor: Colors.deepOrange,
+        ),
+        if (!isToday)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 5,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.deepOrange.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '$daysRemaining $dayWord left',
+                style: GoogleFonts.poppins(
+                  color: Colors.deepOrange,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ),
+      ],
+      message: isToday
+          ? "Your license expires today. To renew your access, please contact our support team below:"
+          : "Your license will expire soon. To renew your access, please contact our support team below:",
+      barrierDismissible: true,
+      onGotIt: (dialogContext) => Navigator.pop(dialogContext),
+    );
+  }
+
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -2039,8 +2418,54 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     /*print('token : $token');
     print('hostname : $hostname');*/
 
-    expire_date = DateTime.parse(license_expiry!);
-    isExpired = DateTime.now().isAfter(expire_date!);
+    // license_expiry can be null (fresh install, cleared prefs) - the old
+    // `DateTime.parse(license_expiry!)` would throw immediately in that
+    // case and break dashboard init entirely.
+    try {
+      expire_date = license_expiry == null || license_expiry!.isEmpty
+          ? null
+          : DateTime.parse(license_expiry!);
+    } catch (_) {
+      expire_date = null;
+    }
+
+    int? daysUntilExpiry;
+
+    if (expire_date != null) {
+      // Compare calendar dates only (matches SerialSelect's expiry check)
+      // - comparing full DateTime.now() against a midnight-valued
+      // expire_date treated the license as already expired from the very
+      // start of the expiry day itself, a full day earlier than
+      // SerialSelect's own check for the same license.
+      final DateTime today = DateTime.now();
+      final DateTime todayDate = DateTime(today.year, today.month, today.day);
+      final DateTime expiryDate = DateTime(
+        expire_date!.year,
+        expire_date!.month,
+        expire_date!.day,
+      );
+      isExpired = todayDate.isAfter(expiryDate);
+      daysUntilExpiry = expiryDate.difference(todayDate).inDays;
+    } else {
+      // Can't verify a missing/invalid expiry - treat as expired rather
+      // than silently granting unrestricted access.
+      isExpired = true;
+    }
+
+    if (isExpired && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showLicenseExpiredDialog();
+      });
+    } else if (daysUntilExpiry != null &&
+        daysUntilExpiry <= 3 &&
+        mounted) {
+      // Not expired yet, but 3 days or fewer remain - a dismissible
+      // heads-up (not a hard block) so the license doesn't lapse as a
+      // surprise.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showLicenseExpiringSoonDialog(daysUntilExpiry!);
+      });
+    }
 
     tickerProvider = this;
 
@@ -3156,23 +3581,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     ),
                   ),
                 ),*/
-            if (isExpired)
-              AlertDialog(
-                title: Text('License Expired'),
-                content: Text('Your license has expired.'),
-                actions: <Widget>[
-                  TextButton(
-                    child: Text('OK'),
-                    onPressed: () {
-                      // Navigate to another screen when the OK button is pressed
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => SerialSelect()),
-                      );
-                    },
-                  ),
-                ],
-              ),
             Visibility(
               visible: _isLoading,
               child: Container(
