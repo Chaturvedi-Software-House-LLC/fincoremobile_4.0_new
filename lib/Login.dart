@@ -526,7 +526,15 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     tickerProvider = this;
 
     if (usernamee != "null" && usernamee.isNotEmpty && usernamee != null) {
-      _login();
+      final biometricEnabled = await BiometricAuthService.instance
+          .isEnabled();
+
+      if (biometricEnabled) {
+        if (mounted) setState(() => _biometricEnabled = true);
+        await _biometricLogin();
+      } else {
+        _login();
+      }
     }
   }
 
