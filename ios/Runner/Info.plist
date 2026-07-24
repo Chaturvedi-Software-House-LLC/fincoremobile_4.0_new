@@ -5,6 +5,8 @@
 
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Fincore Go uses Face ID to let you sign in quickly and securely.</string>
 	<key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>

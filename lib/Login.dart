@@ -20,6 +20,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'widgets/entry_widgets.dart';
+import 'services/biometric_auth_service.dart';
 // import 'package:firebase_messaging/firebase_messaging.dart';
 
 class Login extends StatefulWidget {
@@ -94,6 +95,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   late String passwordd = '';
   bool remember_me = true;
+
+  bool _biometricAvailable = false;
+  bool _biometricEnabled = false;
+  bool _biometricPromptShown = false;
+  String _biometricLabel = 'Biometric';
+  bool _isBiometricAuthenticating = false;
   final _usernameFocusNode = FocusNode();
   final _passwordFocusNode = FocusNode();
   final _resetemailFocusNode = FocusNode();
@@ -202,6 +209,15 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         }
 
         prefs_login.setString('login_list', jsonString);
+
+        if (_biometricEnabled) {
+          prefs_login.setString('biometric_username', usernamee);
+          prefs_login.setString('biometric_password', passwordd);
+        }
+
+        if (!mounted) return;
+
+        await _maybeOfferBiometricEnable();
 
         if (!mounted) return;
 
@@ -397,6 +413,98 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
     return filePath;
   }*/
+
+  Future<void> _initBiometrics() async {
+    final available = await BiometricAuthService.instance.isDeviceSupported();
+    final enabled = await BiometricAuthService.instance.isEnabled();
+    final label = await BiometricAuthService.instance.biometricLabel();
+    if (!mounted) return;
+    setState(() {
+      _biometricAvailable = available;
+      _biometricEnabled = enabled;
+      _biometricLabel = label;
+    });
+  }
+
+  Future<void> _biometricLogin() async {
+    if (_isBiometricAuthenticating) return;
+    setState(() => _isBiometricAuthenticating = true);
+
+    try {
+      final ok = await BiometricAuthService.instance.authenticate(
+        reason: 'Authenticate with $_biometricLabel to sign in',
+      );
+      if (!ok) return;
+
+      final storedUsername = prefs_login.getString('biometric_username');
+      final storedPassword = prefs_login.getString('biometric_password');
+
+      if (storedUsername == null ||
+          storedUsername.isEmpty ||
+          storedPassword == null) {
+        if (mounted) {
+          showAppMessage(
+            context,
+            'No saved credentials found. Please log in manually once to enable $_biometricLabel login.',
+          );
+        }
+        return;
+      }
+
+      usernamee = storedUsername;
+      passwordd = storedPassword;
+      usernameController.text = storedUsername;
+      passwordController.text = storedPassword;
+      username_prefs = storedUsername;
+      password_prefs = storedPassword;
+
+      _login();
+    } finally {
+      if (mounted) setState(() => _isBiometricAuthenticating = false);
+    }
+  }
+
+  Future<void> _maybeOfferBiometricEnable() async {
+    if (_biometricPromptShown ||
+        _biometricEnabled ||
+        !_biometricAvailable ||
+        !mounted) {
+      return;
+    }
+    _biometricPromptShown = true;
+
+    final enable = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Enable $_biometricLabel login?'),
+        content: Text(
+          'Use $_biometricLabel to sign in faster next time instead of typing your password.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Not now'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text('Enable $_biometricLabel'),
+          ),
+        ],
+      ),
+    );
+
+    if (enable == true) {
+      final confirmed = await BiometricAuthService.instance.authenticate(
+        reason: 'Confirm $_biometricLabel to enable it for sign in',
+      );
+      if (confirmed) {
+        await BiometricAuthService.instance.setEnabled(true);
+        await prefs_login.setString('biometric_username', usernamee);
+        await prefs_login.setString('biometric_password', passwordd);
+        if (mounted) setState(() => _biometricEnabled = true);
+      }
+    }
+  }
 
   Future<void> _initSharedPreferences() async {
     fetchvanSalesSerialNumbers();
@@ -817,6 +925,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _initBiometrics();
     passwordController.addListener(_onPasswordChanged);
     resetemailController.addListener(_onResetEmailChanged);
     usernameController.text = usernamee;
@@ -1772,6 +1881,26 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                     icon: const Icon(Icons.login_rounded),
                     label: const Text('Login'),
                   ),
+            if (_biometricAvailable && _biometricEnabled) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: app_color,
+                  side: BorderSide(color: app_color),
+                  minimumSize: const Size.fromHeight(48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _isBiometricAuthenticating ? null : _biometricLogin,
+                icon: Icon(
+                  _biometricLabel == 'Face ID'
+                      ? Icons.face_retouching_natural
+                      : Icons.fingerprint,
+                ),
+                label: Text('Sign in with $_biometricLabel'),
+              ),
+            ],
           ],
         ),
       ),
