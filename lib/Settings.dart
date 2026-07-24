@@ -10,6 +10,7 @@ import 'Dashboard.dart';
 import 'SerialSelect.dart';
 import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'services/biometric_auth_service.dart';
 
 class Settings extends StatefulWidget {
   Settings({Key? key}) : super(key: key);
@@ -35,6 +36,9 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
       _canDefDateRange = true,
       _canAgeingConfig = true,
       _canFastSlowInactiveItem = true;
+  bool _biometricAvailable = false;
+  bool _biometricEnabled = false;
+  String _biometricLabel = 'Biometric';
   final TextEditingController vatController = TextEditingController();
   final TextEditingController inactivedaysController = TextEditingController();
 
@@ -136,6 +140,46 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     _scaffoldMessengerKey = GlobalKey<ScaffoldState>();
     themeController.addListener(_handleThemeChanged);
     _initSharedPreferences();
+    _initBiometricSettings();
+  }
+
+  Future<void> _initBiometricSettings() async {
+    final available = await BiometricAuthService.instance.isDeviceSupported();
+    final enabled = await BiometricAuthService.instance.isEnabled();
+    final label = await BiometricAuthService.instance.biometricLabel();
+    if (!mounted) return;
+    setState(() {
+      _biometricAvailable = available;
+      _biometricEnabled = enabled;
+      _biometricLabel = label;
+    });
+  }
+
+  Future<void> _toggleBiometric(bool enable) async {
+    if (enable) {
+      final storedUser = prefs.getString('username_remember');
+      final storedPass = prefs.getString('password_remember');
+      if (storedUser == null || storedPass == null) {
+        showAppMessage(
+          context,
+          'Please log in once with "Remember me" checked before enabling $_biometricLabel login.',
+        );
+        return;
+      }
+      final confirmed = await BiometricAuthService.instance.authenticate(
+        reason: 'Confirm $_biometricLabel to enable it for sign in',
+      );
+      if (!confirmed) return;
+      await BiometricAuthService.instance.setEnabled(true);
+      await prefs.setString('biometric_username', storedUser);
+      await prefs.setString('biometric_password', storedPass);
+    } else {
+      await BiometricAuthService.instance.setEnabled(false);
+      await prefs.remove('biometric_username');
+      await prefs.remove('biometric_password');
+    }
+    if (!mounted) return;
+    setState(() => _biometricEnabled = enable);
   }
 
   @override
@@ -274,6 +318,34 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                 ),
               ],
             ),
+
+            // ── Security ─────────────────────────────────────────────────
+            if (_biometricAvailable) const SizedBox(height: 18),
+            if (_biometricAvailable) _buildSectionLabel('Security'),
+            if (_biometricAvailable)
+              _buildSettingsGroup(
+                children: [
+                  SwitchListTile(
+                    activeColor: app_color,
+                    secondary: Icon(
+                      _biometricLabel == 'Face ID'
+                          ? Icons.face_retouching_natural
+                          : Icons.fingerprint,
+                      color: _textColor,
+                    ),
+                    title: Text(
+                      '$_biometricLabel login',
+                      style: TextStyle(color: _textColor),
+                    ),
+                    subtitle: Text(
+                      'Sign in using $_biometricLabel instead of your password',
+                      style: TextStyle(color: _mutedTextColor),
+                    ),
+                    value: _biometricEnabled,
+                    onChanged: _toggleBiometric,
+                  ),
+                ],
+              ),
 
             // ── General ──────────────────────────────────────────────────
             if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
