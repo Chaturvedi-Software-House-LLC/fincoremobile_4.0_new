@@ -230,6 +230,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   bool _isAgeingComputing = false;
   bool _isSwitchingView = false;
   List<AgeingBucket> _ageingBuckets = [];
+  List<AgeingBucket> _ageingBucketsDefaultOrder = [];
   AgeingBucket? _selectedAgeingBucket;
 
   List<Receivable_payable> filteredItems_receivable_payable =
@@ -669,28 +670,32 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               setState(() {
                                 selectedSortOption = opt['value'] as String;
                               });
-                              switch (selectedSortOption) {
-                                case 'Default':
-                                  sortByDefault();
-                                  break;
-                                case 'Newest to Oldest':
-                                  sortByDateHightoLow();
-                                  break;
-                                case 'Oldest to Newest':
-                                  sortByDateLowtoHigh();
-                                  break;
-                                case 'A->Z':
-                                  sortByAlphabetAtoZ();
-                                  break;
-                                case 'Z->A':
-                                  sortByAlphabetZtoA();
-                                  break;
-                                case 'Amount High to Low':
-                                  sortByAmountHightoLow();
-                                  break;
-                                case 'Amount Low to High':
-                                  sortByAmountLowtoHigh();
-                                  break;
+                              if (_isOutstandingListVisible && _isAgeingView) {
+                                _applyAgeingSort(selectedSortOption);
+                              } else {
+                                switch (selectedSortOption) {
+                                  case 'Default':
+                                    sortByDefault();
+                                    break;
+                                  case 'Newest to Oldest':
+                                    sortByDateHightoLow();
+                                    break;
+                                  case 'Oldest to Newest':
+                                    sortByDateLowtoHigh();
+                                    break;
+                                  case 'A->Z':
+                                    sortByAlphabetAtoZ();
+                                    break;
+                                  case 'Z->A':
+                                    sortByAlphabetZtoA();
+                                    break;
+                                  case 'Amount High to Low':
+                                    sortByAmountHightoLow();
+                                    break;
+                                  case 'Amount Low to High':
+                                    sortByAmountLowtoHigh();
+                                    break;
+                                }
                               }
                               Navigator.pop(context);
                             },
@@ -2741,10 +2746,75 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     if (mounted) {
       setState(() {
         _ageingBuckets = buckets;
+        _ageingBucketsDefaultOrder = List.from(buckets);
         _selectedAgeingBucket = null;
         _isAgeingComputing = false;
       });
     }
+  }
+
+  void _applyAgeingSort(String option) {
+    setState(() {
+      if (_selectedAgeingBucket != null) {
+        final items = _selectedAgeingBucket!.items;
+        DateTime dueOf(Receivable_payable c) =>
+            _parseDueDateSafe(c.billdate, c.duedate) ??
+            DateTime.tryParse(c.billdate) ??
+            DateTime(1900);
+        switch (option) {
+          case 'Newest to Oldest':
+            items.sort((a, b) => dueOf(b).compareTo(dueOf(a)));
+            break;
+          case 'Oldest to Newest':
+            items.sort((a, b) => dueOf(a).compareTo(dueOf(b)));
+            break;
+          case 'A->Z':
+            items.sort((a, b) => a.ledger.compareTo(b.ledger));
+            break;
+          case 'Z->A':
+            items.sort((a, b) => b.ledger.compareTo(a.ledger));
+            break;
+          case 'Amount High to Low':
+            items.sort(
+              (a, b) => b.outstanding.abs().compareTo(a.outstanding.abs()),
+            );
+            break;
+          case 'Amount Low to High':
+            items.sort(
+              (a, b) => a.outstanding.abs().compareTo(b.outstanding.abs()),
+            );
+            break;
+          case 'Default':
+          default:
+            // original fetch order is already grouped sensibly; nothing to do
+            break;
+        }
+      } else {
+        switch (option) {
+          case 'A->Z':
+            _ageingBuckets.sort((a, b) => a.label.compareTo(b.label));
+            break;
+          case 'Z->A':
+            _ageingBuckets.sort((a, b) => b.label.compareTo(a.label));
+            break;
+          case 'Amount High to Low':
+            _ageingBuckets.sort(
+              (a, b) => b.amount.abs().compareTo(a.amount.abs()),
+            );
+            break;
+          case 'Amount Low to High':
+            _ageingBuckets.sort(
+              (a, b) => a.amount.abs().compareTo(b.amount.abs()),
+            );
+            break;
+          case 'Default':
+          default:
+            // buckets have no date; restore the natural ageing-severity order
+            _ageingBuckets = List.from(_ageingBucketsDefaultOrder);
+            break;
+        }
+      }
+    });
   }
 
   Future<void> _initSharedPreferences() async {
