@@ -1433,6 +1433,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   Future<void> generateAndShareCSV_Ageing() async {
     final List<List<dynamic>> csvData = [];
 
+    final asOfDate = DateFormat('dd-MMM-yyyy').format(DateTime.now());
+    csvData.add(['Ageing As Of', asOfDate]);
+    csvData.add([]);
+
     if (_selectedAgeingBucket != null) {
       csvData.add(['Bill No', 'Bill Type', 'Due Date', 'Party Name', 'Amount']);
       for (final item in _selectedAgeingBucket!.items) {
@@ -1552,6 +1556,11 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                   fontSize: 18,
                   fontWeight: pw.FontWeight.bold,
                 ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'Ageing As Of: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}',
+                style: pw.TextStyle(fontSize: 12, font: font),
               ),
               pw.SizedBox(height: 20),
               table,
