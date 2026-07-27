@@ -2748,6 +2748,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         _ageingBuckets = buckets;
         _ageingBucketsDefaultOrder = List.from(buckets);
         _selectedAgeingBucket = null;
+        selectedSortOption = 'Default';
         _isAgeingComputing = false;
       });
     }
@@ -3189,9 +3190,12 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             _isAgeingView = togglingOn;
                             _selectedAgeingBucket = null;
                             _isSwitchingView = false;
+                            selectedSortOption = 'Default';
                           });
                           if (togglingOn) {
                             _computeAgeingBuckets();
+                          } else {
+                            sortByDefault();
                           }
                         });
                       },
@@ -4031,6 +4035,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 onTap: () {
                                   setState(() {
                                     _selectedAgeingBucket = null;
+                                    selectedSortOption = 'Default';
+                                    _ageingBuckets = List.from(
+                                      _ageingBucketsDefaultOrder,
+                                    );
                                   });
                                 },
                                 child: Padding(
@@ -4606,6 +4614,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         onTap: () {
           setState(() {
             _selectedAgeingBucket = bucket;
+            selectedSortOption = 'Default';
           });
         },
         child: Container(
