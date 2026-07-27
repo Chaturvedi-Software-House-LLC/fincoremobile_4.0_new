@@ -327,22 +327,13 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             if (_biometricAvailable)
               _buildSettingsGroup(
                 children: [
-                  SwitchListTile(
-                    activeColor: app_color,
-                    secondary: Icon(
-                      _biometricLabel == 'Face ID'
-                          ? Icons.face_retouching_natural
-                          : Icons.fingerprint,
-                      color: _textColor,
-                    ),
-                    title: Text(
-                      '$_biometricLabel login',
-                      style: TextStyle(color: _textColor),
-                    ),
-                    subtitle: Text(
-                      'Sign in using $_biometricLabel instead of your password',
-                      style: TextStyle(color: _mutedTextColor),
-                    ),
+                  _buildSwitchTile(
+                    icon: _biometricLabel == 'Face ID'
+                        ? Icons.face_retouching_natural
+                        : Icons.fingerprint,
+                    title: '$_biometricLabel login',
+                    subtitle:
+                        'Sign in using $_biometricLabel instead of your password',
                     value: _biometricEnabled,
                     onChanged: _toggleBiometric,
                   ),
@@ -663,6 +654,76 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             Icon(Icons.chevron_right_rounded, color: _mutedTextColor, size: 22),
           ],
         ),
+      ),
+    );
+  }
+
+  // Same icon-container + Poppins styling as _buildTile, but with a
+  // trailing Switch instead of a value chip/chevron - used for the
+  // biometric login row so it matches the rest of Settings instead of a
+  // plain default SwitchListTile.
+  Widget _buildSwitchTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: app_color.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: app_color, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.poppins(
+                    color: _textColor,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.poppins(
+                    color: _mutedTextColor,
+                    fontSize: 12,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Switch(
+            activeColor: app_color,
+            // Explicit off-state colors - the default (near-white thumb,
+            // light grey track) had almost no contrast against this
+            // tile's own white/light-grey card background, especially in
+            // light mode.
+            inactiveThumbColor: _isDarkMode
+                ? const Color(0xFF9CA3AF)
+                : const Color(0xFF6B7280),
+            inactiveTrackColor: _isDarkMode
+                ? const Color(0xFF374151)
+                : const Color(0xFFD1D5DB),
+            value: value,
+            onChanged: onChanged,
+          ),
+        ],
       ),
     );
   }

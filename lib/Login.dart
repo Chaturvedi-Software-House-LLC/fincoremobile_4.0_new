@@ -94,7 +94,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   bool _deviceIdentifierLoaded = false;
 
   late String passwordd = '';
-  bool remember_me = true;
 
   bool _biometricAvailable = false;
   bool _biometricEnabled = false;
@@ -194,19 +193,19 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
         final jsonString = jsonEncode(myList);
 
-        if (remember_me) {
-          prefs_login.setString('username_remember', usernamee);
-          prefs_login.setString('password_remember', passwordd);
-          prefs_login.setString('username', usernamee);
-          prefs_login.setString('password', passwordd);
-          prefs_login.remove('sync_pref');
-          prefs_login.remove('serial_no');
-        } else {
-          prefs_login.remove('username_remember');
-          prefs_login.remove('password_remember');
-          prefs_login.setString('username', usernamee);
-          prefs_login.setString('password', passwordd);
-        }
+        // "Remember me" as a user-facing toggle is gone - username/
+        // password are no longer prefilled into the form on next launch.
+        // These are still saved every time, silently, purely as the
+        // credential source Settings' biometric toggle and the post-
+        // login "Enable Face ID/Biometric?" prompt need to persist
+        // biometric_username/biometric_password - never shown back to
+        // the user or used to auto-fill/auto-submit the login form.
+        prefs_login.setString('username_remember', usernamee);
+        prefs_login.setString('password_remember', passwordd);
+        prefs_login.setString('username', usernamee);
+        prefs_login.setString('password', passwordd);
+        prefs_login.remove('sync_pref');
+        prefs_login.remove('serial_no');
 
         prefs_login.setString('login_list', jsonString);
 
@@ -473,24 +472,138 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     }
     _biometricPromptShown = true;
 
-    final enable = await showDialog<bool>(
+    final IconData biometricIcon = _biometricLabel == 'Face ID'
+        ? Icons.face_retouching_natural
+        : Icons.fingerprint;
+
+    final enable = await showGeneralDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Enable $_biometricLabel login?'),
-        content: Text(
-          'Use $_biometricLabel to sign in faster next time instead of typing your password.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Not now'),
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      transitionDuration: const Duration(milliseconds: 320),
+      pageBuilder: (dialogContext, anim1, anim2) => const SizedBox.shrink(),
+      transitionBuilder: (dialogContext, anim1, anim2, child) {
+        final curvedValue = Curves.easeOutBack.transform(anim1.value);
+        return Transform.scale(
+          scale: curvedValue,
+          child: Opacity(
+            opacity: anim1.value,
+            child: Center(
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: MediaQuery.of(dialogContext).size.width * 0.85,
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(dialogContext).cardColor,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 24,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [app_color, app_color.withValues(alpha: 0.7)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: Icon(biometricIcon, color: Colors.white, size: 34),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Enable $_biometricLabel login?',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Use $_biometricLabel to sign in faster next time instead of typing your password.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13.5,
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.onSurfaceVariant,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(false),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: app_color),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: Text(
+                                'Not now',
+                                style: GoogleFonts.poppins(
+                                  color: app_color,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: app_color,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: Text(
+                                'Enable',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text('Enable $_biometricLabel'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (enable == true) {
@@ -525,6 +638,11 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
     tickerProvider = this;
 
+    // "Remember me" only remembers what was typed (prefilled into the
+    // form above via initState) - it must never silently log the user
+    // in on its own. Biometric/Face ID is the only thing allowed to
+    // trigger sign-in automatically here; without it, the user always
+    // has to tap Login themselves, even with a remembered username.
     if (usernamee != "null" && usernamee.isNotEmpty && usernamee != null) {
       final biometricEnabled = await BiometricAuthService.instance
           .isEnabled();
@@ -532,8 +650,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       if (biometricEnabled) {
         if (mounted) setState(() => _biometricEnabled = true);
         await _biometricLogin();
-      } else {
-        _login();
       }
     }
   }
@@ -936,8 +1052,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     _initBiometrics();
     passwordController.addListener(_onPasswordChanged);
     resetemailController.addListener(_onResetEmailChanged);
-    usernameController.text = usernamee;
-    passwordController.text = passwordd;
+    // Fields always start blank now - "Remember me" no longer prefills
+    // them. usernamee/passwordd (passed in from a remembered login, if
+    // any) still exist as fields on this State purely so _login()'s
+    // existing same-user-vs-different-user comparison and the biometric
+    // flow keep working; they're just never written into the visible
+    // TextFields.
 
     /*FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       */ /*print('Got a message whilst in the foreground!');
@@ -1822,52 +1942,29 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                   v == null || v.isEmpty ? 'Please enter password' : null,
               onSaved: (v) => passwordd = v!,
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Checkbox(
-                    value: remember_me,
-                    activeColor: app_color,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    onChanged: (v) => setState(() => remember_me = v!),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: app_color,
+                  textStyle: GoogleFonts.poppins(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                Expanded(
-                  child: Text(
-                    'Remember me',
-                    style: GoogleFonts.poppins(
-                      fontSize: 13.5,
-                      color: const Color(0xFF46515B),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: app_color,
-                    textStyle: GoogleFonts.poppins(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      isVisibleLoginForm = false;
-                      resetemailController.text = usernameController.text;
-                      passwordController.clear();
-                      isVisibleResetPassForm = true;
-                    });
-                  },
-                  child: const Text('Forgot Password?'),
-                ),
-              ],
+                onPressed: () {
+                  setState(() {
+                    isVisibleLoginForm = false;
+                    resetemailController.text = usernameController.text;
+                    passwordController.clear();
+                    isVisibleResetPassForm = true;
+                  });
+                },
+                child: const Text('Forgot Password?'),
+              ),
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 14),
             _isLoading
                 ? SizedBox(
                     height: 52,
