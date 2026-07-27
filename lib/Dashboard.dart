@@ -150,6 +150,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
   List<double> salesDataList = [];
   List<double> recDataList = [];
+  double? _salesTrendPercent;
   late String? startdate_pref, enddate_pref;
 
   String? license_expiry;
@@ -1337,6 +1338,23 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               }
 
               generateMonthsList();
+
+              // Month-over-month trend: compare the two most recent months
+              // in the flattened series (salesDataList is stored negated for
+              // the chart's bar direction, so undo that before comparing).
+              if (salesDataList.length >= 2) {
+                final latest = salesDataList[salesDataList.length - 1].abs();
+                final previous = salesDataList[salesDataList.length - 2].abs();
+                setState(() {
+                  _salesTrendPercent = previous > 0.0001
+                      ? ((latest - previous) / previous) * 100
+                      : null;
+                });
+              } else {
+                setState(() {
+                  _salesTrendPercent = null;
+                });
+              }
             } else {
               Map<String, dynamic> data = json.decode(response_charts.body);
               String error = '';
@@ -3204,6 +3222,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                     ),
                                   );
                                 },
+                                trendPercent: _salesTrendPercent,
                               ),
 
                             if (purchase_visibility)
@@ -4010,8 +4029,9 @@ Widget _buildDecentCard(
   String label,
   String value,
   String type,
-  VoidCallback onTap,
-) {
+  VoidCallback onTap, {
+  double? trendPercent,
+}) {
   Color _getColor(String type) {
     switch (type.toLowerCase()) {
       case "sales":
@@ -4137,6 +4157,34 @@ Widget _buildDecentCard(
                     ),
                   ),
                 ),
+                if (trendPercent != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        trendPercent >= 0
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        size: 13,
+                        color: trendPercent >= 0
+                            ? Colors.green.shade600
+                            : Colors.red.shade600,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        '${trendPercent.abs().toStringAsFixed(1)}% vs last month',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: trendPercent >= 0
+                              ? Colors.green.shade600
+                              : Colors.red.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             );
           },

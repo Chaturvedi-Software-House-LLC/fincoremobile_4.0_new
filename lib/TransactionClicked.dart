@@ -595,8 +595,6 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       isUserVisible = false;
     }
 
-    showAppMessage(context, masterid);
-
     fetchData("LedgerEntry", "Bills", "Inventory", "CostCentre", masterid);
   }
 

@@ -95,6 +95,15 @@ class Sale_purc_cash {
   }
 }
 
+class TopPartyEntry {
+  final String ledger;
+  int voucherCount = 0;
+  double amount = 0;
+  final List<Sale_purc_cash> vouchers = [];
+
+  TopPartyEntry(this.ledger);
+}
+
 class LedgerEntry {
   final String ledgername;
   final double amount;
@@ -143,6 +152,91 @@ class AgeingBucket {
   AgeingBucket(this.label);
 }
 
+class _AgeingModeTabs extends StatelessWidget {
+  final bool isPartyMode;
+  final ValueChanged<bool> onChanged;
+
+  const _AgeingModeTabs({required this.isPartyMode, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : const Color(0xFFF1F4F8),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _tab(context, "Bill-wise", !isPartyMode, () => onChanged(false)),
+          ),
+          Expanded(
+            child: _tab(context, "Party-wise", isPartyMode, () => onChanged(true)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tab(
+    BuildContext context,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? app_color : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            color: selected
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AgeingBandSegment {
+  final String label;
+  final double amount;
+  final Color color;
+
+  const _AgeingBandSegment({
+    required this.label,
+    required this.amount,
+    required this.color,
+  });
+}
+
+class PartyAgeingEntry {
+  final String ledger;
+  int overdueCount = 0;
+  double overdueAmount = 0;
+  int maxDaysOverdue = 0;
+  final List<Receivable_payable> overdueBills = [];
+  // Ordered band label -> overdue amount in that band, e.g. "0-30 Days" -> 1200.0
+  final Map<String, double> bandAmounts = {};
+  List<String> bandOrder = [];
+
+  PartyAgeingEntry(this.ledger);
+}
+
 // --------------------
 // Background parsing helpers (NO UI code here)
 // --------------------
@@ -161,6 +255,14 @@ class _ReceivableTotalParsed {
   _ReceivableTotalParsed({required this.opening, required this.items});
 }
 
+// Backend subtraction of large numbers that should net to exactly zero
+// sometimes lands on floating-point noise instead (e.g. 1.7e-13), rather
+// than a clean 0. That's an effectively-settled entry, not real money —
+// filtered out here, at parse time, so every downstream consumer (list
+// display, sort, search, totals, ageing, top parties, CSV/PDF exports)
+// sees it excluded automatically instead of needing its own guard.
+bool _isNegligibleParsedAmount(double value) => value.abs() < 0.01;
+
 // ✅ Must be top-level/static for compute()
 _SalesTotalParsed _parseSalesTotalResponse(String body) {
   final Map<String, dynamic> data = jsonDecode(body) as Map<String, dynamic>;
@@ -169,6 +271,7 @@ _SalesTotalParsed _parseSalesTotalResponse(String body) {
   final List<dynamic> values = (data['values'] ?? []) as List<dynamic>;
   final items = values
       .map((e) => Sale_purc_cash.fromJson(e as Map<String, dynamic>))
+      .where((item) => !_isNegligibleParsedAmount(item.amount))
       .toList();
 
   return _SalesTotalParsed(opening: opening, items: items);
@@ -182,6 +285,7 @@ _ReceivableTotalParsed _parseReceivableTotalResponse(String body) {
   final List<dynamic> values = (data['values'] ?? []) as List<dynamic>;
   final items = values
       .map((e) => Receivable_payable.fromJson(e as Map<String, dynamic>))
+      .where((item) => !_isNegligibleParsedAmount(item.outstanding))
       .toList();
 
   return _ReceivableTotalParsed(opening: opening, items: items);
@@ -192,6 +296,7 @@ List<Sale_purc_cash> _parseReceiptPaymentResponse(String body) {
   final List<dynamic> values = jsonDecode(body) as List<dynamic>;
   return values
       .map((e) => Sale_purc_cash.fromJson(e as Map<String, dynamic>))
+      .where((item) => !_isNegligibleParsedAmount(item.amount))
       .toList();
 }
 
@@ -233,6 +338,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   List<AgeingBucket> _ageingBucketsDefaultOrder = [];
   AgeingBucket? _selectedAgeingBucket;
 
+  bool _isPartyAgeingView = false;
+  List<PartyAgeingEntry> _partyAgeing = [];
+  List<PartyAgeingEntry> _partyAgeingDefaultOrder = [];
+  PartyAgeingEntry? _selectedPartyAgeing;
+
+  bool _isTopPartiesView = false;
+  bool _isSwitchingTopPartiesView = false;
+  List<TopPartyEntry> _topParties = [];
+  List<TopPartyEntry> _topPartiesDefaultOrder = [];
+  TopPartyEntry? _selectedTopParty;
+
   List<Receivable_payable> filteredItems_receivable_payable =
       []; // Initialize an empty list to hold the filtered items
   List<Sale_purc_cash> filteredItems_sale_purc_cash = [];
@@ -270,6 +386,11 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   bool isSortVisible = false;
 
+  // Search text for the report views (Ageing / Party-wise Ageing / Top
+  // Parties) that don't have their own filteredItems_* list to mutate -
+  // these are filtered at render time instead. See _onSearchChanged.
+  String _reportSearchQuery = '';
+
   int getExtraLedgerCount(List<LedgerEntry>? ledgers, String mainLedger) {
     if (ledgers == null || ledgers.isEmpty) return 0;
 
@@ -281,6 +402,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   // 🔍 SEARCH LOGIC
   void _onSearchChanged(String query) {
     final q = query.toLowerCase();
+    setState(() {
+      _reportSearchQuery = q;
+    });
 
     if (vchtypes == "Cash" && _isLedgerGroupVisible) {
       setState(() {
@@ -328,8 +452,59 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   // 🔄 RESET SEARCH
+  // Render-time search filters for the report views that show their own
+  // computed lists (ageing buckets, party-wise ageing, top parties) rather
+  // than filteredItems_receivable_payable/filteredItems_sale_purc_cash.
+  List<Sale_purc_cash> _searchFilterVouchers(List<Sale_purc_cash> items) {
+    if (_reportSearchQuery.isEmpty) return items;
+    return items
+        .where(
+          (v) =>
+              v.vchno.toLowerCase().contains(_reportSearchQuery) ||
+              v.vchname.toLowerCase().contains(_reportSearchQuery) ||
+              v.ledger.toLowerCase().contains(_reportSearchQuery),
+        )
+        .toList();
+  }
+
+  List<Receivable_payable> _searchFilterBills(List<Receivable_payable> items) {
+    if (_reportSearchQuery.isEmpty) return items;
+    return items
+        .where(
+          (b) =>
+              b.ledger.toLowerCase().contains(_reportSearchQuery) ||
+              b.billno.toLowerCase().contains(_reportSearchQuery) ||
+              b.billtype.toLowerCase().contains(_reportSearchQuery),
+        )
+        .toList();
+  }
+
+  List<AgeingBucket> _searchFilterBuckets(List<AgeingBucket> items) {
+    if (_reportSearchQuery.isEmpty) return items;
+    return items
+        .where((b) => b.label.toLowerCase().contains(_reportSearchQuery))
+        .toList();
+  }
+
+  List<PartyAgeingEntry> _searchFilterPartyAgeing(
+    List<PartyAgeingEntry> items,
+  ) {
+    if (_reportSearchQuery.isEmpty) return items;
+    return items
+        .where((p) => p.ledger.toLowerCase().contains(_reportSearchQuery))
+        .toList();
+  }
+
+  List<TopPartyEntry> _searchFilterTopParties(List<TopPartyEntry> items) {
+    if (_reportSearchQuery.isEmpty) return items;
+    return items
+        .where((p) => p.ledger.toLowerCase().contains(_reportSearchQuery))
+        .toList();
+  }
+
   void _resetSearch() {
     setState(() {
+      _reportSearchQuery = '';
       if (vchtypes == "Receivable" || vchtypes == "Payable") {
         filteredItems_receivable_payable = List.from(receivable_payable_list);
       } else if (vchtypes == "Cash" && _isLedgerGroupVisible) {
@@ -390,6 +565,11 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   double getTotalAmount() {
     if (vchtypes == "Receivable" || vchtypes == "Payable") {
+      if (_isAgeingView &&
+          _isPartyAgeingView &&
+          _selectedPartyAgeing != null) {
+        return _selectedPartyAgeing!.overdueAmount;
+      }
       if (_isAgeingView && _selectedAgeingBucket != null) {
         return _selectedAgeingBucket!.amount;
       }
@@ -446,6 +626,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       return voucherTotal + opening;
       // return voucherTotal;
     } else {
+      if (_isTopPartiesView && _selectedTopParty != null) {
+        return _selectedTopParty!.amount;
+      }
       return filteredItems_sale_purc_cash.fold(0.0, (sum, item) {
         print("Adding Amount: ${item.amount}");
         return sum + item.amount;
@@ -670,8 +853,16 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               setState(() {
                                 selectedSortOption = opt['value'] as String;
                               });
-                              if (_isOutstandingListVisible && _isAgeingView) {
+                              if (_isOutstandingListVisible &&
+                                  _isAgeingView &&
+                                  _isPartyAgeingView) {
+                                _applyPartyAgeingSort(selectedSortOption);
+                              } else if (_isOutstandingListVisible &&
+                                  _isAgeingView) {
                                 _applyAgeingSort(selectedSortOption);
+                              } else if (_isSalesListVisible &&
+                                  _isTopPartiesView) {
+                                _applyTopPartiesSort(selectedSortOption);
                               } else {
                                 switch (selectedSortOption) {
                                   case 'Default':
@@ -1543,35 +1734,30 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     pdf.addPage(
       pw.MultiPage(
         build: (pw.Context context) => [
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Text(
-                companyName,
-                style: pw.TextStyle(
-                  fontSize: 20,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                bucket != null
-                    ? '$vchtypes Ageing Report - ${bucket.label}'
-                    : '$vchtypes Ageing Report Summary',
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.SizedBox(height: 6),
-              pw.Text(
-                'Ageing As Of: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}',
-                style: pw.TextStyle(fontSize: 12, font: font),
-              ),
-              pw.SizedBox(height: 20),
-              table,
-            ],
+          pw.Center(
+            child: pw.Text(
+              companyName,
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, font: font),
+            ),
           ),
+          pw.SizedBox(height: 10),
+          pw.Center(
+            child: pw.Text(
+              bucket != null
+                  ? '$vchtypes Ageing Report - ${bucket.label}'
+                  : '$vchtypes Ageing Report Summary',
+              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: font),
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Center(
+            child: pw.Text(
+              'Ageing As Of: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}',
+              style: pw.TextStyle(fontSize: 12, font: font),
+            ),
+          ),
+          pw.SizedBox(height: 20),
+          table,
         ],
       ),
     );
@@ -1589,6 +1775,311 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       ShareParams(
         text:
             'Sharing $vchtypes Ageing Report${bucket != null ? ' (${bucket.label})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndShareCSV_PartyAgeing() async {
+    final List<List<dynamic>> csvData = [];
+
+    final asOfDate = DateFormat('dd-MMM-yyyy').format(DateTime.now());
+    csvData.add(['Ageing As Of', asOfDate]);
+    csvData.add([]);
+
+    if (_selectedPartyAgeing != null) {
+      csvData.add(['Bill No', 'Bill Type', 'Due Date', 'Amount']);
+      for (final item in _selectedPartyAgeing!.overdueBills) {
+        csvData.add([
+          item.billno,
+          item.billtype,
+          formatDueDate(item.billdate, item.billtype, item.duedate),
+          formatAmount(item.outstanding.toString()),
+        ]);
+      }
+    } else {
+      csvData.add([
+        'Party Name',
+        'Overdue Bills',
+        'Max Days Overdue',
+        'Overdue Amount',
+      ]);
+      for (final party in _partyAgeing) {
+        csvData.add([
+          party.ledger,
+          party.overdueCount,
+          party.maxDaysOverdue,
+          formatAmount(party.overdueAmount.toString()),
+        ]);
+      }
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+
+    final tempDir = await Directory.systemTemp.createTemp();
+    final fileName = _selectedPartyAgeing != null
+        ? 'PartyAgeing_${_selectedPartyAgeing!.ledger}.csv'
+        : 'PartyAgeing_Summary.csv';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing $vchtypes Party-wise Ageing${_selectedPartyAgeing != null ? ' (${_selectedPartyAgeing!.ledger})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_PartyAgeing() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+
+    final pdf = pw.Document();
+    final companyName = company!;
+    final party = _selectedPartyAgeing;
+
+    final headers = party != null
+        ? ['Bill No', 'Bill Type', 'Due Date', 'Amount']
+        : ['Party Name', 'Overdue Bills', 'Max Days Overdue', 'Overdue Amount'];
+
+    final rows = party != null
+        ? party.overdueBills
+              .map(
+                (item) => [
+                  item.billno,
+                  item.billtype,
+                  formatDueDate(item.billdate, item.billtype, item.duedate),
+                  formatAmount(item.outstanding.toString()),
+                ],
+              )
+              .toList()
+        : _partyAgeing
+              .map(
+                (p) => [
+                  p.ledger,
+                  p.overdueCount.toString(),
+                  p.maxDaysOverdue.toString(),
+                  formatAmount(p.overdueAmount.toString()),
+                ],
+              )
+              .toList();
+
+    final table = pw.Table.fromTextArray(
+      border: pw.TableBorder.all(width: 1),
+      headerDecoration: pw.BoxDecoration(
+        borderRadius: pw.BorderRadius.circular(2),
+        color: PdfColors.grey300,
+      ),
+      headerHeight: 30,
+      cellAlignment: pw.Alignment.center,
+      cellPadding: const pw.EdgeInsets.all(5),
+      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+      cellStyle: pw.TextStyle(fontSize: 12, font: font),
+      rowDecoration: pw.BoxDecoration(
+        border: pw.Border(
+          top: pw.BorderSide(width: 1),
+          bottom: pw.BorderSide(width: 1),
+        ),
+      ),
+      headers: headers,
+      data: rows,
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        build: (pw.Context context) => [
+          pw.Center(
+            child: pw.Text(
+              companyName,
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, font: font),
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Center(
+            child: pw.Text(
+              party != null
+                  ? '$vchtypes Party-wise Ageing - ${party.ledger}'
+                  : '$vchtypes Party-wise Ageing',
+              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: font),
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Center(
+            child: pw.Text(
+              'Ageing As Of: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}',
+              style: pw.TextStyle(fontSize: 12, font: font),
+            ),
+          ),
+          pw.SizedBox(height: 20),
+          table,
+        ],
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final fileName = party != null
+        ? 'PartyAgeing_${party.ledger}.pdf'
+        : 'PartyAgeing_Summary.pdf';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing $vchtypes Party-wise Ageing${party != null ? ' (${party.ledger})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndShareCSV_TopParties() async {
+    final List<List<dynamic>> csvData = [];
+
+    if (_selectedTopParty != null) {
+      csvData.add(['Vch No', 'Vch Name', 'Vch Date', 'Amount']);
+      for (final item in _selectedTopParty!.vouchers) {
+        csvData.add([
+          item.vchno,
+          item.vchname,
+          convertDateFormat(item.vchdate),
+          formatAmount(item.amount.toString()),
+        ]);
+      }
+    } else {
+      csvData.add(['Party Name', 'No. of Vouchers', 'Amount']);
+      for (final party in _topParties) {
+        csvData.add([
+          party.ledger,
+          party.voucherCount,
+          formatAmount(party.amount.toString()),
+        ]);
+      }
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+
+    final tempDir = await Directory.systemTemp.createTemp();
+    final fileName = _selectedTopParty != null
+        ? 'TopParties_${_selectedTopParty!.ledger}.csv'
+        : 'TopParties_Summary.csv';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing Party Wise $vchtypes Summary${_selectedTopParty != null ? ' (${_selectedTopParty!.ledger})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_TopParties() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+
+    final pdf = pw.Document();
+    final companyName = company!;
+    final party = _selectedTopParty;
+
+    final headers = party != null
+        ? ['Vch No', 'Vch Name', 'Vch Date', 'Amount']
+        : ['Party Name', 'No. of Vouchers', 'Amount'];
+
+    final rows = party != null
+        ? party.vouchers
+              .map(
+                (item) => [
+                  item.vchno,
+                  item.vchname,
+                  convertDateFormat(item.vchdate),
+                  formatAmount(item.amount.toString()),
+                ],
+              )
+              .toList()
+        : _topParties
+              .map(
+                (p) => [
+                  p.ledger,
+                  p.voucherCount.toString(),
+                  formatAmount(p.amount.toString()),
+                ],
+              )
+              .toList();
+
+    final table = pw.Table.fromTextArray(
+      border: pw.TableBorder.all(width: 1),
+      headerDecoration: pw.BoxDecoration(
+        borderRadius: pw.BorderRadius.circular(2),
+        color: PdfColors.grey300,
+      ),
+      headerHeight: 30,
+      cellAlignment: pw.Alignment.center,
+      cellPadding: const pw.EdgeInsets.all(5),
+      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+      cellStyle: pw.TextStyle(fontSize: 12, font: font),
+      rowDecoration: pw.BoxDecoration(
+        border: pw.Border(
+          top: pw.BorderSide(width: 1),
+          bottom: pw.BorderSide(width: 1),
+        ),
+      ),
+      headers: headers,
+      data: rows,
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        build: (pw.Context context) => [
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text(
+                companyName,
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                party != null
+                    ? 'Party Wise $vchtypes Summary - ${party.ledger}'
+                    : 'Party Wise $vchtypes Summary',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              table,
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final fileName = party != null
+        ? 'TopParties_${party.ledger}.pdf'
+        : 'TopParties_Summary.pdf';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing Party Wise $vchtypes Summary${party != null ? ' (${party.ledger})' : ''} of $company',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -1970,6 +2461,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           }
         }
 
+        if (_isTopPartiesView) {
+          _computeTopParties();
+        }
+
         return;
       }
 
@@ -2193,6 +2688,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         }
         if (_isAgeingView) {
           _computeAgeingBuckets();
+          if (_isPartyAgeingView) {
+            _computePartyAgeing();
+          }
         }
         return;
       }
@@ -2558,13 +3056,12 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   String convertDateFormat(String dateStr) {
-    // Parse the input date string
-    DateTime date = DateTime.parse(dateStr);
-
-    // Format the date to the desired output format
-    String formattedDate = DateFormat("dd-MMM-yyyy").format(date);
-
-    return formattedDate;
+    try {
+      final date = DateTime.parse(dateStr);
+      return DateFormat("dd-MMM-yyyy").format(date);
+    } catch (_) {
+      return dateStr;
+    }
   }
 
   String formatDueDate(String billdate, String type, String duedate) {
@@ -2651,6 +3148,19 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     return formattedDate;
   }
 
+  // A single corrupted API value (e.g. a garbled outstanding amount) can
+  // otherwise inflate an entire summary total into an absurd figure. Bills
+  // beyond this are excluded from sums/rankings, but still shown as-is in
+  // any bill-level drill-down so the bad record stays visible for review.
+  bool _isPlausibleAmount(double value) => value.abs() < 1e12;
+
+  // Backend subtraction of large numbers that should net to exactly zero
+  // sometimes lands on floating-point noise instead (e.g. 1.7e-13). That's
+  // effectively a settled/zero bill, not real outstanding money — below one
+  // currency cent it should be treated as zero and skipped entirely rather
+  // than counted as an open bill.
+  bool _isNegligibleAmount(double value) => value.abs() < 0.01;
+
   DateTime? _parseDueDateSafe(String billdate, String duedate) {
     if (duedate == 'null' || duedate.isEmpty) return null;
     try {
@@ -2686,7 +3196,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     final h5 = int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
 
     final notDue = AgeingBucket('Not Due');
-    final b1 = AgeingBucket('1-$h1 Days');
+    final b1 = AgeingBucket('0-$h1 Days');
     final b2 = AgeingBucket('$h1-$h2 Days');
     final b3 = AgeingBucket('$h2-$h3 Days');
     final b4 = AgeingBucket('$h3-$h4 Days');
@@ -2697,9 +3207,15 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     final today = DateTime.now();
 
     for (final card in filteredItems_receivable_payable) {
+      // Effectively settled (floating-point noise from the backend) -
+      // not a real outstanding bill, so don't count it at all.
+      if (_isNegligibleAmount(card.outstanding)) continue;
+
+      final plausible = _isPlausibleAmount(card.outstanding);
+
       if (card.billtype != 'Agst Ref' && card.billtype != 'New Ref') {
         others.count++;
-        others.amount += card.outstanding;
+        if (plausible) others.amount += card.outstanding;
         others.items.add(card);
         continue;
       }
@@ -2707,7 +3223,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       final dueDate = _parseDueDateSafe(card.billdate, card.duedate);
       if (dueDate == null) {
         others.count++;
-        others.amount += card.outstanding;
+        if (plausible) others.amount += card.outstanding;
         others.items.add(card);
         continue;
       }
@@ -2735,7 +3251,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       }
 
       bucket.count++;
-      bucket.amount += card.outstanding;
+      if (plausible) bucket.amount += card.outstanding;
       bucket.items.add(card);
     }
 
@@ -2752,6 +3268,220 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         _isAgeingComputing = false;
       });
     }
+  }
+
+  Future<void> _computePartyAgeing() async {
+    final ageingPrefs = await SharedPreferences.getInstance();
+    final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
+    final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
+    final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
+    final h4 = int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
+    final h5 = int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
+
+    final bandOrder = [
+      '0-$h1 Days',
+      '$h1-$h2 Days',
+      '$h2-$h3 Days',
+      '$h3-$h4 Days',
+      '$h4-$h5 Days',
+      '$h5+ Days',
+    ];
+
+    String bandFor(int daysOverdue) {
+      if (daysOverdue <= h1) return bandOrder[0];
+      if (daysOverdue <= h2) return bandOrder[1];
+      if (daysOverdue <= h3) return bandOrder[2];
+      if (daysOverdue <= h4) return bandOrder[3];
+      if (daysOverdue <= h5) return bandOrder[4];
+      return bandOrder[5];
+    }
+
+    final Map<String, PartyAgeingEntry> byLedger = {};
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+
+    for (final card in filteredItems_receivable_payable) {
+      if (_isNegligibleAmount(card.outstanding)) continue;
+      if (card.billtype != 'Agst Ref' && card.billtype != 'New Ref') continue;
+
+      final dueDate = _parseDueDateSafe(card.billdate, card.duedate);
+      if (dueDate == null) continue;
+
+      final daysOverdue = todayDate
+          .difference(DateTime(dueDate.year, dueDate.month, dueDate.day))
+          .inDays;
+      if (daysOverdue <= 0) continue;
+
+      final entry = byLedger.putIfAbsent(
+        card.ledger,
+        () => PartyAgeingEntry(card.ledger)..bandOrder = bandOrder,
+      );
+      entry.overdueCount++;
+      entry.overdueBills.add(card);
+      if (daysOverdue > entry.maxDaysOverdue) {
+        entry.maxDaysOverdue = daysOverdue;
+      }
+
+      if (_isPlausibleAmount(card.outstanding)) {
+        entry.overdueAmount += card.outstanding;
+        final band = bandFor(daysOverdue);
+        entry.bandAmounts[band] =
+            (entry.bandAmounts[band] ?? 0) + card.outstanding.abs();
+      } else {
+        print(
+          'Skipping implausible outstanding value for ${card.ledger} bill ${card.billno}: ${card.outstanding}',
+        );
+      }
+    }
+
+    final parties = byLedger.values.toList()
+      ..sort((a, b) => b.overdueAmount.abs().compareTo(a.overdueAmount.abs()));
+
+    if (mounted) {
+      setState(() {
+        _partyAgeing = parties;
+        _partyAgeingDefaultOrder = List.from(parties);
+        _selectedPartyAgeing = null;
+      });
+    }
+  }
+
+  void _applyPartyAgeingSort(String option) {
+    setState(() {
+      if (_selectedPartyAgeing != null) {
+        final bills = _selectedPartyAgeing!.overdueBills;
+        switch (option) {
+          case 'A->Z':
+            bills.sort((a, b) => a.billno.compareTo(b.billno));
+            break;
+          case 'Z->A':
+            bills.sort((a, b) => b.billno.compareTo(a.billno));
+            break;
+          case 'Amount High to Low':
+            bills.sort(
+              (a, b) => b.outstanding.abs().compareTo(a.outstanding.abs()),
+            );
+            break;
+          case 'Amount Low to High':
+            bills.sort(
+              (a, b) => a.outstanding.abs().compareTo(b.outstanding.abs()),
+            );
+            break;
+          case 'Default':
+          default:
+            break;
+        }
+      } else {
+        switch (option) {
+          case 'A->Z':
+            _partyAgeing.sort((a, b) => a.ledger.compareTo(b.ledger));
+            break;
+          case 'Z->A':
+            _partyAgeing.sort((a, b) => b.ledger.compareTo(a.ledger));
+            break;
+          case 'Amount High to Low':
+            _partyAgeing.sort(
+              (a, b) =>
+                  b.overdueAmount.abs().compareTo(a.overdueAmount.abs()),
+            );
+            break;
+          case 'Amount Low to High':
+            _partyAgeing.sort(
+              (a, b) =>
+                  a.overdueAmount.abs().compareTo(b.overdueAmount.abs()),
+            );
+            break;
+          case 'Default':
+          default:
+            _partyAgeing = List.from(_partyAgeingDefaultOrder);
+            break;
+        }
+      }
+    });
+  }
+
+  void _computeTopParties() {
+    final Map<String, TopPartyEntry> byLedger = {};
+
+    for (final card in filteredItems_sale_purc_cash) {
+      if (_isNegligibleAmount(card.amount)) continue;
+
+      final entry = byLedger.putIfAbsent(
+        card.ledger,
+        () => TopPartyEntry(card.ledger),
+      );
+      entry.voucherCount++;
+      if (_isPlausibleAmount(card.amount)) {
+        entry.amount += card.amount;
+      }
+      entry.vouchers.add(card);
+    }
+
+    final parties = byLedger.values.toList()
+      ..sort((a, b) => b.amount.abs().compareTo(a.amount.abs()));
+
+    if (mounted) {
+      setState(() {
+        _topParties = parties;
+        _topPartiesDefaultOrder = List.from(parties);
+        _selectedTopParty = null;
+        selectedSortOption = 'Default';
+      });
+    }
+  }
+
+  void _applyTopPartiesSort(String option) {
+    setState(() {
+      if (_selectedTopParty != null) {
+        final vouchers = _selectedTopParty!.vouchers;
+        switch (option) {
+          case 'Newest to Oldest':
+            vouchers.sort((a, b) => b.vchdate.compareTo(a.vchdate));
+            break;
+          case 'Oldest to Newest':
+            vouchers.sort((a, b) => a.vchdate.compareTo(b.vchdate));
+            break;
+          case 'A->Z':
+            vouchers.sort((a, b) => a.vchname.compareTo(b.vchname));
+            break;
+          case 'Z->A':
+            vouchers.sort((a, b) => b.vchname.compareTo(a.vchname));
+            break;
+          case 'Amount High to Low':
+            vouchers.sort((a, b) => b.amount.abs().compareTo(a.amount.abs()));
+            break;
+          case 'Amount Low to High':
+            vouchers.sort((a, b) => a.amount.abs().compareTo(b.amount.abs()));
+            break;
+          case 'Default':
+          default:
+            break;
+        }
+      } else {
+        switch (option) {
+          case 'A->Z':
+            _topParties.sort((a, b) => a.ledger.compareTo(b.ledger));
+            break;
+          case 'Z->A':
+            _topParties.sort((a, b) => b.ledger.compareTo(a.ledger));
+            break;
+          case 'Amount High to Low':
+            _topParties.sort(
+              (a, b) => b.amount.abs().compareTo(a.amount.abs()),
+            );
+            break;
+          case 'Amount Low to High':
+            _topParties.sort(
+              (a, b) => a.amount.abs().compareTo(b.amount.abs()),
+            );
+            break;
+          case 'Default':
+          default:
+            _topParties = List.from(_topPartiesDefaultOrder);
+            break;
+        }
+      }
+    });
   }
 
   void _applyAgeingSort(String option) {
@@ -3118,7 +3848,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
               maxWidth:
                   MediaQuery.of(context).size.width -
                   (kToolbarHeight *
-                      ((vchtypes == "Receivable" || vchtypes == "Payable")
+                      ((vchtypes == "Receivable" ||
+                              vchtypes == "Payable" ||
+                              vchtypes == "Sales" ||
+                              vchtypes == "Purchase")
                           ? 3.6
                           : 2.4)),
             ),
@@ -3174,7 +3907,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
             ),*/
             if (vchtypes == "Receivable" || vchtypes == "Payable")
               IconButton(
-                tooltip: _isAgeingView ? 'Show list' : 'Ageing report',
+                tooltip: _isAgeingView ? 'Bill List' : 'Ageing Analysis',
                 onPressed: (_isAgeingComputing || _isSwitchingView)
                     ? null
                     : () {
@@ -3189,6 +3922,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                           setState(() {
                             _isAgeingView = togglingOn;
                             _selectedAgeingBucket = null;
+                            _isPartyAgeingView = false;
+                            _selectedPartyAgeing = null;
                             _isSwitchingView = false;
                             selectedSortOption = 'Default';
                           });
@@ -3218,6 +3953,52 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                         size: 24,
                       ),
               ),
+            if (vchtypes == "Sales" || vchtypes == "Purchase")
+              IconButton(
+                tooltip: _isTopPartiesView ? 'Voucher List' : 'Party Wise Summary',
+                onPressed: _isSwitchingTopPartiesView
+                    ? null
+                    : () {
+                        setState(() {
+                          _isSwitchingTopPartiesView = true;
+                        });
+                        // ✅ keep the spinner up long enough to actually be
+                        // seen spinning, not just flash for a frame or two
+                        Future.delayed(const Duration(milliseconds: 600), () {
+                          if (!mounted) return;
+                          final togglingOn = !_isTopPartiesView;
+                          setState(() {
+                            _isTopPartiesView = togglingOn;
+                            _selectedTopParty = null;
+                            _isSwitchingTopPartiesView = false;
+                            selectedSortOption = 'Default';
+                          });
+                          if (togglingOn) {
+                            _computeTopParties();
+                          } else {
+                            sortByDefault();
+                          }
+                        });
+                      },
+                icon: _isSwitchingTopPartiesView
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        _isTopPartiesView
+                            ? Icons.list_alt_rounded
+                            : Icons.leaderboard_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+              ),
             IconButton(
               onPressed: () {
                 final RenderBox button =
@@ -3243,9 +4024,36 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (_isOutstandingListVisible && _isAgeingView) {
+                          if (_isOutstandingListVisible &&
+                              _isAgeingView &&
+                              _isPartyAgeingView) {
+                            if (_partyAgeing.isNotEmpty) {
+                              generateAndSharePDF_PartyAgeing().catchError((
+                                e,
+                              ) {
+                                print(e);
+                                showToast('Failed to generate report');
+                              });
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isOutstandingListVisible &&
+                              _isAgeingView) {
                             if (_ageingBuckets.isNotEmpty) {
-                              generateAndSharePDF_Ageing();
+                              generateAndSharePDF_Ageing().catchError((e) {
+                                print(e);
+                                showToast('Failed to generate report');
+                              });
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isSalesListVisible &&
+                              _isTopPartiesView) {
+                            if (_topParties.isNotEmpty) {
+                              generateAndSharePDF_TopParties().catchError((e) {
+                                print(e);
+                                showToast('Failed to generate report');
+                              });
                             } else {
                               showToast('Data Not Found');
                             }
@@ -3282,9 +4090,36 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (_isOutstandingListVisible && _isAgeingView) {
+                          if (_isOutstandingListVisible &&
+                              _isAgeingView &&
+                              _isPartyAgeingView) {
+                            if (_partyAgeing.isNotEmpty) {
+                              generateAndShareCSV_PartyAgeing().catchError((
+                                e,
+                              ) {
+                                print(e);
+                                showToast('Failed to generate report');
+                              });
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isOutstandingListVisible &&
+                              _isAgeingView) {
                             if (_ageingBuckets.isNotEmpty) {
-                              generateAndShareCSV_Ageing();
+                              generateAndShareCSV_Ageing().catchError((e) {
+                                print(e);
+                                showToast('Failed to generate report');
+                              });
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isSalesListVisible &&
+                              _isTopPartiesView) {
+                            if (_topParties.isNotEmpty) {
+                              generateAndShareCSV_TopParties().catchError((e) {
+                                print(e);
+                                showToast('Failed to generate report');
+                              });
                             } else {
                               showToast('Data Not Found');
                             }
@@ -3915,7 +4750,122 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             },
                           ),
 
-                        if (_isSalesListVisible)
+                        if (_isSalesListVisible && _isSwitchingTopPartiesView)
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.5,
+                            child: const Center(child: AppLogoLoader()),
+                          )
+                        else if (_isSalesListVisible &&
+                            _isTopPartiesView) ...[
+                          if (_selectedTopParty != null) ...[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  setState(() {
+                                    _selectedTopParty = null;
+                                    selectedSortOption = 'Default';
+                                    _topParties = List.from(
+                                      _topPartiesDefaultOrder,
+                                    );
+                                  });
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.arrow_back_rounded,
+                                        size: 20,
+                                        color: app_color,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _selectedTopParty!.ledger,
+                                          softWrap: true,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                            color: app_color,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Builder(
+                              builder: (context) {
+                                final visible = _searchFilterVouchers(
+                                  _selectedTopParty!.vouchers,
+                                );
+                                return ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: NeverScrollableScrollPhysics(),
+                                  itemCount: visible.length,
+                                  itemBuilder: (context, index) {
+                                    return buildModernVoucherCard(
+                                      visible[index],
+                                      index: index,
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                          ] else if (_topParties.isEmpty)
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.5,
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.inbox_rounded,
+                                      size: 40,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      "No records found",
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            Builder(
+                              builder: (context) {
+                                final visible = _searchFilterTopParties(
+                                  _topParties,
+                                );
+                                return ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: NeverScrollableScrollPhysics(),
+                                  itemCount: visible.length,
+                                  itemBuilder: (context, index) {
+                                    return buildTopPartyCard(
+                                      visible[index],
+                                      index: index,
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                        ] else if (_isSalesListVisible)
                           Column(
                             children: [
                               if (vchtypes == "Cash" && !_isLedgerGroupVisible)
@@ -4027,92 +4977,262 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               height: MediaQuery.of(context).size.height * 0.5,
                               child: const Center(child: AppLogoLoader()),
                             )
-                          else if (_selectedAgeingBucket != null) ...[
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () {
-                                  setState(() {
-                                    _selectedAgeingBucket = null;
-                                    selectedSortOption = 'Default';
-                                    _ageingBuckets = List.from(
-                                      _ageingBucketsDefaultOrder,
+                          else ...[
+                            if (_selectedAgeingBucket == null &&
+                                _selectedPartyAgeing == null)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  8,
+                                  4,
+                                  8,
+                                  4,
+                                ),
+                                child: _AgeingModeTabs(
+                                  isPartyMode: _isPartyAgeingView,
+                                  onChanged: (isPartyMode) {
+                                    setState(() {
+                                      _isPartyAgeingView = isPartyMode;
+                                      selectedSortOption = 'Default';
+                                    });
+                                    if (isPartyMode &&
+                                        _partyAgeing.isEmpty) {
+                                      _computePartyAgeing();
+                                    }
+                                  },
+                                ),
+                              ),
+                            if (_isPartyAgeingView) ...[
+                              if (_selectedPartyAgeing != null) ...[
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    8,
+                                    4,
+                                    8,
+                                    4,
+                                  ),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedPartyAgeing = null;
+                                        selectedSortOption = 'Default';
+                                        _partyAgeing = List.from(
+                                          _partyAgeingDefaultOrder,
+                                        );
+                                      });
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.arrow_back_rounded,
+                                            size: 20,
+                                            color: app_color,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              _selectedPartyAgeing!.ledger,
+                                              softWrap: true,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w700,
+                                                color: app_color,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    8,
+                                    0,
+                                    8,
+                                    8,
+                                  ),
+                                  child: buildAgeingBandStackedBar(
+                                    _selectedPartyAgeing!,
+                                  ),
+                                ),
+                                Builder(
+                                  builder: (context) {
+                                    final visible = _searchFilterBills(
+                                      _selectedPartyAgeing!.overdueBills,
                                     );
-                                  });
+                                    return ListView.builder(
+                                      shrinkWrap: true,
+                                      physics: NeverScrollableScrollPhysics(),
+                                      itemCount: visible.length,
+                                      itemBuilder: (context, index) {
+                                        return buildReceivableCard(
+                                          visible[index],
+                                          index: index,
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ] else if (_partyAgeing.isEmpty)
+                                SizedBox(
+                                  height:
+                                      MediaQuery.of(context).size.height *
+                                      0.5,
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.inbox_rounded,
+                                          size: 40,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          "No overdue parties",
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              else
+                                Builder(
+                                  builder: (context) {
+                                    final visible = _searchFilterPartyAgeing(
+                                      _partyAgeing,
+                                    );
+                                    return ListView.builder(
+                                      shrinkWrap: true,
+                                      physics: NeverScrollableScrollPhysics(),
+                                      itemCount: visible.length,
+                                      itemBuilder: (context, index) {
+                                        return buildPartyAgeingCard(
+                                          visible[index],
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                            ] else if (_selectedAgeingBucket != null) ...[
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedAgeingBucket = null;
+                                      selectedSortOption = 'Default';
+                                      _ageingBuckets = List.from(
+                                        _ageingBucketsDefaultOrder,
+                                      );
+                                    });
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.arrow_back_rounded,
+                                          size: 20,
+                                          color: app_color,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          _selectedAgeingBucket!.label,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                            color: app_color,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Builder(
+                                builder: (context) {
+                                  final visible = _searchFilterBills(
+                                    _selectedAgeingBucket!.items,
+                                  );
+                                  return ListView.builder(
+                                    shrinkWrap: true,
+                                    physics: NeverScrollableScrollPhysics(),
+                                    itemCount: visible.length,
+                                    itemBuilder: (context, index) {
+                                      return buildReceivableCard(
+                                        visible[index],
+                                        index: index,
+                                      );
+                                    },
+                                  );
                                 },
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: Row(
+                              ),
+                            ] else if (_ageingBuckets.isEmpty)
+                              SizedBox(
+                                height:
+                                    MediaQuery.of(context).size.height * 0.5,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
-                                        Icons.arrow_back_rounded,
-                                        size: 20,
-                                        color: app_color,
+                                        Icons.inbox_rounded,
+                                        size: 40,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
-                                      const SizedBox(width: 8),
+                                      const SizedBox(height: 10),
                                       Text(
-                                        _selectedAgeingBucket!.label,
+                                        "No records found",
                                         style: GoogleFonts.poppins(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w700,
-                                          color: app_color,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
+                              )
+                            else
+                              Builder(
+                                builder: (context) {
+                                  final visible = _searchFilterBuckets(
+                                    _ageingBuckets,
+                                  );
+                                  return ListView.builder(
+                                    shrinkWrap: true,
+                                    physics: NeverScrollableScrollPhysics(),
+                                    itemCount: visible.length,
+                                    itemBuilder: (context, index) {
+                                      return buildAgeingBucketCard(
+                                        visible[index],
+                                      );
+                                    },
+                                  );
+                                },
                               ),
-                            ),
-                            ListView.builder(
-                              shrinkWrap: true,
-                              physics: NeverScrollableScrollPhysics(),
-                              itemCount: _selectedAgeingBucket!.items.length,
-                              itemBuilder: (context, index) {
-                                return buildReceivableCard(
-                                  _selectedAgeingBucket!.items[index],
-                                  index: index,
-                                );
-                              },
-                            ),
-                          ] else if (_ageingBuckets.isEmpty)
-                            SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.5,
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.inbox_rounded,
-                                      size: 40,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      "No records found",
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                          else
-                            ListView.builder(
-                              shrinkWrap: true,
-                              physics: NeverScrollableScrollPhysics(),
-                              itemCount: _ageingBuckets.length,
-                              itemBuilder: (context, index) {
-                                return buildAgeingBucketCard(_ageingBuckets[index]);
-                              },
-                            ),
+                          ],
                         ] else if (_isOutstandingListVisible) ...[
                           if (isVisibleNoDataFound && !_isLoading)
                             SizedBox(
@@ -4385,29 +5505,23 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   ),
                                 ),
                               ),
+                            const SizedBox(height: 4),
+                            Text(
+                              formatAmount(card.amount.toString()),
+                              softWrap: true,
+                              style: GoogleFonts.poppins(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            formatAmount(card.amount.toString()),
-                            style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: Theme.of(context).colorScheme.onSurface,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            size: 20,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ],
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ],
                   ),
@@ -4415,95 +5529,100 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 8,
+                      vertical: 10,
                     ),
                     decoration: BoxDecoration(
                       color: _dashboardDetailSurfaceColor(),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          flex: 3,
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.teal.shade400,
-                                      Colors.teal.shade700,
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
+                        // Vch No — full row width since it's usually the longer value
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              margin: const EdgeInsets.only(top: 1),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.teal.shade400,
+                                    Colors.teal.shade700,
+                                  ],
                                 ),
-                                child: const Icon(
-                                  Icons.receipt_long_outlined,
-                                  color: Colors.white,
-                                  size: 14,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.receipt_long_outlined,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                card.vchno.isNotEmpty ? card.vchno : "-",
+                                softWrap: true,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  card.vchno.isNotEmpty ? card.vchno : "-",
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          flex: 5,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.blueGrey.shade400,
-                                      Colors.blueGrey.shade700,
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
+                        const SizedBox(height: 10),
+                        Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: Theme.of(
+                            context,
+                          ).dividerColor.withOpacity(0.3),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              margin: const EdgeInsets.only(top: 1),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.blueGrey.shade400,
+                                    Colors.blueGrey.shade700,
+                                  ],
                                 ),
-                                child: const Icon(
-                                  Icons.calendar_today_outlined,
-                                  color: Colors.white,
-                                  size: 14,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.calendar_today_outlined,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                convertDateFormat(card.vchdate),
+                                softWrap: true,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  convertDateFormat(card.vchdate),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.right,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -4598,6 +5717,212 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   // 🔹 Receivable/Payable Card
+  Widget buildAgeingBandStackedBar(PartyAgeingEntry entry) {
+    final bandColors = [
+      Colors.teal,
+      Colors.amber,
+      Colors.orange,
+      Colors.deepOrange,
+      Colors.redAccent,
+      Colors.red.shade900,
+    ];
+
+    final total = entry.overdueAmount.abs();
+    final segments = <_AgeingBandSegment>[];
+    for (var i = 0; i < entry.bandOrder.length; i++) {
+      final band = entry.bandOrder[i];
+      final amount = entry.bandAmounts[band] ?? 0;
+      if (amount <= 0.0001) continue;
+      segments.add(
+        _AgeingBandSegment(
+          label: band,
+          amount: amount,
+          color: bandColors[i % bandColors.length],
+        ),
+      );
+    }
+
+    if (segments.isEmpty || total <= 0.0001) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _dashboardDetailSurfaceColor(),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Overdue Breakdown by Ageing Band',
+            style: GoogleFonts.poppins(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 16,
+              child: Row(
+                children: segments
+                    .map(
+                      (s) => Expanded(
+                        flex: (s.amount / total * 1000).round().clamp(1, 1000),
+                        child: Container(color: s.color),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 6,
+            children: segments.map((s) {
+              final pct = (s.amount / total * 100).toStringAsFixed(0);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: s.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${s.label} ($pct%)',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildPartyAgeingCard(PartyAgeingEntry entry) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        splashColor: app_color.withOpacity(0.08),
+        onTap: () {
+          setState(() {
+            _selectedPartyAgeing = entry;
+            selectedSortOption = 'Default';
+          });
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              colors: _dashboardCardGradientColors(),
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black12.withOpacity(0.08),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+            border: Border.all(color: _dashboardCardBorderColor()),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.deepOrange.shade400,
+                        Colors.deepOrange.shade700,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26.withOpacity(0.15),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.timer_outlined,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.ledger,
+                        softWrap: true,
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${entry.overdueCount} outstanding bill${entry.overdueCount == 1 ? '' : 's'} · Overdue by up to ${entry.maxDaysOverdue} day${entry.maxDaysOverdue == 1 ? '' : 's'}',
+                        softWrap: true,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatAmount(entry.overdueAmount.toString()),
+                        softWrap: true,
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: getAmountColor(vchtypes),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget buildAgeingBucketCard(AgeingBucket bucket) {
     final bool isOverdue = bucket.label != 'Not Due' && bucket.label != 'Others';
     final MaterialColor accentColor = bucket.label == 'Not Due'
@@ -4710,6 +6035,124 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           ],
         ),
       ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildTopPartyCard(TopPartyEntry entry, {int index = 0}) {
+    final int rank = index + 1;
+    final MaterialColor rankColor = switch (rank) {
+      1 => Colors.amber,
+      2 => Colors.blueGrey,
+      3 => Colors.brown,
+      _ => Colors.indigo,
+    };
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        splashColor: app_color.withOpacity(0.08),
+        onTap: () {
+          setState(() {
+            _selectedTopParty = entry;
+            selectedSortOption = 'Default';
+          });
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              colors: _dashboardCardGradientColors(),
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black12.withOpacity(0.08),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+            border: Border.all(color: _dashboardCardBorderColor()),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [rankColor.shade400, rankColor.shade700],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26.withOpacity(0.15),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    "$rank",
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.ledger,
+                        softWrap: true,
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${entry.voucherCount} voucher${entry.voucherCount == 1 ? '' : 's'}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatAmount(entry.amount.toString()),
+                        softWrap: true,
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
