@@ -176,9 +176,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
   bool _isRefreshing = false;
 
-  int? _overdueReceivableCount;
-  int? _overduePayableCount;
-
   late String currencysymbol = '';
 
   dynamic _selecteddate = "Today";
@@ -1134,82 +1131,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     });
   }
 
-  DateTime? _tryParseOverdueDueDate(String billdate, String duedate) {
-    if (duedate == 'null' || duedate.isEmpty) return null;
-    try {
-      if (duedate.contains('Days')) {
-        final match = RegExp(r'(\d+)').firstMatch(duedate);
-        if (match == null) return null;
-        final nodays = int.parse(match.group(0)!);
-        final bill = DateTime.tryParse(billdate);
-        if (bill == null) return null;
-        return bill.add(Duration(days: nodays));
-      }
-      try {
-        return DateFormat('dd-MMM-yy').parse(duedate);
-      } catch (_) {
-        return DateTime.tryParse(duedate);
-      }
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _fetchOverdueCount({required bool isReceivable}) async {
-    try {
-      final url = Uri.parse(
-        '$hostname/api/ledger/getOutstandingOpening/$company_lowercase/$serial_no',
-      );
-      final headers = {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      };
-      final body = jsonEncode({
-        'orderby': 'ledger',
-        'startdate': startDateString,
-        'enddate': endDateString,
-        'isDebit': isReceivable ? 'true' : '',
-        'ledger': 'All Parties',
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-      if (response.statusCode != 200) return;
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final values = (data['values'] ?? []) as List<dynamic>;
-      final today = DateTime.now();
-      final todayDate = DateTime(today.year, today.month, today.day);
-
-      int count = 0;
-      for (final raw in values) {
-        final item = raw as Map<String, dynamic>;
-        final billtype = item['billtype']?.toString() ?? '';
-        if (billtype != 'Agst Ref' && billtype != 'New Ref') continue;
-
-        final due = _tryParseOverdueDueDate(
-          item['billdate']?.toString() ?? '',
-          item['duedate']?.toString() ?? '',
-        );
-        if (due == null) continue;
-
-        final dueDate = DateTime(due.year, due.month, due.day);
-        if (todayDate.isAfter(dueDate)) count++;
-      }
-
-      if (!mounted) return;
-      setState(() {
-        if (isReceivable) {
-          _overdueReceivableCount = count;
-        } else {
-          _overduePayableCount = count;
-        }
-      });
-    } catch (e) {
-      // Badge is a nice-to-have — a failed count just means no badge shows.
-      print('Overdue count fetch failed: $e');
-    }
-  }
-
   Future<void> fetchDashData(String startdate, String enddate) async {
     if (!isVisibleNoAccess) {
       setState(() {
@@ -1526,15 +1447,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
         _isLoading = false;
       });
       /*showProgressDialog_LoadData(context, _isLoading);*/
-
-      // Fire-and-forget — the badge just fills in once these resolve,
-      // it shouldn't hold up the rest of the dashboard.
-      if (receivable_visibility) {
-        _fetchOverdueCount(isReceivable: true);
-      }
-      if (payable_visibility) {
-        _fetchOverdueCount(isReceivable: false);
-      }
     }
   }
 
@@ -3376,7 +3288,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                     ),
                                   );
                                 },
-                                overdueCount: _overdueReceivableCount,
                               ),
 
                             if (payable_visibility)
@@ -3398,7 +3309,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                     ),
                                   );
                                 },
-                                overdueCount: _overduePayableCount,
                               ),
 
                             if (cash_visibility)
@@ -4100,9 +4010,8 @@ Widget _buildDecentCard(
   String label,
   String value,
   String type,
-  VoidCallback onTap, {
-  int? overdueCount,
-}) {
+  VoidCallback onTap,
+) {
   Color _getColor(String type) {
     switch (type.toLowerCase()) {
       case "sales":
@@ -4174,51 +4083,14 @@ Widget _buildDecentCard(
               children: [
                 Row(
                   children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: color.withOpacity(0.10),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(_getIcon(type), size: 20, color: color),
-                        ),
-                        if (overdueCount != null && overdueCount > 0)
-                          Positioned(
-                            right: -6,
-                            top: -6,
-                            child: Container(
-                              constraints: const BoxConstraints(
-                                minWidth: 18,
-                                minHeight: 18,
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade600,
-                                borderRadius: BorderRadius.circular(9),
-                                border: Border.all(
-                                  color: Theme.of(context).cardColor,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  overdueCount > 9 ? '9+' : '$overdueCount',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(_getIcon(type), size: 20, color: color),
                     ),
                     const Spacer(),
                     Container(
