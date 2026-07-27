@@ -228,6 +228,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   bool _isAgeingView = false;
   bool _isAgeingComputing = false;
+  bool _isSwitchingView = false;
   List<AgeingBucket> _ageingBuckets = [];
   AgeingBucket? _selectedAgeingBucket;
 
@@ -3103,19 +3104,28 @@ class _DashboardClickedPageState extends State<DashboardClicked>
             if (vchtypes == "Receivable" || vchtypes == "Payable")
               IconButton(
                 tooltip: _isAgeingView ? 'Show list' : 'Ageing report',
-                onPressed: _isAgeingComputing
+                onPressed: (_isAgeingComputing || _isSwitchingView)
                     ? null
                     : () {
-                        final togglingOn = !_isAgeingView;
                         setState(() {
-                          _isAgeingView = togglingOn;
-                          _selectedAgeingBucket = null;
+                          _isSwitchingView = true;
                         });
-                        if (togglingOn) {
-                          _computeAgeingBuckets();
-                        }
+                        // ✅ let the spinner frame paint before the heavy
+                        // list rebuild happens, so the tap feels responsive
+                        Future.delayed(const Duration(milliseconds: 50), () {
+                          if (!mounted) return;
+                          final togglingOn = !_isAgeingView;
+                          setState(() {
+                            _isAgeingView = togglingOn;
+                            _selectedAgeingBucket = null;
+                            _isSwitchingView = false;
+                          });
+                          if (togglingOn) {
+                            _computeAgeingBuckets();
+                          }
+                        });
                       },
-                icon: _isAgeingComputing
+                icon: (_isAgeingComputing || _isSwitchingView)
                     ? SizedBox(
                         width: 22,
                         height: 22,
@@ -3932,7 +3942,12 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             ],
                           ),
 
-                        if (_isOutstandingListVisible && _isAgeingView) ...[
+                        if (_isOutstandingListVisible && _isSwitchingView)
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.5,
+                            child: const Center(child: AppLogoLoader()),
+                          )
+                        else if (_isOutstandingListVisible && _isAgeingView) ...[
                           if (_isAgeingComputing)
                             SizedBox(
                               height: MediaQuery.of(context).size.height * 0.5,
