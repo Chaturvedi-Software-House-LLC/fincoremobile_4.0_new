@@ -1430,6 +1430,155 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     );
   }
 
+  Future<void> generateAndShareCSV_Ageing() async {
+    final List<List<dynamic>> csvData = [];
+
+    if (_selectedAgeingBucket != null) {
+      csvData.add(['Bill No', 'Bill Type', 'Due Date', 'Party Name', 'Amount']);
+      for (final item in _selectedAgeingBucket!.items) {
+        csvData.add([
+          item.billno,
+          item.billtype,
+          formatDueDate(item.billdate, item.billtype, item.duedate),
+          item.ledger,
+          formatAmount(item.outstanding.toString()),
+        ]);
+      }
+    } else {
+      csvData.add(['Ageing Bucket', 'No. of Bills', 'Amount']);
+      for (final bucket in _ageingBuckets) {
+        csvData.add([
+          bucket.label,
+          bucket.count,
+          formatAmount(bucket.amount.toString()),
+        ]);
+      }
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+
+    final tempDir = await Directory.systemTemp.createTemp();
+    final fileName = _selectedAgeingBucket != null
+        ? 'Ageing_${_selectedAgeingBucket!.label}.csv'
+        : 'Ageing_Summary.csv';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing $vchtypes Ageing Report${_selectedAgeingBucket != null ? ' (${_selectedAgeingBucket!.label})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_Ageing() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+
+    final pdf = pw.Document();
+    final companyName = company!;
+    final bucket = _selectedAgeingBucket;
+
+    final headers = bucket != null
+        ? ['Bill No', 'Bill Type', 'Due Date', 'Party Name', 'Amount']
+        : ['Ageing Bucket', 'No. of Bills', 'Amount'];
+
+    final rows = bucket != null
+        ? bucket.items
+              .map(
+                (item) => [
+                  item.billno,
+                  item.billtype,
+                  formatDueDate(item.billdate, item.billtype, item.duedate),
+                  item.ledger,
+                  formatAmount(item.outstanding.toString()),
+                ],
+              )
+              .toList()
+        : _ageingBuckets
+              .map(
+                (b) => [
+                  b.label,
+                  b.count.toString(),
+                  formatAmount(b.amount.toString()),
+                ],
+              )
+              .toList();
+
+    final table = pw.Table.fromTextArray(
+      border: pw.TableBorder.all(width: 1),
+      headerDecoration: pw.BoxDecoration(
+        borderRadius: pw.BorderRadius.circular(2),
+        color: PdfColors.grey300,
+      ),
+      headerHeight: 30,
+      cellAlignment: pw.Alignment.center,
+      cellPadding: const pw.EdgeInsets.all(5),
+      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+      cellStyle: pw.TextStyle(fontSize: 12, font: font),
+      rowDecoration: pw.BoxDecoration(
+        border: pw.Border(
+          top: pw.BorderSide(width: 1),
+          bottom: pw.BorderSide(width: 1),
+        ),
+      ),
+      headers: headers,
+      data: rows,
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        build: (pw.Context context) => [
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text(
+                companyName,
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                bucket != null
+                    ? '$vchtypes Ageing Report - ${bucket.label}'
+                    : '$vchtypes Ageing Report Summary',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              table,
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final fileName = bucket != null
+        ? 'Ageing_${bucket.label}.pdf'
+        : 'Ageing_Summary.pdf';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing $vchtypes Ageing Report${bucket != null ? ' (${bucket.label})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
   void fetchParentData() {
     if (vchtypes == "Sales" ||
         vchtypes == "Purchase" ||
@@ -3001,7 +3150,13 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (_isSalesListVisible &&
+                          if (_isOutstandingListVisible && _isAgeingView) {
+                            if (_ageingBuckets.isNotEmpty) {
+                              generateAndSharePDF_Ageing();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isSalesListVisible &&
                               filteredItems_sale_purc_cash.isNotEmpty) {
                             generateAndSharePDF_SalesList();
                           } else if (_isOutstandingListVisible &&
@@ -3034,7 +3189,13 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (_isSalesListVisible &&
+                          if (_isOutstandingListVisible && _isAgeingView) {
+                            if (_ageingBuckets.isNotEmpty) {
+                              generateAndShareCSV_Ageing();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isSalesListVisible &&
                               filteredItems_sale_purc_cash.isNotEmpty) {
                             generateAndShareCSV_SalesList();
                           } else if (_isOutstandingListVisible &&
