@@ -134,6 +134,15 @@ class Receivable_payable {
   }
 }
 
+class AgeingBucket {
+  final String label;
+  int count = 0;
+  double amount = 0;
+  final List<Receivable_payable> items = [];
+
+  AgeingBucket(this.label);
+}
+
 // --------------------
 // Background parsing helpers (NO UI code here)
 // --------------------
@@ -216,6 +225,11 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   bool _isLedgerGroupVisible = false;
   String? _selectedLedgerGroup;
   List<LedgerGroup> ledgerGroupList = [];
+
+  bool _isAgeingView = false;
+  bool _isAgeingComputing = false;
+  List<AgeingBucket> _ageingBuckets = [];
+  AgeingBucket? _selectedAgeingBucket;
 
   List<Receivable_payable> filteredItems_receivable_payable =
       []; // Initialize an empty list to hold the filtered items
@@ -374,6 +388,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   double getTotalAmount() {
     if (vchtypes == "Receivable" || vchtypes == "Payable") {
+      if (_isAgeingView && _selectedAgeingBucket != null) {
+        return _selectedAgeingBucket!.amount;
+      }
       double billsTotal = filteredItems_receivable_payable.fold(0.0, (
         sum,
         item,
@@ -2010,6 +2027,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
               break;
           }
         }
+        if (_isAgeingView) {
+          _computeAgeingBuckets();
+        }
         return;
       }
 
@@ -2467,6 +2487,107 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     return formattedDate;
   }
 
+  DateTime? _parseDueDateSafe(String billdate, String duedate) {
+    if (duedate == 'null' || duedate.isEmpty) return null;
+    try {
+      if (duedate.contains('Days')) {
+        final match = RegExp(r'(\d+)').firstMatch(duedate);
+        if (match == null) return null;
+        final nodays = int.parse(match.group(0)!);
+        final bill = DateTime.tryParse(billdate);
+        if (bill == null) return null;
+        return bill.add(Duration(days: nodays));
+      }
+      try {
+        return DateFormat('dd-MMM-yy').parse(duedate);
+      } catch (_) {
+        return DateTime.tryParse(duedate);
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _computeAgeingBuckets() async {
+    if (mounted) {
+      setState(() {
+        _isAgeingComputing = true;
+      });
+    }
+    final ageingPrefs = await SharedPreferences.getInstance();
+    final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
+    final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
+    final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
+    final h4 = int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
+    final h5 = int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
+
+    final notDue = AgeingBucket('Not Due');
+    final b1 = AgeingBucket('1-$h1 Days');
+    final b2 = AgeingBucket('$h1-$h2 Days');
+    final b3 = AgeingBucket('$h2-$h3 Days');
+    final b4 = AgeingBucket('$h3-$h4 Days');
+    final b5 = AgeingBucket('$h4-$h5 Days');
+    final b6 = AgeingBucket('$h5+ Days');
+    final others = AgeingBucket('Others');
+
+    final today = DateTime.now();
+
+    for (final card in filteredItems_receivable_payable) {
+      if (card.billtype != 'Agst Ref' && card.billtype != 'New Ref') {
+        others.count++;
+        others.amount += card.outstanding;
+        others.items.add(card);
+        continue;
+      }
+
+      final dueDate = _parseDueDateSafe(card.billdate, card.duedate);
+      if (dueDate == null) {
+        others.count++;
+        others.amount += card.outstanding;
+        others.items.add(card);
+        continue;
+      }
+      final daysOverdue = DateTime(
+        today.year,
+        today.month,
+        today.day,
+      ).difference(DateTime(dueDate.year, dueDate.month, dueDate.day)).inDays;
+
+      AgeingBucket bucket;
+      if (daysOverdue <= 0) {
+        bucket = notDue;
+      } else if (daysOverdue <= h1) {
+        bucket = b1;
+      } else if (daysOverdue <= h2) {
+        bucket = b2;
+      } else if (daysOverdue <= h3) {
+        bucket = b3;
+      } else if (daysOverdue <= h4) {
+        bucket = b4;
+      } else if (daysOverdue <= h5) {
+        bucket = b5;
+      } else {
+        bucket = b6;
+      }
+
+      bucket.count++;
+      bucket.amount += card.outstanding;
+      bucket.items.add(card);
+    }
+
+    final buckets = [notDue, b1, b2, b3, b4, b5, b6, others]
+        .where((b) => b.count > 0)
+        .toList();
+
+    if (mounted) {
+      setState(() {
+        _ageingBuckets = buckets;
+        _selectedAgeingBucket = null;
+        _isAgeingComputing = false;
+      });
+    }
+  }
+
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -2765,7 +2886,11 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           title: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 2.4),
+                  MediaQuery.of(context).size.width -
+                  (kToolbarHeight *
+                      ((vchtypes == "Receivable" || vchtypes == "Payable")
+                          ? 3.6
+                          : 2.4)),
             ),
             child: GestureDetector(
               onTap: () {
@@ -2785,9 +2910,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
                       ),
-                      overflow: TextOverflow.visible, // ✅ shows "..."
-                      maxLines: 1, // ✅ keeps single line
-                      softWrap: false, // ✅ prevents wrapping
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
                     ),
                   ),
                   const SizedBox(width: 4),
@@ -2817,6 +2942,40 @@ class _DashboardClickedPageState extends State<DashboardClicked>
               },
               icon: Icon(Icons.search, color: Colors.white, size: 26),
             ),*/
+            if (vchtypes == "Receivable" || vchtypes == "Payable")
+              IconButton(
+                tooltip: _isAgeingView ? 'Show list' : 'Ageing report',
+                onPressed: _isAgeingComputing
+                    ? null
+                    : () {
+                        final togglingOn = !_isAgeingView;
+                        setState(() {
+                          _isAgeingView = togglingOn;
+                          _selectedAgeingBucket = null;
+                        });
+                        if (togglingOn) {
+                          _computeAgeingBuckets();
+                        }
+                      },
+                icon: _isAgeingComputing
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        _isAgeingView
+                            ? Icons.list_alt_rounded
+                            : Icons.timelapse_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+              ),
             IconButton(
               onPressed: () {
                 final RenderBox button =
@@ -3603,7 +3762,95 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             ],
                           ),
 
-                        if (_isOutstandingListVisible) ...[
+                        if (_isOutstandingListVisible && _isAgeingView) ...[
+                          if (_isAgeingComputing)
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.5,
+                              child: const Center(child: AppLogoLoader()),
+                            )
+                          else if (_selectedAgeingBucket != null) ...[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  setState(() {
+                                    _selectedAgeingBucket = null;
+                                  });
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.arrow_back_rounded,
+                                        size: 20,
+                                        color: app_color,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _selectedAgeingBucket!.label,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: app_color,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: NeverScrollableScrollPhysics(),
+                              itemCount: _selectedAgeingBucket!.items.length,
+                              itemBuilder: (context, index) {
+                                return buildReceivableCard(
+                                  _selectedAgeingBucket!.items[index],
+                                  index: index,
+                                );
+                              },
+                            ),
+                          ] else if (_ageingBuckets.isEmpty)
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.5,
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.inbox_rounded,
+                                      size: 40,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      "No records found",
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: NeverScrollableScrollPhysics(),
+                              itemCount: _ageingBuckets.length,
+                              itemBuilder: (context, index) {
+                                return buildAgeingBucketCard(_ageingBuckets[index]);
+                              },
+                            ),
+                        ] else if (_isOutstandingListVisible) ...[
                           if (isVisibleNoDataFound && !_isLoading)
                             SizedBox(
                               height: MediaQuery.of(context).size.height * 0.5,
@@ -4088,6 +4335,122 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   // 🔹 Receivable/Payable Card
+  Widget buildAgeingBucketCard(AgeingBucket bucket) {
+    final bool isOverdue = bucket.label != 'Not Due' && bucket.label != 'Others';
+    final MaterialColor accentColor = bucket.label == 'Not Due'
+        ? Colors.teal
+        : bucket.label == 'Others'
+            ? Colors.blueGrey
+            : Colors.deepOrange;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        splashColor: app_color.withOpacity(0.08),
+        onTap: () {
+          setState(() {
+            _selectedAgeingBucket = bucket;
+          });
+        },
+        child: Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: _dashboardCardGradientColors(),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12.withOpacity(0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+        border: Border.all(color: _dashboardCardBorderColor()),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [accentColor.shade400, accentColor.shade700],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26.withOpacity(0.15),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(
+                isOverdue ? Icons.timer_outlined : Icons.check_circle_outline,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    bucket.label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${bucket.count} bill${bucket.count == 1 ? '' : 's'}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    formatAmount(bucket.amount.toString()),
+                    softWrap: true,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: getAmountColor(vchtypes),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+        ),
+      ),
+    );
+  }
+
   Widget buildReceivableCard(Receivable_payable card, {int index = 0}) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -4162,22 +4525,29 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          card.ledger,
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                          overflow: TextOverflow.visible,
-                        ),
-                      ),
-                      Text(
-                        formatAmount(card.outstanding.toString()),
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: getAmountColor(vchtypes),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              card.ledger,
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                              softWrap: true,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              formatAmount(card.outstanding.toString()),
+                              softWrap: true,
+                              style: GoogleFonts.poppins(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: getAmountColor(vchtypes),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -4186,138 +4556,153 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 8,
+                      vertical: 10,
                     ),
                     decoration: BoxDecoration(
                       color: _dashboardDetailSurfaceColor(),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          flex: 2,
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.blue.shade400,
-                                      Colors.blue.shade700,
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
+                        // Bill No — gets the full row width since it's usually the longest value
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              margin: const EdgeInsets.only(top: 1),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.blue.shade400,
+                                    Colors.blue.shade700,
+                                  ],
                                 ),
-                                child: const Icon(
-                                  Icons.confirmation_number_outlined,
-                                  color: Colors.white,
-                                  size: 14,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.confirmation_number_outlined,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                card.billno != "null" ? card.billno : "-",
+                                softWrap: true,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  card.billno != "null" ? card.billno : "-",
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          flex: 4,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.brown.shade400,
-                                      Colors.brown.shade500,
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.date_range,
-                                  color: Colors.white,
-                                  size: 14,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  card.billdate != "null"
-                                      ? formatdate(card.billdate)
-                                      : "-",
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                        const SizedBox(height: 10),
+                        Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: Theme.of(
+                            context,
+                          ).dividerColor.withOpacity(0.3),
                         ),
-                        Expanded(
-                          flex: 3,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.purple.shade400,
-                                      Colors.purple.shade700,
-                                    ],
+                        const SizedBox(height: 10),
+                        // Date + Bill type side by side
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 24,
+                                    height: 24,
+                                    margin: const EdgeInsets.only(top: 1),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          Colors.brown.shade400,
+                                          Colors.brown.shade500,
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(
+                                      Icons.date_range,
+                                      color: Colors.white,
+                                      size: 14,
+                                    ),
                                   ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.description_outlined,
-                                  color: Colors.white,
-                                  size: 14,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  card.billtype != "null" ? card.billtype : "-",
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.right,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      card.billdate != "null"
+                                          ? formatdate(card.billdate)
+                                          : "-",
+                                      softWrap: true,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurface,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 24,
+                                    height: 24,
+                                    margin: const EdgeInsets.only(top: 1),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          Colors.purple.shade400,
+                                          Colors.purple.shade700,
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(
+                                      Icons.description_outlined,
+                                      color: Colors.white,
+                                      size: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      card.billtype != "null"
+                                          ? card.billtype
+                                          : "-",
+                                      softWrap: true,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurface,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
