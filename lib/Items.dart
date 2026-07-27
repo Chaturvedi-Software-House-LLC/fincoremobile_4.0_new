@@ -72,6 +72,15 @@ class items {
   }
 }
 
+class ItemAgeingBucket {
+  final String label;
+  int count = 0;
+  double value = 0;
+  final List<items> itemsList = [];
+
+  ItemAgeingBucket(this.label);
+}
+
 String formatlastsaledate(String saledate) {
   String formated_saledate = "";
 
@@ -144,6 +153,25 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       []; // Initialize an empty list to hold the filtered items
   List<items> filteredItems_active_items =
       []; // Initialize an empty list to hold the filtered items
+
+  // Fast vs Slow Moving Summary
+  bool isClicked_movingsummary = false;
+  List<items> fastMovingSummaryList = [];
+  List<items> slowMovingSummaryList = [];
+  // null = showing the two summary cards, 'fast'/'slow' = drilled into that list
+  String? _movingSummaryDrilldown;
+  List<items> _movingSummaryFilteredDrilldown = [];
+
+  // Stock Valuation Report
+  bool isClicked_stockvaluation = false;
+  List<items> stockValuationList = [];
+  List<items> _stockValuationFiltered = [];
+
+  // Item Ageing Report
+  bool isClicked_itemageing = false;
+  List<ItemAgeingBucket> itemAgeingBuckets = [];
+  ItemAgeingBucket? _selectedItemAgeingBucket;
+  List<items> _itemAgeingFilteredDrilldown = [];
 
   String item_count = "0", token = '';
 
@@ -301,6 +329,498 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     await SharePlus.instance.share(
       ShareParams(
         text: 'Sharing Fast/Slow Moving Items Report of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndShareCSV_ItemAgeing() async {
+    final List<List<dynamic>> csvData = [];
+
+    if (_selectedItemAgeingBucket != null) {
+      csvData.add(['Item Name', 'Qty', 'Last Sale', 'Last Purchase', 'Amount']);
+      for (final item in _selectedItemAgeingBucket!.itemsList) {
+        csvData.add([
+          item.itemname,
+          removeUnit(item.c_qty),
+          formatlastsaledate(item.lastsale),
+          formatlastsaledate(item.lastpurc),
+          formatAmount(item.c_amount),
+        ]);
+      }
+    } else {
+      csvData.add(['Ageing Bucket', 'No. of Items', 'Value']);
+      for (final bucket in itemAgeingBuckets) {
+        csvData.add([
+          bucket.label,
+          bucket.count,
+          formatAmount(bucket.value.toString()),
+        ]);
+      }
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+    final tempDir = await Directory.systemTemp.createTemp();
+    final fileName = _selectedItemAgeingBucket != null
+        ? 'ItemAgeing_${_selectedItemAgeingBucket!.label}.csv'
+        : 'ItemAgeing_Summary.csv';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing Item Ageing Report${_selectedItemAgeingBucket != null ? ' (${_selectedItemAgeingBucket!.label})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_ItemAgeing() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+    final pdf = pw.Document();
+    final companyName = company!;
+    final bucket = _selectedItemAgeingBucket;
+
+    final headersRow = bucket != null
+        ? ['Item Name', 'Qty', 'Last Sale', 'Last Purchase', 'Amount']
+        : ['Ageing Bucket', 'No. of Items', 'Value'];
+
+    final rows = bucket != null
+        ? bucket.itemsList
+              .map(
+                (item) => [
+                  item.itemname,
+                  removeUnit(item.c_qty),
+                  formatlastsaledate(item.lastsale),
+                  formatlastsaledate(item.lastpurc),
+                  formatAmount(item.c_amount),
+                ],
+              )
+              .toList()
+        : itemAgeingBuckets
+              .map(
+                (b) => [
+                  b.label,
+                  b.count.toString(),
+                  formatAmount(b.value.toString()),
+                ],
+              )
+              .toList();
+
+    final itemsPerPage = 8;
+    final pageCount = (rows.length / itemsPerPage).ceil().clamp(1, 1 << 30);
+
+    for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
+      final startIndex = pageNumber * itemsPerPage;
+      final endIndex = (pageNumber + 1) * itemsPerPage;
+      final rowsSubset = rows.sublist(
+        startIndex,
+        endIndex > rows.length ? rows.length : endIndex,
+      );
+
+      final tableSubset = pw.Table.fromTextArray(
+        border: pw.TableBorder.all(width: 1),
+        headerDecoration: pw.BoxDecoration(
+          borderRadius: pw.BorderRadius.circular(2),
+          color: PdfColors.grey300,
+        ),
+        headerHeight: 30,
+        cellAlignment: pw.Alignment.center,
+        cellPadding: const pw.EdgeInsets.all(5),
+        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+        cellStyle: pw.TextStyle(fontSize: 12, font: font),
+        headers: headersRow,
+        data: rowsSubset,
+      );
+
+      pdf.addPage(
+        pw.Page(
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text(
+                companyName,
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                bucket != null
+                    ? 'Item Ageing Report - ${bucket.label}'
+                    : 'Item Ageing Report Summary',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Expanded(child: tableSubset),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final fileName = bucket != null
+        ? 'ItemAgeing_${bucket.label}.pdf'
+        : 'ItemAgeing_Summary.pdf';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            'Sharing Item Ageing Report${bucket != null ? ' (${bucket.label})' : ''} of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndShareCSV_StockValuation() async {
+    final List<List<dynamic>> csvData = [];
+    csvData.add(['Rank', 'Item Name', 'Qty', 'Rate', 'Amount']);
+
+    for (var i = 0; i < stockValuationList.length; i++) {
+      final item = stockValuationList[i];
+      csvData.add([
+        i + 1,
+        item.itemname,
+        item.c_qty,
+        formatRate_Report(item.c_rate),
+        formatAmount(item.c_amount),
+      ]);
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+    final tempDir = await Directory.systemTemp.createTemp();
+    final tempFilePath = '${tempDir.path}/StockValuation.csv';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Sharing Stock Valuation Report of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_StockValuation() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+    final pdf = pw.Document();
+    final companyName = company!;
+    final headersRow = ['Rank', 'Item Name', 'Qty', 'Rate', 'Amount'];
+
+    final itemsPerPage = 8;
+    final pageCount = (stockValuationList.length / itemsPerPage)
+        .ceil()
+        .clamp(1, 1 << 30);
+
+    for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
+      final startIndex = pageNumber * itemsPerPage;
+      final endIndex = (pageNumber + 1) * itemsPerPage;
+      final itemsSubset = stockValuationList.sublist(
+        startIndex,
+        endIndex > stockValuationList.length
+            ? stockValuationList.length
+            : endIndex,
+      );
+
+      final tableSubsetRows = itemsSubset.asMap().entries.map((entry) {
+        final item = entry.value;
+        return [
+          (startIndex + entry.key + 1).toString(),
+          item.itemname,
+          item.c_qty,
+          formatRate_Report(item.c_rate),
+          formatAmount(item.c_amount),
+        ];
+      }).toList();
+
+      final tableSubset = pw.Table.fromTextArray(
+        border: pw.TableBorder.all(width: 1),
+        headerDecoration: pw.BoxDecoration(
+          borderRadius: pw.BorderRadius.circular(2),
+          color: PdfColors.grey300,
+        ),
+        headerHeight: 30,
+        cellAlignment: pw.Alignment.center,
+        cellPadding: const pw.EdgeInsets.all(5),
+        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+        cellStyle: pw.TextStyle(fontSize: 12, font: font),
+        headers: headersRow,
+        data: tableSubsetRows,
+      );
+
+      pdf.addPage(
+        pw.Page(
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text(
+                companyName,
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'Stock Valuation Report',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Expanded(child: tableSubset),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final tempFilePath = '${tempDir.path}/StockValuation.pdf';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Sharing Stock Valuation Report of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndShareCSV_MovingSummary() async {
+    final List<List<dynamic>> csvData = [];
+
+    if (_movingSummaryDrilldown != null) {
+      final list = _movingSummaryDrilldown == 'fast'
+          ? fastMovingSummaryList
+          : slowMovingSummaryList;
+      csvData.add([
+        'Item Name',
+        'Qty',
+        'Rate',
+        'Last Sale Price',
+        'Standard Selling Price',
+        'Amount',
+      ]);
+      for (final item in list) {
+        csvData.add([
+          item.itemname,
+          item.c_qty,
+          formatRate_Report(item.c_rate),
+          formatValue(item.saleprice),
+          formatValue(item.standardprice),
+          formatAmount(item.c_amount),
+        ]);
+      }
+    } else {
+      csvData.add(['Category', 'Item Count', 'Total Value']);
+      csvData.add([
+        'Fast Moving',
+        fastMovingSummaryList.length,
+        formatAmount(_movingListTotalValue(fastMovingSummaryList).toString()),
+      ]);
+      csvData.add([
+        'Slow Moving',
+        slowMovingSummaryList.length,
+        formatAmount(_movingListTotalValue(slowMovingSummaryList).toString()),
+      ]);
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+    final tempDir = await Directory.systemTemp.createTemp();
+    final fileName = _movingSummaryDrilldown != null
+        ? '${_movingSummaryDrilldown == 'fast' ? 'FastMoving' : 'SlowMoving'}Items.csv'
+        : 'MovingSummary.csv';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Sharing Fast vs Slow Moving Summary of $company',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_MovingSummary() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+    final pdf = pw.Document();
+    final companyName = company!;
+
+    if (_movingSummaryDrilldown != null) {
+      final list = _movingSummaryDrilldown == 'fast'
+          ? fastMovingSummaryList
+          : slowMovingSummaryList;
+      final reportname = _movingSummaryDrilldown == 'fast'
+          ? 'Fast Moving Items'
+          : 'Slow Moving Items';
+      final headersRow = [
+        'Item Name',
+        'Qty',
+        'Rate',
+        'Last Sale Price',
+        'Standard Selling Price',
+        'Amount',
+      ];
+
+      final itemsPerPage = 8;
+      final pageCount = (list.length / itemsPerPage).ceil().clamp(
+        1,
+        1 << 30,
+      );
+
+      for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
+        final startIndex = pageNumber * itemsPerPage;
+        final endIndex = (pageNumber + 1) * itemsPerPage;
+        final itemsSubset = list.sublist(
+          startIndex,
+          endIndex > list.length ? list.length : endIndex,
+        );
+
+        final tableSubsetRows = itemsSubset.map((item) {
+          return [
+            item.itemname,
+            item.c_qty,
+            formatRate_Report(item.c_rate),
+            formatValue(item.saleprice),
+            formatValue(item.standardprice),
+            formatAmount(item.c_amount),
+          ];
+        }).toList();
+
+        final tableSubset = pw.Table.fromTextArray(
+          border: pw.TableBorder.all(width: 1),
+          headerDecoration: pw.BoxDecoration(
+            borderRadius: pw.BorderRadius.circular(2),
+            color: PdfColors.grey300,
+          ),
+          headerHeight: 30,
+          cellAlignment: pw.Alignment.center,
+          cellPadding: const pw.EdgeInsets.all(5),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+          cellStyle: pw.TextStyle(fontSize: 12, font: font),
+          headers: headersRow,
+          data: tableSubsetRows,
+        );
+
+        pdf.addPage(
+          pw.Page(
+            build: (context) => pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text(
+                  companyName,
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Text(
+                  reportname,
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+                pw.Expanded(child: tableSubset),
+              ],
+            ),
+          ),
+        );
+      }
+    } else {
+      final headersRow = ['Category', 'Item Count', 'Total Value'];
+      final rows = [
+        [
+          'Fast Moving',
+          fastMovingSummaryList.length.toString(),
+          formatAmount(_movingListTotalValue(fastMovingSummaryList).toString()),
+        ],
+        [
+          'Slow Moving',
+          slowMovingSummaryList.length.toString(),
+          formatAmount(_movingListTotalValue(slowMovingSummaryList).toString()),
+        ],
+      ];
+
+      final table = pw.Table.fromTextArray(
+        border: pw.TableBorder.all(width: 1),
+        headerDecoration: pw.BoxDecoration(
+          borderRadius: pw.BorderRadius.circular(2),
+          color: PdfColors.grey300,
+        ),
+        headerHeight: 30,
+        cellAlignment: pw.Alignment.center,
+        cellPadding: const pw.EdgeInsets.all(5),
+        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+        cellStyle: pw.TextStyle(fontSize: 12, font: font),
+        headers: headersRow,
+        data: rows,
+      );
+
+      pdf.addPage(
+        pw.Page(
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text(
+                companyName,
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'Fast vs Slow Moving Summary',
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              table,
+            ],
+          ),
+        ),
+      );
+    }
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final fileName = _movingSummaryDrilldown != null
+        ? '${_movingSummaryDrilldown == 'fast' ? 'FastMoving' : 'SlowMoving'}Items.pdf'
+        : 'MovingSummary.pdf';
+    final tempFilePath = '${tempDir.path}/$fileName';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Sharing Fast vs Slow Moving Summary of $company',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -737,7 +1257,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
         if (allitems_visibility) {
           fetchItemData('All Items', _selecteditem);
         } else if (fastmovingitems_visibility) {
-          fetchItemData('FastMovingItems', _selecteditem);
+          fetchMovingSummary(_selecteditem);
         } else if (inactiveitems_visibility) {
           fetchItemData('InactiveItems', _selecteditem);
         }
@@ -776,6 +1296,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       isClicked_fastmoving = false;
       isClicked_slowmoving = false;
       isClicked_inactiveitems = false;
+      isClicked_movingsummary = false;
+      isClicked_stockvaluation = false;
+      isClicked_itemageing = false;
       isVisibleNoDataFound = false;
       isVisibleFilterby = false;
     });
@@ -859,6 +1382,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       isClicked_fastmoving = true;
       isClicked_slowmoving = false;
       isClicked_inactiveitems = false;
+      isClicked_movingsummary = false;
+      isClicked_stockvaluation = false;
+      isClicked_itemageing = false;
       _isLoading = true;
       _isAllList = false;
       _isInactiveList = false;
@@ -989,6 +1515,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       isClicked_fastmoving = false;
       isClicked_slowmoving = true;
       isClicked_inactiveitems = false;
+      isClicked_movingsummary = false;
+      isClicked_stockvaluation = false;
+      isClicked_itemageing = false;
       _isLoading = true;
       _isAllList = false;
       _isInactiveList = false;
@@ -1094,6 +1623,378 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     });
   }
 
+  Future<List<items>> _fetchMovingList(
+    final String parent,
+    final String filter,
+    final String status,
+  ) async {
+    String qty = '';
+    String value = '';
+
+    if (status == 'FAST') {
+      if (filter == 'qty') qty = fastmovingqty;
+      if (filter == 'value') value = fastmovingvalue;
+    } else {
+      if (filter == 'qty') qty = slowmovingqty;
+      if (filter == 'value') value = slowmovingvalue;
+    }
+
+    final days = int.tryParse(status == 'FAST' ? fastmovingdays : slowmovingdays) ?? 0;
+    final cutoffDate = DateTime.now().subtract(Duration(days: days));
+    final formattedDate = DateFormat('yyyyMMdd').format(cutoffDate);
+
+    final url = Uri.parse(HttpURL_active_inactive_items!);
+    final headers = <String, String>{
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+    final body = jsonEncode({
+      "date": formattedDate,
+      "status": status,
+      "qty": qty,
+      "value": value,
+      "parent": parent,
+    });
+
+    final response = await http.post(url, body: body, headers: headers);
+    if (response.statusCode != 200) return [];
+
+    final List<dynamic> valuesList = jsonDecode(response.body);
+    return valuesList
+        .map((e) => items.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> fetchMovingSummary(final String parent) async {
+    setState(() {
+      item_count = "0";
+      isClicked_allitems = false;
+      isClicked_fastmoving = false;
+      isClicked_slowmoving = false;
+      isClicked_inactiveitems = false;
+      isClicked_movingsummary = true;
+      isClicked_stockvaluation = false;
+      isClicked_itemageing = false;
+      _isAllList = false;
+      _isInactiveList = false;
+      _isActiveList = false;
+      isVisibleNoDataFound = false;
+      isVisibleFilterby = true;
+      _movingSummaryDrilldown = null;
+      fastMovingSummaryList = [];
+      slowMovingSummaryList = [];
+      _movingSummaryFilteredDrilldown = [];
+      searchController.clear();
+      _isLoading = true;
+    });
+
+    final resolvedParent = parent == "All Items" ? "" : parent;
+
+    try {
+      final results = await Future.wait([
+        _fetchMovingList(resolvedParent, _selectedFilter!, 'FAST'),
+        _fetchMovingList(resolvedParent, _selectedFilter!, 'SLOW'),
+      ]);
+
+      if (!mounted) return;
+      setState(() {
+        fastMovingSummaryList = results[0];
+        slowMovingSummaryList = results[1];
+        _isLoading = false;
+        isVisibleNoDataFound =
+            fastMovingSummaryList.isEmpty && slowMovingSummaryList.isEmpty;
+      });
+    } catch (e) {
+      print(e);
+      if (!mounted) return;
+      setState(() {
+        fastMovingSummaryList = [];
+        slowMovingSummaryList = [];
+        _isLoading = false;
+        isVisibleNoDataFound = true;
+      });
+    }
+  }
+
+  double _movingListTotalValue(List<items> list) {
+    return list.fold<double>(
+      0.0,
+      (sum, item) => sum + (double.tryParse(item.c_amount) ?? 0.0),
+    );
+  }
+
+  void _onMovingSummarySearchChanged(String value) {
+    if (_movingSummaryDrilldown == null) return;
+    final query = value.toLowerCase();
+    final source = _movingSummaryDrilldown == 'fast'
+        ? fastMovingSummaryList
+        : slowMovingSummaryList;
+    setState(() {
+      _movingSummaryFilteredDrilldown = source
+          .where((e) => e.itemname.toLowerCase().contains(query))
+          .toList();
+    });
+  }
+
+  double _stockValuationTotal(List<items> list) {
+    return list.fold<double>(
+      0.0,
+      (sum, item) => sum + (double.tryParse(item.c_amount) ?? 0.0),
+    );
+  }
+
+  // Used only as the denominator for each item's "% of total" bar/label.
+  // Some items can carry a negative c_amount (e.g. write-offs/adjustments),
+  // which would shrink the signed total below an individual item's own
+  // value and push its share past 100%. Summing magnitudes instead keeps
+  // every item's share within 0-100%, while the header card above still
+  // shows the true signed net total.
+  double _stockValuationAbsTotal(List<items> list) {
+    return list.fold<double>(
+      0.0,
+      (sum, item) => sum + (double.tryParse(item.c_amount) ?? 0.0).abs(),
+    );
+  }
+
+  void _onStockValuationSearchChanged(String value) {
+    final query = value.toLowerCase();
+    setState(() {
+      _stockValuationFiltered = stockValuationList
+          .where((e) => e.itemname.toLowerCase().contains(query))
+          .toList();
+    });
+  }
+
+  Future<void> fetchStockValuation(final String parent) async {
+    setState(() {
+      item_count = "0";
+      isClicked_allitems = false;
+      isClicked_fastmoving = false;
+      isClicked_slowmoving = false;
+      isClicked_inactiveitems = false;
+      isClicked_movingsummary = false;
+      isClicked_stockvaluation = true;
+      isClicked_itemageing = false;
+      _isAllList = false;
+      _isInactiveList = false;
+      _isActiveList = false;
+      isVisibleNoDataFound = false;
+      isVisibleFilterby = false;
+      stockValuationList = [];
+      _stockValuationFiltered = [];
+      searchController.clear();
+      _isLoading = true;
+    });
+
+    final resolvedParent = parent == "All Items" ? "" : parent;
+
+    try {
+      final url = Uri.parse(HttpURL_allitems!);
+      final headers = <String, String>{
+        'Authorization': 'Bearer $token',
+        "Content-Type": "application/json",
+      };
+      final body = jsonEncode({'parent': resolvedParent});
+
+      final response = await http.post(url, body: body, headers: headers);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final List<dynamic> valuesList = jsonDecode(response.body);
+        final parsed = valuesList
+            .map((e) => items.fromJson(e as Map<String, dynamic>))
+            .toList()
+          ..sort(
+            (a, b) => (double.tryParse(b.c_amount) ?? 0.0).compareTo(
+              double.tryParse(a.c_amount) ?? 0.0,
+            ),
+          );
+
+        setState(() {
+          stockValuationList = parsed;
+          item_count = parsed.length.toString();
+          isVisibleNoDataFound = parsed.isEmpty;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          isVisibleNoDataFound = true;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print(e);
+      if (!mounted) return;
+      setState(() {
+        stockValuationList = [];
+        isVisibleNoDataFound = true;
+        _isLoading = false;
+      });
+    }
+  }
+
+  DateTime? _parseItemDateSafe(String value) {
+    if (value == 'null' || value.isEmpty) return null;
+    try {
+      return DateTime.parse(value);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _onItemAgeingSearchChanged(String value) {
+    if (_selectedItemAgeingBucket == null) return;
+    final query = value.toLowerCase();
+    setState(() {
+      _itemAgeingFilteredDrilldown = _selectedItemAgeingBucket!.itemsList
+          .where((e) => e.itemname.toLowerCase().contains(query))
+          .toList();
+    });
+  }
+
+  Future<void> fetchItemAgeing(final String parent) async {
+    setState(() {
+      item_count = "0";
+      isClicked_allitems = false;
+      isClicked_fastmoving = false;
+      isClicked_slowmoving = false;
+      isClicked_inactiveitems = false;
+      isClicked_movingsummary = false;
+      isClicked_stockvaluation = false;
+      isClicked_itemageing = true;
+      _isAllList = false;
+      _isInactiveList = false;
+      _isActiveList = false;
+      isVisibleNoDataFound = false;
+      isVisibleFilterby = false;
+      itemAgeingBuckets = [];
+      _selectedItemAgeingBucket = null;
+      _itemAgeingFilteredDrilldown = [];
+      searchController.clear();
+      _isLoading = true;
+    });
+
+    final resolvedParent = parent == "All Items" ? "" : parent;
+
+    try {
+      final url = Uri.parse(HttpURL_allitems!);
+      final headers = <String, String>{
+        'Authorization': 'Bearer $token',
+        "Content-Type": "application/json",
+      };
+      final body = jsonEncode({'parent': resolvedParent});
+
+      final response = await http.post(url, body: body, headers: headers);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final List<dynamic> valuesList = jsonDecode(response.body);
+        final parsedItems = valuesList
+            .map((e) => items.fromJson(e as Map<String, dynamic>))
+            .toList();
+
+        // Same configurable thresholds as the voucher Ageing Report
+        // (AgeingConfig.dart), so both reports stay in sync from one
+        // settings screen.
+        final ageingPrefs = await SharedPreferences.getInstance();
+        final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
+        final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
+        final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
+        final h4 =
+            int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
+        final h5 =
+            int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
+
+        final b1 = ItemAgeingBucket('0-$h1 Days');
+        final b2 = ItemAgeingBucket('$h1-$h2 Days');
+        final b3 = ItemAgeingBucket('$h2-$h3 Days');
+        final b4 = ItemAgeingBucket('$h3-$h4 Days');
+        final b5 = ItemAgeingBucket('$h4-$h5 Days');
+        final b6 = ItemAgeingBucket('$h5+ Days');
+        final noMovement = ItemAgeingBucket('No Sales/Purchase Data');
+
+        final today = DateTime.now();
+        final todayDate = DateTime(today.year, today.month, today.day);
+
+        for (final item in parsedItems) {
+          final saleDate = _parseItemDateSafe(item.lastsale);
+          final purcDate = _parseItemDateSafe(item.lastpurc);
+
+          DateTime? lastMovement;
+          if (saleDate != null && purcDate != null) {
+            lastMovement = saleDate.isAfter(purcDate) ? saleDate : purcDate;
+          } else {
+            lastMovement = saleDate ?? purcDate;
+          }
+
+          final amount = double.tryParse(item.c_amount)?.abs() ?? 0.0;
+
+          if (lastMovement == null) {
+            noMovement.count++;
+            noMovement.value += amount;
+            noMovement.itemsList.add(item);
+            continue;
+          }
+
+          final daysSince = todayDate
+              .difference(
+                DateTime(
+                  lastMovement.year,
+                  lastMovement.month,
+                  lastMovement.day,
+                ),
+              )
+              .inDays;
+
+          ItemAgeingBucket bucket;
+          if (daysSince <= h1) {
+            bucket = b1;
+          } else if (daysSince <= h2) {
+            bucket = b2;
+          } else if (daysSince <= h3) {
+            bucket = b3;
+          } else if (daysSince <= h4) {
+            bucket = b4;
+          } else if (daysSince <= h5) {
+            bucket = b5;
+          } else {
+            bucket = b6;
+          }
+
+          bucket.count++;
+          bucket.value += amount;
+          bucket.itemsList.add(item);
+        }
+
+        final buckets = [b1, b2, b3, b4, b5, b6, noMovement]
+            .where((b) => b.count > 0)
+            .toList();
+
+        setState(() {
+          itemAgeingBuckets = buckets;
+          item_count = parsedItems.length.toString();
+          isVisibleNoDataFound = parsedItems.isEmpty;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          isVisibleNoDataFound = true;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print(e);
+      if (!mounted) return;
+      setState(() {
+        itemAgeingBuckets = [];
+        isVisibleNoDataFound = true;
+        _isLoading = false;
+      });
+    }
+  }
+
   Future<void> fetchinactive_items(final String parent) async {
     setState(() {
       item_count = "0";
@@ -1105,6 +2006,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       isClicked_allitems = false;
       isClicked_fastmoving = false;
       isClicked_slowmoving = false;
+      isClicked_movingsummary = false;
+      isClicked_stockvaluation = false;
+      isClicked_itemageing = false;
       isVisibleFilterby = false;
 
       isClicked_inactiveitems = true;
@@ -1438,7 +2342,26 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (_isAllList) {
+                          if (isClicked_movingsummary) {
+                            if (fastMovingSummaryList.isNotEmpty ||
+                                slowMovingSummaryList.isNotEmpty) {
+                              generateAndSharePDF_MovingSummary();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (isClicked_stockvaluation) {
+                            if (stockValuationList.isNotEmpty) {
+                              generateAndSharePDF_StockValuation();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (isClicked_itemageing) {
+                            if (itemAgeingBuckets.isNotEmpty) {
+                              generateAndSharePDF_ItemAgeing();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isAllList) {
                             if (!all_items_list.isEmpty) {
                               generateAndSharePDF_AllItems();
                             } else {
@@ -1456,6 +2379,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                             } else {
                               showToast('Data Not Found');
                             }
+                          } else {
+                            showToast('Data Not Found');
                           }
                         },
                         child: Row(
@@ -1485,18 +2410,45 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                         onTap: () {
                           Navigator.pop(context);
 
-                          if (_isAllList) {
+                          if (isClicked_movingsummary) {
+                            if (fastMovingSummaryList.isNotEmpty ||
+                                slowMovingSummaryList.isNotEmpty) {
+                              generateAndShareCSV_MovingSummary();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (isClicked_stockvaluation) {
+                            if (stockValuationList.isNotEmpty) {
+                              generateAndShareCSV_StockValuation();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (isClicked_itemageing) {
+                            if (itemAgeingBuckets.isNotEmpty) {
+                              generateAndShareCSV_ItemAgeing();
+                            } else {
+                              showToast('Data Not Found');
+                            }
+                          } else if (_isAllList) {
                             if (!all_items_list.isEmpty) {
                               generateAndShareCSV_AllItems();
+                            } else {
+                              showToast('Data Not Found');
                             }
                           } else if (_isActiveList) {
                             if (!active_items_list.isEmpty) {
                               generateAndShareCSV_FastSlowItems();
+                            } else {
+                              showToast('Data Not Found');
                             }
                           } else if (_isInactiveList) {
                             if (!inactive_items_list.isEmpty) {
                               generateAndShareCSV_InactiveItems();
+                            } else {
+                              showToast('Data Not Found');
                             }
+                          } else {
+                            showToast('Data Not Found');
                           }
                         },
                         child: Row(
@@ -1583,23 +2535,24 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                                 ),
                               if (fastmovingitems_visibility)
                                 _buildTab(
-                                  "Fast Moving",
-                                  Icons.flash_on_rounded,
-                                  isClicked_fastmoving,
-                                  () => fetchItemData(
-                                    'FastMovingItems',
-                                    _selecteditem,
-                                  ),
+                                  "Moving Summary",
+                                  Icons.compare_arrows_rounded,
+                                  isClicked_movingsummary,
+                                  () => fetchMovingSummary(_selecteditem),
                                 ),
-                              if (fastmovingitems_visibility)
+                              if (allitems_visibility)
                                 _buildTab(
-                                  "Slow Moving",
-                                  Icons.timer_outlined,
-                                  isClicked_slowmoving,
-                                  () => fetchItemData(
-                                    'SlowMovingItems',
-                                    _selecteditem,
-                                  ),
+                                  "Stock Valuation",
+                                  Icons.bar_chart_rounded,
+                                  isClicked_stockvaluation,
+                                  () => fetchStockValuation(_selecteditem),
+                                ),
+                              if (allitems_visibility)
+                                _buildTab(
+                                  "Item Ageing",
+                                  Icons.history_rounded,
+                                  isClicked_itemageing,
+                                  () => fetchItemAgeing(_selecteditem),
                                 ),
                               if (inactiveitems_visibility)
                                 _buildTab(
@@ -1616,7 +2569,11 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                           ),
                         ),
 
-                        if (_isSearchViewVisible)
+                        if (_isSearchViewVisible &&
+                            !(isClicked_movingsummary &&
+                                _movingSummaryDrilldown == null) &&
+                            !(isClicked_itemageing &&
+                                _selectedItemAgeingBucket == null))
                           Padding(
                             padding: const EdgeInsets.only(
                               left: 0,
@@ -1630,7 +2587,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                               shadowColor: Colors.black12,
                               child: TextField(
                                 controller: searchController,
-                                onChanged: _onSearchChanged,
+                                onChanged: isClicked_movingsummary
+                                    ? _onMovingSummarySearchChanged
+                                    : isClicked_stockvaluation
+                                    ? _onStockValuationSearchChanged
+                                    : isClicked_itemageing
+                                    ? _onItemAgeingSearchChanged
+                                    : _onSearchChanged,
                                 style: GoogleFonts.poppins(
                                   fontSize: 14,
                                   color: Theme.of(
@@ -1683,7 +2646,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 ),
 
               // 🔹 List / Empty State
-              if (isVisibleNoDataFound)
+              if (isClicked_movingsummary)
+                ..._buildMovingSummarySlivers()
+              else if (isClicked_stockvaluation)
+                ..._buildStockValuationSlivers()
+              else if (isClicked_itemageing)
+                ..._buildItemAgeingSlivers()
+              else if (isVisibleNoDataFound)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _buildEmptyState(),
@@ -1830,6 +2799,614 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 fontWeight: FontWeight.w600,
                 color: isSelected ? Colors.white : app_color,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildMovingSummarySlivers() {
+    if (_isLoading) {
+      return [const SliverToBoxAdapter(child: SizedBox.shrink())];
+    }
+
+    if (_movingSummaryDrilldown != null) {
+      final fullList = _movingSummaryDrilldown == 'fast'
+          ? fastMovingSummaryList
+          : slowMovingSummaryList;
+      final visible = _isSearchViewVisible && searchController.text.isNotEmpty
+          ? _movingSummaryFilteredDrilldown
+          : fullList;
+
+      return [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () {
+                setState(() {
+                  _movingSummaryDrilldown = null;
+                  searchController.clear();
+                  _movingSummaryFilteredDrilldown = [];
+                });
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.arrow_back_rounded, size: 20, color: app_color),
+                    const SizedBox(width: 8),
+                    Text(
+                      _movingSummaryDrilldown == 'fast'
+                          ? 'Fast Moving Items'
+                          : 'Slow Moving Items',
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: app_color,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (visible.isEmpty)
+          SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState())
+        else
+          SliverList(
+            delegate: SliverChildBuilderDelegate((context, index) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildItemCard(visible[index]),
+              );
+            }, childCount: visible.length),
+          ),
+      ];
+    }
+
+    if (fastMovingSummaryList.isEmpty && slowMovingSummaryList.isEmpty) {
+      return [
+        SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState()),
+      ];
+    }
+
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Column(
+            children: [
+              _buildMovingSummaryCard(
+                title: 'Fast Moving',
+                icon: Icons.flash_on_rounded,
+                accentColor: Colors.green,
+                list: fastMovingSummaryList,
+                onTap: () => setState(() => _movingSummaryDrilldown = 'fast'),
+              ),
+              const SizedBox(height: 12),
+              _buildMovingSummaryCard(
+                title: 'Slow Moving',
+                icon: Icons.timer_outlined,
+                accentColor: Colors.deepOrange,
+                list: slowMovingSummaryList,
+                onTap: () => setState(() => _movingSummaryDrilldown = 'slow'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildMovingSummaryCard({
+    required String title,
+    required IconData icon,
+    required MaterialColor accentColor,
+    required List<items> list,
+    required VoidCallback onTap,
+  }) {
+    final totalValue = _movingListTotalValue(list);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: Theme.of(context).cardColor,
+          border: Border.all(color: Theme.of(context).dividerColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [accentColor.shade400, accentColor.shade700],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${list.length} item${list.length == 1 ? '' : 's'}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    formatAmount(totalValue.toString()),
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 22,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildStockValuationSlivers() {
+    if (_isLoading) {
+      return [const SliverToBoxAdapter(child: SizedBox.shrink())];
+    }
+
+    if (stockValuationList.isEmpty) {
+      return [
+        SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState()),
+      ];
+    }
+
+    final visible = searchController.text.isNotEmpty
+        ? _stockValuationFiltered
+        : stockValuationList;
+    final totalValue = _stockValuationTotal(stockValuationList);
+    final absTotalValue = _stockValuationAbsTotal(stockValuationList);
+
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: Theme.of(context).cardColor,
+              border: Border.all(color: Theme.of(context).dividerColor),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.teal.shade400, Colors.teal.shade700],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.inventory_2_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Total Inventory Value',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${stockValuationList.length} item${stockValuationList.length == 1 ? '' : 's'}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatAmount(totalValue.toString()),
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      if (visible.isEmpty)
+        SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState())
+      else
+        SliverList(
+          delegate: SliverChildBuilderDelegate((context, index) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildStockValuationCard(
+                visible[index],
+                stockValuationList.indexOf(visible[index]) + 1,
+                absTotalValue,
+              ),
+            );
+          }, childCount: visible.length),
+        ),
+    ];
+  }
+
+  Widget _buildStockValuationCard(items item, int rank, double absTotalValue) {
+    final amount = double.tryParse(item.c_amount) ?? 0.0;
+    final share = absTotalValue > 0 ? amount.abs() / absTotalValue : 0.0;
+    final MaterialColor rankColor = switch (rank) {
+      1 => Colors.amber,
+      2 => Colors.blueGrey,
+      3 => Colors.brown,
+      _ => Colors.teal,
+    };
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ItemsClicked(
+                itemname: item.itemname,
+                unit: item.unit,
+                item_desc: item.description,
+                item_lastsaledate: item.lastsale,
+                item_lastpurchdate: item.lastpurc,
+                item_rate: item.saleprice,
+                inventory_closing: item.c_qty,
+                lastpurcrate: item.purcprice,
+                alias: item.alias,
+              ),
+            ),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            color: Theme.of(context).cardColor,
+            border: Border.all(color: Theme.of(context).dividerColor),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black12.withOpacity(0.08),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [rankColor.shade400, rankColor.shade700],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  "$rank",
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.itemname,
+                      softWrap: true,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Qty: ${removeUnit(item.c_qty)} ${item.unit}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: share.clamp(0.0, 1.0),
+                        minHeight: 6,
+                        backgroundColor:
+                            Theme.of(context).brightness == Brightness.dark
+                            ? Theme.of(context).colorScheme.surfaceContainerHighest
+                            : const Color(0xFFF1F4F8),
+                        valueColor: AlwaysStoppedAnimation<Color>(rankColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    formatAmount(item.c_amount),
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${(share * 100).toStringAsFixed(1)}%',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildItemAgeingSlivers() {
+    if (_isLoading) {
+      return [const SliverToBoxAdapter(child: SizedBox.shrink())];
+    }
+
+    if (_selectedItemAgeingBucket != null) {
+      final bucket = _selectedItemAgeingBucket!;
+      final visible = searchController.text.isNotEmpty
+          ? _itemAgeingFilteredDrilldown
+          : bucket.itemsList;
+
+      return [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () {
+                setState(() {
+                  _selectedItemAgeingBucket = null;
+                  searchController.clear();
+                  _itemAgeingFilteredDrilldown = [];
+                });
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.arrow_back_rounded, size: 20, color: app_color),
+                    const SizedBox(width: 8),
+                    Text(
+                      bucket.label,
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: app_color,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (visible.isEmpty)
+          SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState())
+        else
+          SliverList(
+            delegate: SliverChildBuilderDelegate((context, index) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildItemCard(visible[index]),
+              );
+            }, childCount: visible.length),
+          ),
+      ];
+    }
+
+    if (itemAgeingBuckets.isEmpty) {
+      return [
+        SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState()),
+      ];
+    }
+
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Column(
+            children: itemAgeingBuckets.map((bucket) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildItemAgeingBucketCard(bucket),
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildItemAgeingBucketCard(ItemAgeingBucket bucket) {
+    final bool isOverdue = bucket.label != 'No Sales/Purchase Data';
+    // Single accent for every aged band (labels are dynamic based on the
+    // configured thresholds, and bands with zero items get filtered out of
+    // the list before this is called - so a position/label-based gradient
+    // can't reliably reflect severity here). "No Sales/Purchase Data" gets
+    // its own neutral color.
+    final MaterialColor accentColor = isOverdue ? Colors.deepOrange : Colors.blueGrey;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () {
+        setState(() {
+          _selectedItemAgeingBucket = bucket;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: Theme.of(context).cardColor,
+          border: Border.all(color: Theme.of(context).dividerColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [accentColor.shade400, accentColor.shade700],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                isOverdue ? Icons.history_rounded : Icons.help_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    bucket.label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${bucket.count} item${bucket.count == 1 ? '' : 's'}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    formatAmount(bucket.value.toString()),
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 22,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ],
         ),
@@ -2259,10 +3836,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             onChanged: (v) {
               setState(() => _selectedFilter = v);
               Navigator.pop(context);
-              if (isClicked_fastmoving)
-                fetchItemData('FastMovingItems', _selecteditem);
-              if (isClicked_slowmoving)
-                fetchItemData('SlowMovingItems', _selecteditem);
+              if (isClicked_movingsummary)
+                fetchMovingSummary(_selecteditem);
             },
             title: Text("Quantity"),
           ),
@@ -2272,10 +3847,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             onChanged: (v) {
               setState(() => _selectedFilter = v);
               Navigator.pop(context);
-              if (isClicked_fastmoving)
-                fetchItemData('FastMovingItems', _selecteditem);
-              if (isClicked_slowmoving)
-                fetchItemData('SlowMovingItems', _selecteditem);
+              if (isClicked_movingsummary)
+                fetchMovingSummary(_selecteditem);
             },
             title: Text("Sale Price"),
           ),
