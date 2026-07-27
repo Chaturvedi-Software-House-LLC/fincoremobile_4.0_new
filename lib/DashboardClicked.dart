@@ -3110,9 +3110,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                         setState(() {
                           _isSwitchingView = true;
                         });
-                        // ✅ let the spinner frame paint before the heavy
-                        // list rebuild happens, so the tap feels responsive
-                        Future.delayed(const Duration(milliseconds: 50), () {
+                        // ✅ keep the spinner up long enough to actually be
+                        // seen spinning, not just flash for a frame or two
+                        Future.delayed(const Duration(milliseconds: 600), () {
                           if (!mounted) return;
                           final togglingOn = !_isAgeingView;
                           setState(() {
