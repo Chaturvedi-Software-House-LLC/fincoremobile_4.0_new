@@ -823,6 +823,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     required T? groupValue,
     required String title,
     required ValueChanged<T?> onChanged,
+    Widget? titleWidget,
   }) {
     final bool selected = groupValue == value;
 
@@ -833,14 +834,16 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       tileColor: selected ? app_color.withOpacity(0.08) : Colors.transparent,
       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      title: Text(
-        title,
-        style: GoogleFonts.poppins(
-          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-          color: _textColor,
-          fontSize: 13.5,
-        ),
-      ),
+      title:
+          titleWidget ??
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: _textColor,
+              fontSize: 13.5,
+            ),
+          ),
       onChanged: onChanged,
     );
   }
@@ -1216,6 +1219,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                         context,
                         'AED',
                         'UAE Dirhams (${getCurrencySymbol('AED')})',
+                        namePrefix: 'UAE Dirhams',
                       ),
                       _buildCurrencyOption(
                         context,
@@ -1281,12 +1285,41 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
   Widget _buildCurrencyOption(
     BuildContext context,
     String value,
-    String label,
-  ) {
+    String label, {
+    String? namePrefix,
+  }) {
+    final bool selected = groupvalue == value;
     return _optionTile<String>(
       value: value,
       groupValue: groupvalue,
       title: label,
+      // AED's "symbol" is the new Dirham glyph, not plain text - render it
+      // in its own span (like everywhere else in the app) instead of the
+      // literal "AED" that NumberFormat.currency falls back to.
+      titleWidget: value == 'AED' && namePrefix != null
+          ? Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(text: '$namePrefix ('),
+                  currencySymbolSpan(
+                    'AED',
+                    '',
+                    GoogleFonts.poppins(
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: _textColor,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                  const TextSpan(text: ')'),
+                ],
+              ),
+              style: GoogleFonts.poppins(
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: _textColor,
+                fontSize: 13.5,
+              ),
+            )
+          : null,
       onChanged: (selected) {
         setState(() {
           groupvalue = selected!;

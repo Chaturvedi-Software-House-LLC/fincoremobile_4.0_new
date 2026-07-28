@@ -729,34 +729,32 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
               AppNavigation.backOrDashboard(context);
             },
           ),
-          centerTitle: true,
-          title: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 5.2),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ledger,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+          centerTitle: false,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                ledger,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
-                Text(
-                  type,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.normal,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                type,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.normal,
                 ),
-              ],
-            ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
           actions: [
             IconButton(
@@ -893,7 +891,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                     children: [
                       // Total Value
                       Center(
-                        child: Text(
+                        child: formatAmountRich(
                           total,
                           style: GoogleFonts.poppins(
                             fontSize: 24,
@@ -1097,18 +1095,24 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                           ),
                         ),
 
-                      // List
-                      Visibility(
-                        visible: _isListVisible,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          itemCount: filteredItems.length,
-                          itemBuilder: (context, index) {
+                    ],
+                  ),
+                ),
+              ),
+
+              // 📋 List - a real sliver (SliverList) so the CustomScrollView
+              // only builds cards near the viewport; the previous
+              // shrinkWrap ListView.builder forced eager layout of every
+              // item up front, which is what caused the same scroll-hang
+              // bug already fixed on the Party list.
+              if (_isListVisible)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
                             final card = filteredItems[index];
 
                             return Container(
@@ -1266,12 +1270,12 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                                               .min, // ✅ only as wide as text
                                           children: [
                                             Flexible(
-                                              child: Text(
-                                                '${formatAmount(card.amount.toString())}',
+                                              child: formatAmountRich(
+                                                card.amount.toString(),
                                                 softWrap:
                                                     true, // ✅ allows text to wrap to next line
                                                 overflow: TextOverflow
-                                                    .visible, // ✅ ensures nothing gets cut off
+                                                    .ellipsis, // ✅ truncate instead of overlapping
                                                 textAlign: TextAlign
                                                     .end, // or TextAlign.center if needed
                                                 style: GoogleFonts.poppins(
@@ -1320,13 +1324,9 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                                 ),
                               ),
                             );
-                          },
-                        ),
-                      ),
-                    ],
+                    }, childCount: filteredItems.length),
                   ),
                 ),
-              ),
             ],
           ),
 

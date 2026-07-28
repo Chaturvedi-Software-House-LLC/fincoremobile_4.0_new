@@ -34,7 +34,15 @@ class Data {
     return Data(
       billno: json['billno'].toString(),
       overdue: json['overdue'].toString(),
-      outstanding: double.tryParse(json['outstanding'].toString()) ?? 0,
+      // Some bills come back with a comma-formatted "outstanding" string
+      // (e.g. "1,234.56") - double.tryParse silently fails on the comma
+      // and falls back to 0, which is what made several real bills show
+      // as a 0.00 amount even though they clearly have an overdue balance.
+      outstanding:
+          double.tryParse(
+            json['outstanding'].toString().replaceAll(',', ''),
+          ) ??
+          0,
       billdate: json['billdate'].toString(),
       duedate: json['duedate'].toString(),
     );
@@ -102,9 +110,9 @@ class _PartyTotalClickedRecPayClickedPageState
   String selectedSortOption = '', token = '';
 
   bool isSortVisible = false;
-  ScrollController _scrollController = ScrollController();
   final ScrollController _scrollFabController = ScrollController();
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   late NumberFormat currencyFormat;
 
@@ -156,6 +164,248 @@ class _PartyTotalClickedRecPayClickedPageState
 
   List<Data> item_list = [];
   List<Data> filteredItems = []; // default initialization
+
+  // Ageing bucket report - client-side bucketing of the same outstanding
+  // bill list (no new API), so users can see/filter which bucket their
+  // outstanding amount is concentrated in. Boundaries come from the same
+  // AgeingConfig thresholds (SharedPreferences 'heading1'..'heading5')
+  // used by PartyClicked's Receivable/Payable row1-row6 breakdown,
+  // instead of being hardcoded here - so both screens always agree.
+  List<int> _ageingThresholds = [30, 60, 90, 120, 180];
+  String? _selectedAgeingBucket; // null = no bucket filter applied
+
+  List<String> get _ageingBuckets {
+    final t = _ageingThresholds;
+    return [
+      '0-${t[0]}',
+      '${t[0]}-${t[1]}',
+      '${t[1]}-${t[2]}',
+      '${t[2]}-${t[3]}',
+      '${t[3]}-${t[4]}',
+      '${t[4]}+',
+    ];
+  }
+
+  Future<void> _loadAgeingThresholds() async {
+    final t = [
+      int.tryParse(prefs.getString('heading1') ?? '') ?? 30,
+      int.tryParse(prefs.getString('heading2') ?? '') ?? 60,
+      int.tryParse(prefs.getString('heading3') ?? '') ?? 90,
+      int.tryParse(prefs.getString('heading4') ?? '') ?? 120,
+      int.tryParse(prefs.getString('heading5') ?? '') ?? 180,
+    ];
+    if (mounted) {
+      setState(() => _ageingThresholds = t);
+    } else {
+      _ageingThresholds = t;
+    }
+  }
+
+  String _bucketFor(String overdueRaw) {
+    final days = int.tryParse(overdueRaw) ?? 0;
+    final t = _ageingThresholds;
+    final buckets = _ageingBuckets;
+    if (days <= t[0]) return buckets[0];
+    if (days <= t[1]) return buckets[1];
+    if (days <= t[2]) return buckets[2];
+    if (days <= t[3]) return buckets[3];
+    if (days <= t[4]) return buckets[4];
+    return buckets[5];
+  }
+
+  Map<String, List<Data>> get _itemsByBucket {
+    final map = {for (final b in _ageingBuckets) b: <Data>[]};
+    for (final item in item_list) {
+      map[_bucketFor(item.overdue)]!.add(item);
+    }
+    return map;
+  }
+
+  // Re-applies both the active search text and the active ageing-bucket
+  // filter together, so the two work in combination rather than one
+  // silently overriding the other.
+  void _applyItemFilters() {
+    Iterable<Data> items = item_list;
+
+    if (_selectedAgeingBucket != null) {
+      items = items.where((i) => _bucketFor(i.overdue) == _selectedAgeingBucket);
+    }
+
+    final query = searchController.text.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      items = items.where((i) => i.billno.toLowerCase().contains(query));
+    }
+
+    setState(() {
+      filteredItems = items.toList();
+    });
+  }
+
+  // Indexed by bucket position (0 = freshest .. 5 = most overdue) since
+  // the bucket labels themselves are now dynamic (driven by AgeingConfig).
+  static const List<Color> _ageingBucketColors = [
+    Color(0xFF2ECC71),
+    Color(0xFFA9D82E),
+    Color(0xFFF1C40F),
+    Color(0xFFE67E22),
+    Color(0xFFE85D3D),
+    Color(0xFFE74C3C),
+  ];
+
+  Widget _buildAgeingBucketSummary(BuildContext context) {
+    final byBucket = _itemsByBucket;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Theme.of(context).brightness == Brightness.dark
+            ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Ageing Breakdown',
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+              if (_selectedAgeingBucket != null)
+                GestureDetector(
+                  onTap: () {
+                    _selectedAgeingBucket = null;
+                    _applyItemFilters();
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.close_rounded,
+                        size: 14,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        'Clear filter',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // 6 buckets (matching AgeingConfig's 5 thresholds) no longer fit
+          // in one un-scrolled row on a phone width, so this scrolls
+          // horizontally like the "As of" pill above it already does.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final entry in _ageingBuckets.asMap().entries)
+                  Builder(
+                    builder: (context) {
+                      final bucket = entry.value;
+                      final color = _ageingBucketColors[entry.key];
+                      final items = byBucket[bucket] ?? const <Data>[];
+                      final total = items.fold<double>(
+                        0,
+                        (sum, i) => sum + i.outstanding,
+                      );
+                      final isSelected = _selectedAgeingBucket == bucket;
+
+                      return GestureDetector(
+                        onTap: () {
+                          _selectedAgeingBucket = isSelected ? null : bucket;
+                          _applyItemFilters();
+                        },
+                        child: Container(
+                          width: 96,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? color.withOpacity(0.18)
+                                : color.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected
+                                  ? color
+                                  : color.withOpacity(0.3),
+                              width: isSelected ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Text(
+                                '$bucket d',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: color,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${items.length} bill${items.length == 1 ? '' : 's'}',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 10,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              FittedBox(
+                                child: currencyAmountText(
+                                  currencyCode: _currencyCode,
+                                  symbol: currencysymbol,
+                                  amountText:
+                                      '${CurrencyFormatter.formatCurrencyParts(total.abs()).number} ${total >= 0 ? 'CR' : 'DR'}',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showSelectionWindow(BuildContext context) {
     final List<IconData> icons = [
@@ -271,7 +521,7 @@ class _PartyTotalClickedRecPayClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems = List.from(item_list);
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -284,7 +534,7 @@ class _PartyTotalClickedRecPayClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => a.billno.compareTo(b.billno));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -297,7 +547,7 @@ class _PartyTotalClickedRecPayClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => b.billno.compareTo(a.billno));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -310,7 +560,7 @@ class _PartyTotalClickedRecPayClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => a.billdate.compareTo(b.billdate));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -323,7 +573,7 @@ class _PartyTotalClickedRecPayClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => b.billdate.compareTo(a.billdate));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -337,14 +587,14 @@ class _PartyTotalClickedRecPayClickedPageState
       if (filteredItems.isNotEmpty) {
         if (type == "Receivable") {
           filteredItems.sort((a, b) => b.outstanding.compareTo(a.outstanding));
-          _scrollController.animateTo(
+          _scrollFabController.animateTo(
             0.0,
             duration: Duration(milliseconds: 500),
             curve: Curves.easeInOut,
           );
         } else {
           filteredItems.sort((a, b) => a.outstanding.compareTo(b.outstanding));
-          _scrollController.animateTo(
+          _scrollFabController.animateTo(
             0.0,
             duration: Duration(milliseconds: 500),
             curve: Curves.easeInOut,
@@ -359,14 +609,14 @@ class _PartyTotalClickedRecPayClickedPageState
       if (filteredItems.isNotEmpty) {
         if (type == "Receivable") {
           filteredItems.sort((a, b) => a.outstanding.compareTo(b.outstanding));
-          _scrollController.animateTo(
+          _scrollFabController.animateTo(
             0.0,
             duration: Duration(milliseconds: 500),
             curve: Curves.easeInOut,
           );
         } else {
           filteredItems.sort((a, b) => b.outstanding.compareTo(a.outstanding));
-          _scrollController.animateTo(
+          _scrollFabController.animateTo(
             0.0,
             duration: Duration(milliseconds: 500),
             curve: Curves.easeInOut,
@@ -576,6 +826,34 @@ class _PartyTotalClickedRecPayClickedPageState
     return opening_string;
   }
 
+  // The header "total" arrives in one of two shapes depending on which tap
+  // brought the user here: a plain signed number (from the card's own
+  // Total tap) or "<number> DR"/"<number> CR" (from a bucket row tap,
+  // already suffix-formatted upstream). Handle both so the symbol/glyph
+  // renders correctly either way instead of showing plain unstyled text.
+  Widget _totalAmountWidget(String value, TextStyle style) {
+    String cleaned = value.trim();
+    String suffix;
+    final upper = cleaned.toUpperCase();
+    if (upper.endsWith(' DR') || upper.endsWith(' CR')) {
+      suffix = upper.substring(upper.length - 2);
+      cleaned = cleaned.substring(0, cleaned.length - 3).trim();
+    } else if (cleaned.contains('-')) {
+      cleaned = cleaned.replaceAll('-', '');
+      suffix = 'DR';
+    } else {
+      suffix = 'CR';
+    }
+    final parsed = double.tryParse(cleaned.replaceAll(',', '')) ?? 0.0;
+    final parts = CurrencyFormatter.formatCurrencyParts(parsed);
+    return currencyAmountText(
+      currencyCode: _currencyCode,
+      symbol: currencysymbol,
+      amountText: '${parts.number} $suffix',
+      style: style,
+    );
+  }
+
   String convertDateFormat(String dateStr) {
     String formattedDate = "";
 
@@ -682,6 +960,7 @@ class _PartyTotalClickedRecPayClickedPageState
 
     item_list.clear();
     filteredItems.clear();
+    _selectedAgeingBucket = null;
 
     try {
       final url = Uri.parse(HttpURL!);
@@ -697,6 +976,13 @@ class _PartyTotalClickedRecPayClickedPageState
         'orderby': orderby,
         'groupby': groupby,
         'overdue': variabletype,
+        // PartyClicked.dart's own call to this same endpoint passes
+        // showAll:true and gets back the correct, consolidated current
+        // outstanding bill(s) - without it, this screen was getting a
+        // different (stale-looking, mostly-already-settled) historical
+        // per-bill list instead, which is why the real overdue bill and
+        // its ageing bucket didn't match what PartyClicked.dart showed.
+        'showAll': 'true',
       });
 
       final response = await http.post(url, body: body, headers: headers);
@@ -760,6 +1046,7 @@ class _PartyTotalClickedRecPayClickedPageState
 
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
+    await _loadAgeingThresholds();
 
     setState(() {
       hostname = prefs.getString('hostname');
@@ -801,6 +1088,7 @@ class _PartyTotalClickedRecPayClickedPageState
       currencysymbol = format.currencySymbol;
       currencyFormat = NumberFormat('#,##0');
     }
+    _currencyCode = currencyCode ?? 'AED';
 
     try {
       selectedSortOption = prefs.getString('sort')!;
@@ -1006,10 +1294,20 @@ class _PartyTotalClickedRecPayClickedPageState
                   items: <PopupMenuEntry<String>>[
                     PopupMenuItem<String>(
                       child: GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(context);
-                          if (!item_list.isEmpty) {
-                            generateAndSharePDF_RecPay();
+                          if (item_list.isEmpty) return;
+                          try {
+                            await generateAndSharePDF_RecPay();
+                          } catch (e) {
+                            debugPrint('Share as PDF failed: $e');
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Could not generate PDF: $e'),
+                                ),
+                              );
+                            }
                           }
                         },
                         child: Row(
@@ -1036,11 +1334,20 @@ class _PartyTotalClickedRecPayClickedPageState
 
                     PopupMenuItem<String>(
                       child: GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(context);
-
-                          if (!item_list.isEmpty) {
-                            generateAndShareCSV_RecPay();
+                          if (item_list.isEmpty) return;
+                          try {
+                            await generateAndShareCSV_RecPay();
+                          } catch (e) {
+                            debugPrint('Share as CSV failed: $e');
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Could not generate CSV: $e'),
+                                ),
+                              );
+                            }
                           }
                         },
                         child: Row(
@@ -1102,9 +1409,9 @@ class _PartyTotalClickedRecPayClickedPageState
                     children: [
                       // Total Value
                       Center(
-                        child: Text(
+                        child: _totalAmountWidget(
                           total,
-                          style: GoogleFonts.poppins(
+                          GoogleFonts.poppins(
                             fontSize: 24,
                             fontWeight: FontWeight.w800,
                             color: Theme.of(context).colorScheme.onSurface,
@@ -1208,8 +1515,15 @@ class _PartyTotalClickedRecPayClickedPageState
                                       ).colorScheme.onSurface,
                                     ),
                                   ),
-                                  Text(
-                                    creditlimit,
+                                  currencyAmountText(
+                                    currencyCode: _currencyCode,
+                                    symbol: currencysymbol,
+                                    amountText: CurrencyFormatter.formatCurrencyParts(
+                                      double.tryParse(
+                                            creditlimit.replaceAll(',', ''),
+                                          ) ??
+                                          0.0,
+                                    ).number,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 14,
@@ -1262,7 +1576,15 @@ class _PartyTotalClickedRecPayClickedPageState
                 ),
               ),
 
-              SliverToBoxAdapter(
+              if (item_list.isNotEmpty)
+                SliverToBoxAdapter(child: _buildAgeingBucketSummary(context)),
+
+              // Only reserve space/paint this card when it actually has
+              // something to show (search field or "no records" state) -
+              // otherwise it rendered as an empty decorated box (visible
+              // shadow/rounded corners with nothing inside).
+              if (_isSearchViewVisible || isVisibleNoDataFound)
+                SliverToBoxAdapter(
                 child: Container(
                   width: double.infinity,
                   margin: const EdgeInsets.only(
@@ -1302,23 +1624,7 @@ class _PartyTotalClickedRecPayClickedPageState
                             shadowColor: Colors.black12,
                             child: TextField(
                               controller: searchController,
-                              onChanged: (value) {
-                                if (value.isEmpty) {
-                                  setState(() {
-                                    filteredItems = item_list;
-                                  });
-                                } else {
-                                  setState(() {
-                                    filteredItems = item_list.where((item) {
-                                      // Filter items based on the search query and the ledgerName property
-                                      final query = value.toLowerCase();
-                                      return item.billno.toLowerCase().contains(
-                                        query,
-                                      );
-                                    }).toList();
-                                  });
-                                }
-                              },
+                              onChanged: (value) => _applyItemFilters(),
                               style: GoogleFonts.poppins(
                                 fontSize: 15,
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -1392,17 +1698,24 @@ class _PartyTotalClickedRecPayClickedPageState
                           ),
                         ),
 
-                      Visibility(
-                        visible: _isListVisible,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          itemCount: filteredItems.length,
-                          itemBuilder: (context, index) {
+                    ],
+                  ),
+                ),
+              ),
+
+              // 📋 Bills list - a real sliver (SliverList) so the
+              // CustomScrollView only builds cards near the viewport; the
+              // previous shrinkWrap ListView.builder forced eager layout of
+              // every bill up front, which is what caused the same
+              // scroll-hang bug already fixed on the Party list.
+              if (_isListVisible)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
                             final card = filteredItems[index];
                             final curr =
                                 currencysymbol ??
@@ -1567,10 +1880,9 @@ class _PartyTotalClickedRecPayClickedPageState
                                               CrossAxisAlignment.center,
                                           children: [
                                             Flexible(
-                                              child: Text(
-                                                '${formatAmount(card.outstanding.toString())}',
+                                              child: formatAmountRich(
+                                                card.outstanding.toString(),
                                                 softWrap: true,
-                                                maxLines: null,
                                                 overflow: TextOverflow.visible,
                                                 style: GoogleFonts.poppins(
                                                   fontSize: 14,
@@ -1588,13 +1900,9 @@ class _PartyTotalClickedRecPayClickedPageState
                                 ),
                               ),
                             );
-                          },
-                        ),
-                      ),
-                    ],
+                    }, childCount: filteredItems.length),
                   ),
                 ),
-              ),
             ],
           ),
 

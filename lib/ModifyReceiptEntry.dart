@@ -511,6 +511,18 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     }
   }
 
+  // Currency-symbol-aware value display - renders the Dirham glyph for AED
+  // instead of the literal "AED" text that getCurrencySymbol() falls back
+  // to (there's no distinct AED symbol glyph in the standard locale data).
+  Widget _currencyValueWidget(String numberText, TextStyle style) {
+    return currencyAmountText(
+      currencyCode: currencycode,
+      symbol: getCurrencySymbol(currencycode),
+      amountText: numberText,
+      style: style,
+    );
+  }
+
   bool isNumeric(String s) {
     if (s == null) {
       return false;
@@ -607,7 +619,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       if (bills.isEmpty) {
         isVisibleBillHeading = false;
         isChequeVisible = false;
-        _selectedpaymentmode = paymentmode_data.first;
+        _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
         cheque.clear();
         updateChequeAmount();
         isPaymentModeVisible = false;
@@ -624,7 +636,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         isVisibleBillHeading = true;
         if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.first;
+          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
           cheque.clear();
           updateChequeAmount();
 
@@ -638,7 +650,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
               isVisibleChequeHeading = true;
             } else {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -647,7 +659,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             }
           } else {
             isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             cheque.clear();
             updateChequeAmount();
 
@@ -2296,7 +2308,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
           if (cheque.isNotEmpty) {
             _selectedpaymentmode = cheque.last.paymentMode;
           } else {
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             isPaymentModeVisible = false;
           }
 
@@ -2309,7 +2321,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
           if (_selectedbankcashname != null && isSelectedBankCashInHand) {
             isPaymentModeVisible = false;
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             cheque.clear();
             updateChequeAmount();
             isVisibleChequeHeading = false;
@@ -2322,7 +2334,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                 isVisibleChequeHeading = true;
               } else {
                 isPaymentModeVisible = true;
-                _selectedpaymentmode = paymentmode_data.first;
+                _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
                 cheque.clear();
                 updateChequeAmount();
 
@@ -2331,7 +2343,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
               }
             } else {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -2410,7 +2422,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
         if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.first;
+          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
           cheque.clear();
           updateChequeAmount();
           isVisibleChequeHeading = false;
@@ -2419,7 +2431,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
           if (bills.isNotEmpty) {
             if (cheque.isNotEmpty) {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -2427,7 +2439,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
               isChequeVisible = true;
             } else {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -2436,7 +2448,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             }
           } else {
             isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             cheque.clear();
             updateChequeAmount();
 
@@ -2758,9 +2770,10 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                               ),
                               borderRadius: BorderRadius.all(Radius.circular(8)),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -3266,9 +3279,10 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                               Radius.circular(8),
                                             ),
                                           ),
-                                          child: Text(
+                                          child: currencySymbolWidget(
+                                            currencycode,
                                             getCurrencySymbol(currencycode),
-                                            style: GoogleFonts.poppins(
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontSize: 13,
                                               fontWeight: FontWeight.bold,
@@ -3695,12 +3709,13 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                               borderRadius: BorderRadius.circular(12),
                             ),
                             alignment: Alignment.center,
-                            child: Text(
-                              getCurrencySymbol('$currencycode'),
-                              style: GoogleFonts.poppins(
+                            child: currencySymbolWidget(
+                              currencycode,
+                              getCurrencySymbol(currencycode),
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                                fontSize: 13,
                               ),
                             ),
                           ),
@@ -4244,12 +4259,13 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                             ),
                                           ),
                                           alignment: Alignment.center,
-                                          child: Text(
-                                            getCurrencySymbol('$currencycode'),
-                                            style: GoogleFonts.poppins(
+                                          child: currencySymbolWidget(
+                                            currencycode,
+                                            getCurrencySymbol(currencycode),
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontWeight: FontWeight.bold,
-                                              fontSize: 12,
+                                              fontSize: 13,
                                             ),
                                           ),
                                         ),
@@ -4474,7 +4490,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             (_selectedbill == "Agst Ref" || _selectedbill == 'New Ref');
         if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.first;
+          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
           cheque.clear();
           updateChequeAmount();
           isVisibleChequeHeading = false;
@@ -4487,7 +4503,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
               isVisibleChequeHeading = true;
             } else {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
               isVisibleChequeHeading = false;
@@ -4495,7 +4511,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             }
           } else {
             isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             cheque.clear();
             updateChequeAmount();
             isVisibleChequeHeading = false;
@@ -4718,7 +4734,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       paymentmode_data.add("ATM");
       paymentmode_data.add("Card");
       paymentmode_data.add('Cheque/DD');
-      _selectedpaymentmode = paymentmode_data.first;
+      _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
 
       billAmountController.clear();
 
@@ -5381,8 +5397,9 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                     if (_selectedbankcashname != null &&
                                         isSelectedBankCashInHand) {
                                       isPaymentModeVisible = false;
-                                      _selectedpaymentmode =
-                                          paymentmode_data.first;
+                                      _selectedpaymentmode = paymentmode_data.isNotEmpty
+                                          ? paymentmode_data.first
+                                          : '';
                                       cheque.clear();
                                       updateChequeAmount();
                                       isVisibleChequeHeading = false;
@@ -5394,8 +5411,9 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                           cheque.isNotEmpty;
                                     } else {
                                       isPaymentModeVisible = true;
-                                      _selectedpaymentmode =
-                                          paymentmode_data.first;
+                                      _selectedpaymentmode = paymentmode_data.isNotEmpty
+                                          ? paymentmode_data.first
+                                          : '';
                                       cheque.clear();
                                       updateChequeAmount();
                                       isVisibleChequeHeading = false;
@@ -5584,12 +5602,13 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                               ),
                                             ),
                                             alignment: Alignment.center,
-                                            child: Text(
+                                            child: currencySymbolWidget(
+                                              currencycode,
                                               getCurrencySymbol(currencycode),
-                                              style: GoogleFonts.poppins(
+                                              GoogleFonts.poppins(
                                                 color: Colors.white,
                                                 fontWeight: FontWeight.bold,
-                                                fontSize: 11,
+                                                fontSize: 13,
                                               ),
                                             ),
                                           ),
@@ -5893,11 +5912,12 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                                 ),
                                               ),
                                               child: Center(
-                                                child: Text(
+                                                child: currencySymbolWidget(
+                                                  currencycode,
                                                   getCurrencySymbol(
                                                     currencycode,
                                                   ),
-                                                  style: GoogleFonts.poppins(
+                                                  GoogleFonts.poppins(
                                                     color: Colors.white,
                                                     fontWeight: FontWeight.bold,
                                                     fontSize: 11,
@@ -5952,6 +5972,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                             ? controller_totalamt.text
                             : "0.00",
                         currencySymbol: getCurrencySymbol(currencycode),
+                        currencyCode: currencycode,
                       ),
 
                       EntrySaveButton(

@@ -1,7 +1,12 @@
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:fl_chart/fl_chart.dart';
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -19,6 +24,7 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
+import 'utils/number_formatter.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
@@ -189,9 +195,41 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   int counter = 0;
 
+  // Running ageing-bucket accumulators for the Receivable/Payable summary.
+  // These must persist across the whole recpay_list loop (one call to
+  // formatOnAccountWithBillNo per bill) - previously they were declared
+  // *inside* formatOnAccountWithBillNo and reset to 0 on every call, so
+  // each bucket only ever reflected the single most-recently-processed
+  // bill instead of the sum of every bill in that bucket, and the
+  // headline receivabletotal/payabletotal (derived from these below)
+  // never accounted for bill-based amounts at all - only whatever the
+  // separate getOutstandings "opening" endpoint returned, which is 0 for
+  // a party whose whole balance is bill-linked rather than on-account.
+  double _sumReceivable0 = 0,
+      _sumReceivable30 = 0,
+      _sumReceivable60 = 0,
+      _sumReceivable90 = 0,
+      _sumReceivable120 = 0,
+      _sumReceivable180 = 0;
+  double _sumPayable0 = 0,
+      _sumPayable30 = 0,
+      _sumPayable60 = 0,
+      _sumPayable90 = 0,
+      _sumPayable120 = 0,
+      _sumPayable180 = 0;
+
+  // On-account money that is NOT also inside one of the 6 buckets above
+  // (i.e. overdue_int <= 0, so formatOnAccountWithBillNo never ran for
+  // it). Kept separate from onAccountReceivable/onAccountPayable, which
+  // just holds whatever the last on-account row's raw value was and does
+  // NOT tell you whether that same row was already bucketed elsewhere.
+  double _currentReceivableOnAccount = 0;
+  double _currentPayableOnAccount = 0;
+
   late int? decimal;
   late NumberFormat currencyFormat;
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   bool isVisibleSoldBtn = false, isVisiblePurchaseBtn = false;
 
@@ -228,6 +266,11 @@ class _PartyClickedPageState extends State<PartyClicked>
   String item_count = "0";
 
   bool _isSearchViewVisible = false, isSearchLayoutVisible = false;
+
+  // Used to capture the Trend Overview chart as an image for the Summary
+  // PDF export - the chart itself (fl_chart) has no direct PDF renderer,
+  // so it's rendered normally on-screen and grabbed as a PNG snapshot.
+  final GlobalKey _trendChartRepaintKey = GlobalKey();
   List<String> date_range = [
     'Today',
     'Yesterday',
@@ -320,6 +363,383 @@ class _PartyClickedPageState extends State<PartyClicked>
   String pendingsalesorderparty = '';
   String party_suppliers = '';
   String party_customers = '';
+
+  // ------------------------ SUMMARY PDF ------------------------
+  // Formats a raw signed total the same way the on-screen summary cards do
+  // (CurrencyFormatter's baked-symbol variant, which is fine for PDF/CSV
+  // export contexts - see currencyFormat.dart).
+  String _pdfFormatCrDr(String raw) {
+    final value = double.tryParse(raw.replaceAll(',', '')) ?? 0.0;
+    final formatted = CurrencyFormatter.formatCurrency_double(value.abs());
+    return value >= 0 ? '$formatted CR' : '$formatted DR';
+  }
+
+  Future<Uint8List?> _captureTrendChartImage() async {
+    try {
+      final boundary =
+          _trendChartRepaintKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: 2.5);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (e) {
+      debugPrint('Trend chart capture failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> generateAndSharePDF_Summary() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+    final pdf = pw.Document();
+
+    final companyName = company ?? '';
+    const reportname = 'Party Summary Report';
+
+    final chartImageBytes =
+        (SalesVisibility || PurchaseVisibility || ReceiptVisibility)
+        ? await _captureTrendChartImage()
+        : null;
+    final chartImage = chartImageBytes != null
+        ? pw.MemoryImage(chartImageBytes)
+        : null;
+
+    // One row per voucher type currently visible on the Summary screen -
+    // mirrors the figures already shown on each SummaryExpansionCard.
+    final summaryRows = <List<String>>[
+      if (SalesVisibility)
+        [
+          'Sales',
+          _pdfFormatCrDr(totalsaleamt),
+          _pdfFormatCrDr(avgsalesinvoiceamt),
+          noofsalesinvoice,
+          convertDateFormat(lastsaledate),
+        ],
+      if (PurchaseVisibility)
+        [
+          'Purchase',
+          _pdfFormatCrDr(totalpurchaseamt),
+          _pdfFormatCrDr(avgpurchaseinvoiceamt),
+          noofpurchaseinvoice,
+          convertDateFormat(lastpurchasedate),
+        ],
+      if (ReceiptVisibility)
+        [
+          'Receipt',
+          _pdfFormatCrDr(totalreceiptamt),
+          _pdfFormatCrDr(avgreceiptinvoiceamt),
+          noofreceiptinvoice,
+          convertDateFormat(lastreceiptdate),
+        ],
+      if (PaymentVisibility)
+        [
+          'Payment',
+          _pdfFormatCrDr(totalpaymentamt),
+          _pdfFormatCrDr(avgpaymentinvoiceamt),
+          noofpaymentinvoice,
+          convertDateFormat(lastpaymentdate),
+        ],
+      if (CreditnoteVisibility)
+        [
+          'Credit Note',
+          _pdfFormatCrDr(totalcreditnoteamt),
+          _pdfFormatCrDr(avgcreditnoteinvoiceamt),
+          noofcreditnoteinvoice,
+          convertDateFormat(lastcreditnotedate),
+        ],
+      if (DebitnoteVisibility)
+        [
+          'Debit Note',
+          _pdfFormatCrDr(totaldebitnoteamt),
+          _pdfFormatCrDr(avgdebitnoteinvoiceamt),
+          noofdebitnoteinvoice,
+          convertDateFormat(lastdebitnotedate),
+        ],
+      if (JournalVisibility)
+        [
+          'Journal',
+          _pdfFormatCrDr(totaljournalamt),
+          _pdfFormatCrDr(avgjournalinvoiceamt),
+          noofjournalinvoice,
+          convertDateFormat(lastjournaldate),
+        ],
+    ];
+
+    final summaryTable = pw.Table.fromTextArray(
+      border: pw.TableBorder.all(width: 1),
+      headerDecoration: pw.BoxDecoration(
+        borderRadius: pw.BorderRadius.circular(2),
+        color: PdfColors.grey300,
+      ),
+      headerHeight: 28,
+      cellAlignment: pw.Alignment.centerLeft,
+      cellPadding: const pw.EdgeInsets.all(6),
+      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+      cellStyle: pw.TextStyle(fontSize: 11, font: font),
+      headers: ['Type', 'Total', 'Average', 'Invoices', 'Last Date'],
+      data: summaryRows,
+    );
+
+    // Ageing bucket breakdown - same 6 buckets + "On Account" shown on the
+    // Receivable/Payable cards on screen.
+    final receivableRows = <List<String>>[
+      if (ReceivableVisibility) ...[
+        ['On Account', _pdfFormatCrDr(onAccountReceivable)],
+        [row1_receivable_heading, _pdfFormatCrDr(row1_receivable)],
+        [row2_receivable_heading, _pdfFormatCrDr(row2_receivable)],
+        [row3_receivable_heading, _pdfFormatCrDr(row3_receivable)],
+        [row4_receivable_heading, _pdfFormatCrDr(row4_receivable)],
+        [row5_receivable_heading, _pdfFormatCrDr(row5_receivable)],
+        [row6_receivable_heading, _pdfFormatCrDr(row6_receivable)],
+      ],
+    ];
+
+    final payableRows = <List<String>>[
+      if (PayableVisibility) ...[
+        ['On Account', _pdfFormatCrDr(onAccountPayable)],
+        [row1_payable_heading, _pdfFormatCrDr(row1_payable)],
+        [row2_payable_heading, _pdfFormatCrDr(row2_payable)],
+        [row3_payable_heading, _pdfFormatCrDr(row3_payable)],
+        [row4_payable_heading, _pdfFormatCrDr(row4_payable)],
+        [row5_payable_heading, _pdfFormatCrDr(row5_payable)],
+        [row6_payable_heading, _pdfFormatCrDr(row6_payable)],
+      ],
+    ];
+
+    final pendingOrderRows = <List<String>>[
+      if (SalesOrderVisibility)
+        ['Pending Sales Order', _pdfFormatCrDr(pendingsalesorder)],
+      if (PurchaseOrderVisibility)
+        ['Pending Purchase Order', _pdfFormatCrDr(pendingpurchaseorder)],
+    ];
+
+    pw.Widget bucketTable(String title, List<List<String>> rows) {
+      if (rows.isEmpty) return pw.SizedBox();
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(height: 16),
+          pw.Text(
+            title,
+            style: pw.TextStyle(
+              fontSize: 13,
+              fontWeight: pw.FontWeight.bold,
+              font: font,
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Table.fromTextArray(
+            border: pw.TableBorder.all(width: 1),
+            headerDecoration: pw.BoxDecoration(
+              borderRadius: pw.BorderRadius.circular(2),
+              color: PdfColors.grey300,
+            ),
+            headerHeight: 24,
+            cellAlignment: pw.Alignment.centerLeft,
+            cellPadding: const pw.EdgeInsets.all(6),
+            headerStyle: pw.TextStyle(
+              fontWeight: pw.FontWeight.bold,
+              fontSize: 10,
+              font: font,
+            ),
+            cellStyle: pw.TextStyle(fontSize: 10, font: font),
+            headers: const ['Bucket (Days)', 'Amount'],
+            data: rows,
+          ),
+        ],
+      );
+    }
+
+    pw.Widget reportHeader() => pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.Text(
+          companyName,
+          style: pw.TextStyle(
+            fontSize: 20,
+            fontWeight: pw.FontWeight.bold,
+            font: font,
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        pw.Text(
+          reportname,
+          style: pw.TextStyle(
+            fontSize: 18,
+            fontWeight: pw.FontWeight.bold,
+            font: font,
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          children: [
+            pw.Text(
+              convertDateFormat(startDateString),
+              style: pw.TextStyle(fontSize: 14, font: font),
+            ),
+            pw.SizedBox(width: 5),
+            pw.Text('to', style: pw.TextStyle(fontSize: 14, font: font)),
+            pw.SizedBox(width: 5),
+            pw.Text(
+              convertDateFormat(endDateString),
+              style: pw.TextStyle(fontSize: 14, font: font),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 8),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          children: [
+            pw.Text(
+              'Ledger: ',
+              style: pw.TextStyle(
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+                font: font,
+              ),
+            ),
+            pw.Text(
+              partyname,
+              style: pw.TextStyle(fontSize: 14, font: font),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    pw.Widget outstandingBlock() {
+      if (!(ReceivableVisibility || PayableVisibility)) {
+        return pw.SizedBox();
+      }
+      return pw.Container(
+        margin: const pw.EdgeInsets.only(top: 16),
+        padding: const pw.EdgeInsets.all(12),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(width: 1, color: PdfColors.grey400),
+          borderRadius: pw.BorderRadius.circular(6),
+        ),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+          children: [
+            if (ReceivableVisibility)
+              pw.Column(
+                children: [
+                  pw.Text(
+                    'Receivable',
+                    style: pw.TextStyle(fontSize: 12, font: font),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    _pdfFormatCrDr(receivabletotal),
+                    style: pw.TextStyle(
+                      fontSize: 14,
+                      fontWeight: pw.FontWeight.bold,
+                      font: font,
+                    ),
+                  ),
+                ],
+              ),
+            if (PayableVisibility)
+              pw.Column(
+                children: [
+                  pw.Text(
+                    'Payable',
+                    style: pw.TextStyle(fontSize: 12, font: font),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    _pdfFormatCrDr(payabletotal),
+                    style: pw.TextStyle(
+                      fontSize: 14,
+                      fontWeight: pw.FontWeight.bold,
+                      font: font,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      );
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        build: (context) => [
+          reportHeader(),
+          outstandingBlock(),
+          if (chartImage != null) ...[
+            pw.SizedBox(height: 20),
+            pw.Text(
+              'Trend Overview',
+              style: pw.TextStyle(
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+                font: font,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Image(chartImage, height: 220),
+          ],
+          pw.SizedBox(height: 20),
+          pw.Text(
+            'Summary',
+            style: pw.TextStyle(
+              fontSize: 14,
+              fontWeight: pw.FontWeight.bold,
+              font: font,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          summaryTable,
+          bucketTable('Receivable Breakdown', receivableRows),
+          bucketTable('Payable Breakdown', payableRows),
+          if (pendingOrderRows.isNotEmpty) ...[
+            pw.SizedBox(height: 16),
+            pw.Text(
+              'Pending Orders',
+              style: pw.TextStyle(
+                fontSize: 13,
+                fontWeight: pw.FontWeight.bold,
+                font: font,
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Table.fromTextArray(
+              border: pw.TableBorder.all(width: 1),
+              headerDecoration: pw.BoxDecoration(
+                borderRadius: pw.BorderRadius.circular(2),
+                color: PdfColors.grey300,
+              ),
+              headerHeight: 24,
+              cellAlignment: pw.Alignment.centerLeft,
+              cellPadding: const pw.EdgeInsets.all(6),
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 10,
+                font: font,
+              ),
+              cellStyle: pw.TextStyle(fontSize: 10, font: font),
+              headers: const ['Order Type', 'Amount'],
+              data: pendingOrderRows,
+            ),
+          ],
+        ],
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final tempFilePath = '${tempDir.path}/PartySummaryReport.pdf';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await Share.shareXFiles([
+      XFile(tempFilePath),
+    ], text: 'Sharing $reportname of $company');
+  }
 
   // ------------------------ SOLD PDF ------------------------
   Future<void> generateAndSharePDF_Sold() async {
@@ -817,16 +1237,31 @@ class _PartyClickedPageState extends State<PartyClicked>
     }
   }
 
-  void formatOnAccount(String outstanding) {
+  // overdueInt is passed so this can tell whether the caller ALSO bucketed
+  // this same amount via formatOnAccountWithBillNo (that happens whenever
+  // overdue_int > 0, even for an on-account/billno-null entry) - if it
+  // did, this money is already inside the bucket sums and must NOT be
+  // added again here, or the grand total silently doubles it.
+  void formatOnAccount(String rawOutstanding, int overdueInt) {
+    // Some bills come back with a comma-formatted amount (e.g.
+    // "-1,234.56") - strip it before parsing, same fix as Data.fromJson
+    // in PartyClickedRecPayClicked.dart.
+    final outstanding = rawOutstanding.replaceAll(',', '');
     final double value = double.tryParse(outstanding) ?? 0.0;
 
     if (value == 0) return;
+
+    final alreadyBucketed = overdueInt > 0;
 
     if (value < 0) {
       if (receivableparty == 'True') {
         setState(() {
           onAccountReceivable = outstanding; // raw: -57561
           ReceivableVisibility = true;
+          if (!alreadyBucketed) {
+            _currentReceivableOnAccount += value.abs();
+          }
+          _refreshReceivablePayableGrandTotals();
         });
       }
     } else {
@@ -834,141 +1269,116 @@ class _PartyClickedPageState extends State<PartyClicked>
         setState(() {
           onAccountPayable = outstanding; // raw: 57561
           PayableVisibility = true;
+          if (!alreadyBucketed) {
+            _currentPayableOnAccount += value;
+          }
+          _refreshReceivablePayableGrandTotals();
         });
       }
     }
   }
 
+  // Symbol-free on purpose: this only resets the bucket rows to "0" before
+  // recomputation, and the rows are rendered via _rowAmountWidget, which
+  // already prepends the symbol/Dirham glyph - baking it in here as well
+  // caused a doubled symbol on every bucket with no overdue data.
   String formatRemainingOverdue(String outstanding) {
     double outstanding_double = double.parse(outstanding);
-    outstanding = CurrencyFormatter.formatCurrency_double(outstanding_double);
-
-    return outstanding;
+    return CurrencyFormatter.formatCurrencyParts(outstanding_double).number;
   }
 
-  void formatOnAccountWithBillNo(int overdue_int, String total) {
-    double sum_total_180_receivable = 0.00;
-    double total_180_receivable = 0.00;
+  // Recomputes the headline receivabletotal/payabletotal from the same
+  // bucket sums the row1-row6 breakdown uses, so the big total figure can
+  // never drift from (or silently stay at 0 relative to) what the buckets
+  // below it actually show.
+  void _refreshReceivablePayableGrandTotals() {
+    // _currentReceivableOnAccount/_currentPayableOnAccount cover only the
+    // truly "not yet overdue" portion (overdue_int <= 0, never bucketed
+    // above) - so a party that's entirely current-balance still gets a
+    // correct total, without double-counting on-account rows that were
+    // ALSO bucketed (overdue_int > 0).
+    final receivableGrand =
+        _sumReceivable0 +
+        _sumReceivable30 +
+        _sumReceivable60 +
+        _sumReceivable90 +
+        _sumReceivable120 +
+        _sumReceivable180 +
+        _currentReceivableOnAccount;
+    final payableGrand =
+        _sumPayable0 +
+        _sumPayable30 +
+        _sumPayable60 +
+        _sumPayable90 +
+        _sumPayable120 +
+        _sumPayable180 +
+        _currentPayableOnAccount;
 
-    double sum_total_120_receivable = 0.00;
-    double total_120_receivable = 0.00;
+    if (receivableGrand > 0) {
+      receivabletotal = '-${receivableGrand.toStringAsFixed(2)}';
+    }
+    if (payableGrand > 0) {
+      payabletotal = payableGrand.toStringAsFixed(2);
+    }
+  }
 
-    double sum_total_90_receivable = 0.00;
-    double total_90_receivable = 0.00;
-
-    double sum_total_60_receivable = 0.00;
-    double total_60_receivable = 0.00;
-
-    double sum_total_30_receivable = 0.00;
-    double total_30_receivable = 0.00;
-
-    double sum_total_0_receivable = 0.00;
-    double total_0_receivable = 0.00;
-
-    double sum_total_180_payable = 0.00;
-    double total_180_payable = 0.00;
-
-    double sum_total_120_payable = 0.00;
-    double total_120_payable = 0.00;
-
-    double sum_total_90_payable = 0.00;
-    double total_90_payable = 0.00;
-
-    double sum_total_60_payable = 0.00;
-    double total_60_payable = 0.00;
-
-    double sum_total_30_payable = 0.00;
-    double total_30_payable = 0.00;
-
-    double sum_total_0_payable = 0.00;
-    double total_0_payable = 0.00;
-
+  void formatOnAccountWithBillNo(int overdue_int, String rawTotal) {
+    // Same comma-stripping fix as formatOnAccount/Data.fromJson - a
+    // comma-formatted amount here would make double.parse() below throw,
+    // aborting this bill's bucket update silently.
+    final total = rawTotal.replaceAll(',', '');
     if (total.contains("-")) {
       if (receivableparty == 'True') {
         setState(() {
           ReceivableVisibility = true;
         });
         if (overdue_int > 0 && overdue_int <= int.parse(heading1)) {
-          String total_string = total.replaceAll("-", "");
-          total_0_receivable = double.parse(total_string);
-          sum_total_0_receivable = sum_total_0_receivable + total_0_receivable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_0_receivable,
-          );
-          total_string = total_string + " DR";
-
-          row6_receivable = total_string.toString();
+          final amount = double.parse(total.replaceAll("-", ""));
+          _sumReceivable0 += amount;
+          row6_receivable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable0).number} DR';
         }
 
         if (overdue_int > int.parse(heading1) &&
             overdue_int <= int.parse(heading2)) {
-          String total_string = total.replaceAll("-", "");
-
-          total_30_receivable = double.parse(total_string);
-          sum_total_30_receivable =
-              sum_total_30_receivable + total_30_receivable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_30_receivable,
-          );
-          total_string = total_string + " DR";
-
-          row5_receivable = total_string.toString();
+          final amount = double.parse(total.replaceAll("-", ""));
+          _sumReceivable30 += amount;
+          row5_receivable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable30).number} DR';
         }
 
         if (overdue_int > int.parse(heading2) &&
             overdue_int <= int.parse(heading3)) {
-          String total_string = total.replaceAll("-", "");
-
-          total_60_receivable = double.parse(total_string);
-          sum_total_60_receivable =
-              sum_total_60_receivable + total_60_receivable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_60_receivable,
-          );
-          total_string = total_string + " DR";
-          row4_receivable = total_string.toString();
+          final amount = double.parse(total.replaceAll("-", ""));
+          _sumReceivable60 += amount;
+          row4_receivable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable60).number} DR';
         }
 
         if (overdue_int > int.parse(heading3) &&
             overdue_int <= int.parse(heading4)) {
-          String total_string = total.replaceAll("-", "");
-
-          total_90_receivable = double.parse(total_string);
-          sum_total_90_receivable =
-              sum_total_90_receivable + total_90_receivable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_90_receivable,
-          );
-          total_string = total_string + " DR";
-          row3_receivable = total_string.toString();
+          final amount = double.parse(total.replaceAll("-", ""));
+          _sumReceivable90 += amount;
+          row3_receivable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable90).number} DR';
         }
 
         if (overdue_int > int.parse(heading4) &&
             overdue_int <= int.parse(heading5)) {
-          String total_string = total.replaceAll("-", "");
-
-          total_120_receivable = double.parse(total_string);
-          sum_total_120_receivable =
-              sum_total_120_receivable + total_120_receivable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_120_receivable,
-          );
-          total_string = total_string + " DR";
-          row2_receivable = total_string.toString();
+          final amount = double.parse(total.replaceAll("-", ""));
+          _sumReceivable120 += amount;
+          row2_receivable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable120).number} DR';
         }
 
         if (overdue_int > int.parse(heading5)) {
-          String total_string = total.replaceAll("-", "");
-
-          total_180_receivable = double.parse(total_string);
-          sum_total_180_receivable =
-              sum_total_180_receivable + total_180_receivable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_180_receivable,
-          );
-          total_string = total_string + " DR";
-          row1_receivable = total_string.toString();
+          final amount = double.parse(total.replaceAll("-", ""));
+          _sumReceivable180 += amount;
+          row1_receivable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable180).number} DR';
         }
+
+        _refreshReceivablePayableGrandTotals();
       }
     } else {
       if (payableparty == 'True') {
@@ -976,81 +1386,52 @@ class _PartyClickedPageState extends State<PartyClicked>
           PayableVisibility = true;
         });
         if (overdue_int > 0 && overdue_int <= int.parse(heading1)) {
-          String total_string = total;
-          total_0_payable = double.parse(total_string);
-          sum_total_0_payable = sum_total_0_payable + total_0_payable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_0_payable,
-          );
-          total_string = total_string + " CR";
-
-          row6_payable = total_string.toString();
+          final amount = double.parse(total);
+          _sumPayable0 += amount;
+          row6_payable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumPayable0).number} CR';
         }
 
         if (overdue_int > int.parse(heading1) &&
             overdue_int <= int.parse(heading2)) {
-          String total_string = total;
-
-          total_30_payable = double.parse(total_string);
-          sum_total_30_payable = sum_total_30_payable + total_30_payable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_30_payable,
-          );
-          total_string = total_string + " CR";
-
-          row5_payable = total_string.toString();
+          final amount = double.parse(total);
+          _sumPayable30 += amount;
+          row5_payable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumPayable30).number} CR';
         }
 
         if (overdue_int > int.parse(heading2) &&
             overdue_int <= int.parse(heading3)) {
-          String total_string = total;
-
-          total_60_payable = double.parse(total_string);
-          sum_total_60_payable = sum_total_60_payable + total_60_payable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_60_payable,
-          );
-          total_string = total_string + " CR";
-          row4_payable = total_string.toString();
+          final amount = double.parse(total);
+          _sumPayable60 += amount;
+          row4_payable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumPayable60).number} CR';
         }
 
         if (overdue_int > int.parse(heading3) &&
             overdue_int <= int.parse(heading4)) {
-          String total_string = total;
-
-          total_90_payable = double.parse(total_string);
-          sum_total_90_payable = sum_total_90_payable + total_90_payable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_90_payable,
-          );
-          total_string = total_string + " CR";
-          row3_payable = total_string.toString();
+          final amount = double.parse(total);
+          _sumPayable90 += amount;
+          row3_payable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumPayable90).number} CR';
         }
 
         if (overdue_int > int.parse(heading4) &&
             overdue_int <= int.parse(heading5)) {
-          String total_string = total;
-
-          total_120_payable = double.parse(total_string);
-          sum_total_120_payable = sum_total_120_payable + total_120_payable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_120_payable,
-          );
-          total_string = total_string + " CR";
-          row2_payable = total_string.toString();
+          final amount = double.parse(total);
+          _sumPayable120 += amount;
+          row2_payable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumPayable120).number} CR';
         }
 
         if (overdue_int > int.parse(heading5)) {
-          String total_string = total;
-
-          total_180_payable = double.parse(total_string);
-          sum_total_180_payable = sum_total_180_payable + total_180_payable;
-          total_string = CurrencyFormatter.formatCurrency_double(
-            sum_total_180_payable,
-          );
-          total_string = total_string + " CR";
-          row1_payable = total_string.toString();
+          final amount = double.parse(total);
+          _sumPayable180 += amount;
+          row1_payable =
+              '${CurrencyFormatter.formatCurrencyParts(_sumPayable180).number} CR';
         }
+
+        _refreshReceivablePayableGrandTotals();
       }
     }
   }
@@ -1590,6 +1971,25 @@ class _PartyClickedPageState extends State<PartyClicked>
         }
 
         if (receivableparty == 'True' || payableparty == 'True') {
+          // Ageing-bucket accumulators must start fresh for every reload
+          // (new party, date-range change, etc.) - see
+          // formatOnAccountWithBillNo for why these can't just live as
+          // locals inside that function.
+          _sumReceivable0 = 0;
+          _sumReceivable30 = 0;
+          _sumReceivable60 = 0;
+          _sumReceivable90 = 0;
+          _sumReceivable120 = 0;
+          _sumReceivable180 = 0;
+          _sumPayable0 = 0;
+          _sumPayable30 = 0;
+          _sumPayable60 = 0;
+          _sumPayable90 = 0;
+          _sumPayable120 = 0;
+          _sumPayable180 = 0;
+          _currentReceivableOnAccount = 0;
+          _currentPayableOnAccount = 0;
+
           // receivable payable total calculation
           final url_recpaytotal = Uri.parse(HttpURL_receivablepayable_total!);
 
@@ -1677,7 +2077,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                 }
 
                 if (billno == 'null') {
-                  formatOnAccount(outstanding);
+                  formatOnAccount(outstanding, overdue_int);
                   if (overdue_int > 0) {
                     formatOnAccountWithBillNo(overdue_int, outstanding);
                   }
@@ -1839,6 +2239,8 @@ class _PartyClickedPageState extends State<PartyClicked>
         currencysymbol = format.currencySymbol;
         currencyFormat = NumberFormat('#,##0');
       }
+
+      _currencyCode = currencyCode;
 
       if (_selecteddate == 'Custom Date') {
         _startDate = DateTime.parse(prefs.getString('startdate')!);
@@ -2445,28 +2847,86 @@ class _PartyClickedPageState extends State<PartyClicked>
               AppNavigation.backOrDashboard(context);
             },
           ),
-          title: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 5.2),
+          title: Text(
+            partyname,
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
             ),
-            child: GestureDetector(
-              onTap: () {},
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      partyname,
-                      style: GoogleFonts.poppins(color: Colors.white),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          centerTitle: false,
+          actions: [
+            Visibility(
+              visible: isClicked_Summary &&
+                  (SalesVisibility ||
+                      PurchaseVisibility ||
+                      ReceiptVisibility ||
+                      PaymentVisibility ||
+                      CreditnoteVisibility ||
+                      DebitnoteVisibility ||
+                      JournalVisibility ||
+                      ReceivableVisibility ||
+                      PayableVisibility ||
+                      SalesOrderVisibility ||
+                      PurchaseOrderVisibility),
+              child: IconButton(
+                tooltip: 'Share Summary',
+                icon: const Icon(Icons.share, color: Colors.white, size: 26),
+                onPressed: () {
+                  final RenderBox button =
+                      context.findRenderObject() as RenderBox;
+                  final RenderBox overlay =
+                      Overlay.of(context).context.findRenderObject()
+                          as RenderBox;
+                  final Offset buttonPosition = button.localToGlobal(
+                    Offset.zero,
+                    ancestor: overlay,
+                  );
+
+                  showMenu(
+                    color: Theme.of(context).colorScheme.surface,
+                    context: context,
+                    position: RelativeRect.fromLTRB(
+                      overlay.size.width - buttonPosition.dx,
+                      buttonPosition.dy - button.size.height,
+                      overlay.size.width - buttonPosition.dx,
+                      buttonPosition.dy,
                     ),
-                  ),
-                ],
+                    items: <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.pop(context);
+                            generateAndSharePDF_Summary();
+                          },
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.picture_as_pdf,
+                                size: 16,
+                                color: Colors.teal,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Share as PDF',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.normal,
+                                  color: Colors.teal,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
-          ),
-          centerTitle: true,
-          actions: [
             Visibility(
               visible: isSearchLayoutVisible,
               child: Align(
@@ -2888,6 +3348,34 @@ class _PartyClickedPageState extends State<PartyClicked>
                                       ),
                                     ),
                                   ),
+                                if (SalesVisibility ||
+                                    PurchaseVisibility ||
+                                    ReceiptVisibility)
+                                  RepaintBoundary(
+                                    key: _trendChartRepaintKey,
+                                    child: PartyTrendChartCard(
+                                      series: [
+                                        if (SalesVisibility)
+                                          PartyTrendSeries(
+                                            label: 'Sales',
+                                            color: const Color(0xFF00BFA5),
+                                            monthsList: months_list_sales,
+                                          ),
+                                        if (PurchaseVisibility)
+                                          PartyTrendSeries(
+                                            label: 'Purchase',
+                                            color: const Color(0xFFFF6D00),
+                                            monthsList: months_list_purchase,
+                                          ),
+                                        if (ReceiptVisibility)
+                                          PartyTrendSeries(
+                                            label: 'Receipt',
+                                            color: const Color(0xFF2979FF),
+                                            monthsList: months_list_receipt,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
                                 if (SalesVisibility)
                                   SummaryExpansionCard(
                                     title: 'Sales',
@@ -2902,6 +3390,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     onTapTotal: () =>
                                         navigateToDetail('Sales', totalsaleamt),
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                   ),
 
@@ -2916,6 +3405,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     type: "Purchase",
                                     partyname: partyname,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTapTotal: () => navigateToDetail(
                                       'Purchase',
@@ -2934,11 +3424,10 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     type: "Receipt",
                                     partyname: partyname,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTapTotal: () {
-                                      String amount = formatAmount(
-                                        totalreceiptamt,
-                                      );
+                                      String amount = totalreceiptamt;
 
                                       print('amount -> $amount');
                                       String vchtype = 'Receipt';
@@ -2970,11 +3459,10 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     type: "Payment",
                                     partyname: partyname,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTapTotal: () {
-                                      String amount = formatAmount(
-                                        totalpaymentamt,
-                                      );
+                                      String amount = totalpaymentamt;
                                       print('amount -> $amount');
 
                                       String vchtype = 'Payment';
@@ -3006,6 +3494,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     type: "Credit Note",
                                     partyname: partyname,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTapTotal: () => navigateToDetail(
                                       'Credit Note',
@@ -3023,6 +3512,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     type: "Debit Note",
                                     partyname: partyname,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTapTotal: () => navigateToDetail(
                                       'Debit Note',
@@ -3040,11 +3530,10 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     type: "Journal",
                                     partyname: partyname,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTapTotal: () {
-                                      String amount = formatAmount(
-                                        totaljournalamt,
-                                      );
+                                      String amount = totaljournalamt;
                                       print('amount -> $amount');
                                       String vchtype = 'Journal';
                                       Navigator.push(
@@ -3068,6 +3557,8 @@ class _PartyClickedPageState extends State<PartyClicked>
                                   ReceivableBreakdownCard(
                                     total: receivabletotal,
                                     onAccount: onAccountReceivable,
+                                    currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     onTotalTap: () {
                                       navigateToReceivable(
                                         'Receivable',
@@ -3157,10 +3648,12 @@ class _PartyClickedPageState extends State<PartyClicked>
                                   PayableBreakdownCard(
                                     total: payabletotal,
                                     onAccount: onAccountPayable,
+                                    currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     onTotalTap: () {
                                       navigateToPayable(
                                         'Payable',
-                                        formatAmount(payabletotal.toString()),
+                                        payabletotal.toString(),
                                         '',
                                         'All',
                                       );
@@ -3246,6 +3739,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     label: 'Pending Sales Order',
                                     amount: pendingsalesorder,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal!,
                                     onTap: () => navigateToOrder('salesorder'),
                                   ),
@@ -3255,6 +3749,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     label: 'Pending Purchase Order',
                                     amount: pendingpurchaseorder,
                                     currencysymbol: currencysymbol,
+                                    currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTap: () => navigateToOrder('purcorder'),
                                   ),
@@ -3786,7 +4281,7 @@ class _PartyClickedPageState extends State<PartyClicked>
           startdate_string: startDateString,
           enddate_string: endDateString,
           type: vchtype,
-          total: formatAmount(amount),
+          total: amount,
           ledger: partyname,
         ),
       ),
@@ -3868,6 +4363,7 @@ class SummaryExpansionCard extends StatelessWidget {
   final String partyname;
   final int? decimal;
   final String? currencysymbol;
+  final String? currencyCode;
 
   const SummaryExpansionCard({
     super.key,
@@ -3882,6 +4378,7 @@ class SummaryExpansionCard extends StatelessWidget {
     required this.partyname,
     this.decimal,
     this.currencysymbol,
+    this.currencyCode,
   });
 
   String formatAmountWithCrDr(String amount) {
@@ -3898,6 +4395,32 @@ class SummaryExpansionCard extends StatelessWidget {
         : "";
 
     return value >= 0 ? "$symbol$formatted CR" : "$symbol$formatted DR";
+  }
+
+  // Widget counterpart of formatAmountWithCrDr - renders the Dirham glyph
+  // for AED in its own span, matching every other currency's plain text.
+  Widget formatAmountWithCrDrRich(
+    String amount,
+    TextStyle style, {
+    TextAlign? textAlign,
+    bool? softWrap,
+    TextOverflow? overflow,
+  }) {
+    double value = double.tryParse(amount.replaceAll(',', '')) ?? 0.0;
+    final decimals = decimal ?? 2;
+    final pattern = "#,##0.${'0' * decimals}";
+    final formatted = NumberFormat(pattern).format(value.abs());
+    final suffix = value >= 0 ? 'CR' : 'DR';
+
+    return currencyAmountText(
+      currencyCode: currencyCode ?? 'AED',
+      symbol: currencysymbol ?? '',
+      amountText: '$formatted $suffix',
+      textAlign: textAlign,
+      softWrap: softWrap,
+      overflow: overflow,
+      style: style,
+    );
   }
 
   IconData _getIconForTitle(String title) {
@@ -3960,7 +4483,13 @@ class SummaryExpansionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final formattedTotal = formatAmountWithCrDr(totalAmount);
+    final totalValueStyle = GoogleFonts.poppins(
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      color: Theme.of(context).brightness == Brightness.dark
+          ? Colors.tealAccent.shade100
+          : Colors.teal.shade700,
+    );
 
     return Container(
       margin: const EdgeInsets.only(left: 12, right: 12, top: 10),
@@ -4033,18 +4562,12 @@ class SummaryExpansionCard extends StatelessWidget {
 
             // 🔹 Total value (right aligned, wraps to next line if long)
             Flexible(
-              child: Text(
-                formattedTotal,
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.tealAccent.shade100
-                      : Colors.teal.shade700,
-                ),
-                textAlign: TextAlign.right, // ✅ right align
-                softWrap: true, // ✅ allow multi-line
-                overflow: TextOverflow.visible, // ✅ prevent clipping
+              child: formatAmountWithCrDrRich(
+                totalAmount,
+                totalValueStyle,
+                textAlign: TextAlign.right,
+                softWrap: true,
+                overflow: TextOverflow.visible,
               ),
             ),
           ],
@@ -4058,7 +4581,15 @@ class SummaryExpansionCard extends StatelessWidget {
           DetailRowTile(label: 'No. of Invoices', value: count),
           DetailRowTile(
             label: 'Avg Invoice Amount',
-            value: '${formatAmountWithCrDr(averageAmount)}',
+            value: '',
+            valueWidget: formatAmountWithCrDrRich(
+              averageAmount,
+              GoogleFonts.poppins(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
           ),
 
           const SizedBox(height: 6),
@@ -4074,6 +4605,7 @@ class SummaryExpansionCard extends StatelessWidget {
             child: ExpansionTile(
               tilePadding: const EdgeInsets.symmetric(horizontal: 18),
               title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // 🔹 Left side (icon + "Monthly Breakdown")
                   Expanded(
@@ -4106,27 +4638,27 @@ class SummaryExpansionCard extends StatelessWidget {
                               fontWeight: FontWeight.w600,
                               color: Theme.of(context).colorScheme.onSurface,
                             ),
-                            overflow: TextOverflow.visible, // ✅ safe truncate
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
                   ),
 
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
 
-                  // 🔹 Right side (formatted total)
-                  Flexible(
-                    child: Text(
-                      formattedTotal,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      overflow: TextOverflow.visible,
-                      textAlign: TextAlign.right, // ✅ align safely
+                  // 🔹 Right side (formatted total) - sized to content so it
+                  // doesn't compete for width with the label above and end
+                  // up cramped against it.
+                  formatAmountWithCrDrRich(
+                    totalAmount,
+                    GoogleFonts.poppins(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
+                    softWrap: false,
                   ),
                 ],
               ),
@@ -4192,9 +4724,9 @@ class SummaryExpansionCard extends StatelessWidget {
                         ),
                         Row(
                           children: [
-                            Text(
-                              formattedTotal,
-                              style: GoogleFonts.poppins(
+                            formatAmountWithCrDrRich(
+                              totalAmount,
+                              GoogleFonts.poppins(
                                 fontSize: 14.5,
                                 fontWeight: FontWeight.w600,
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -4239,7 +4771,6 @@ class SummaryExpansionCard extends StatelessWidget {
                     final card = months[index];
                     final month = card.mname;
                     final rawAmount = card.total.toString();
-                    final formattedAmount = formatAmountWithCrDr(rawAmount);
 
                     return GestureDetector(
                       onTap: () {
@@ -4255,7 +4786,6 @@ class SummaryExpansionCard extends StatelessWidget {
                         if (type == "Receipt" ||
                             type == "Payment" ||
                             type == "Journal") {
-                          String amount = formatAmount(rawAmount);
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -4263,7 +4793,7 @@ class SummaryExpansionCard extends StatelessWidget {
                                 startdate_string: startStr,
                                 enddate_string: endStr,
                                 type: type,
-                                total: amount,
+                                total: rawAmount,
                                 ledger: partyname,
                               ),
                             ),
@@ -4276,7 +4806,7 @@ class SummaryExpansionCard extends StatelessWidget {
                                 startdate_string: startStr,
                                 enddate_string: endStr,
                                 type: type,
-                                total: formatAmount(rawAmount),
+                                total: rawAmount,
                                 ledger: partyname,
                               ),
                             ),
@@ -4344,23 +4874,24 @@ class SummaryExpansionCard extends StatelessWidget {
                                           context,
                                         ).colorScheme.onSurface,
                                       ),
+                                      maxLines: 1,
                                       overflow: TextOverflow
-                                          .visible, // ✅ truncate safely
+                                          .ellipsis, // ✅ truncate instead of overlapping the amount
                                     ),
                                   ),
                                 ],
                               ),
                             ),
 
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 12),
 
                             // 🔹 Right side (amount + arrow)
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  formattedAmount,
-                                  style: GoogleFonts.poppins(
+                                formatAmountWithCrDrRich(
+                                  rawAmount,
+                                  GoogleFonts.poppins(
                                     fontSize: 14.5,
                                     fontWeight: FontWeight.w600,
                                     color: Theme.of(
@@ -4405,15 +4936,380 @@ class SummaryExpansionCard extends StatelessWidget {
   }
 }
 
+// Combines the already-fetched per-vchtype month summaries (Sales,
+// Purchase, Receipt) into one multi-line trend chart, instead of the
+// separate isolated month lists each SummaryExpansionCard already shows -
+// no extra API calls, this just re-renders data already in memory.
+enum _TrendGranularity { month, quarter, year }
+
+class _TrendBucket {
+  final String key;
+  final DateTime sortDate;
+  final String shortLabel;
+
+  _TrendBucket({
+    required this.key,
+    required this.sortDate,
+    required this.shortLabel,
+  });
+}
+
+class PartyTrendChartCard extends StatelessWidget {
+  final List<PartyTrendSeries> series;
+
+  const PartyTrendChartCard({super.key, required this.series});
+
+  // Finer-grained "nice number" steps than the usual 1/2/5/10 - the old
+  // 5->10 gap meant a value just above 5x magnitude got rounded all the
+  // way up to 10x (up to ~2x taller axis than the data needed).
+  static const List<double> _niceSteps = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+
+  double _niceMax(double rawMax) {
+    if (rawMax <= 0 || !rawMax.isFinite) return 1;
+    final padded = rawMax * 1.1;
+    final exponent = (math.log(padded) / math.ln10).floor();
+    final magnitude = math.pow(10, exponent).toDouble();
+    final normalized = padded / magnitude;
+    final nice = _niceSteps.firstWhere(
+      (step) => normalized <= step,
+      orElse: () => 10,
+    );
+    return nice * magnitude;
+  }
+
+  double _amount(String raw) {
+    return (double.tryParse(raw.replaceAll(',', '')) ?? 0.0).abs();
+  }
+
+  DateTime? _parseMonth(String mname) {
+    try {
+      return DateFormat('MMMM yyyy').parse(mname);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Always plot at monthly resolution - crowding on long ranges is instead
+  // handled by capping visible x-axis labels and simplifying the line
+  // rendering (see isDense below), not by changing the data granularity.
+  _TrendGranularity _pickGranularity(int distinctMonthCount) {
+    return _TrendGranularity.month;
+  }
+
+  _TrendBucket _bucketFor(DateTime date, _TrendGranularity granularity) {
+    switch (granularity) {
+      case _TrendGranularity.month:
+        return _TrendBucket(
+          key: DateFormat('yyyy-MM').format(date),
+          sortDate: DateTime(date.year, date.month, 1),
+          // Always include the year - a bare "Jan" reads as ambiguous
+          // (which year?) even when the visible data happens to be a
+          // single year, so keep the label unambiguous in every case.
+          shortLabel: DateFormat("MMM ''yy").format(date),
+        );
+      case _TrendGranularity.quarter:
+        final quarter = ((date.month - 1) ~/ 3) + 1;
+        final quarterStart = DateTime(date.year, (quarter - 1) * 3 + 1, 1);
+        return _TrendBucket(
+          key: '${date.year}-Q$quarter',
+          sortDate: quarterStart,
+          shortLabel: "Q$quarter '${DateFormat('yy').format(date)}",
+        );
+      case _TrendGranularity.year:
+        return _TrendBucket(
+          key: '${date.year}',
+          sortDate: DateTime(date.year, 1, 1),
+          shortLabel: '${date.year}',
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleSeries = series.where((s) => s.monthsList.isNotEmpty).toList();
+    if (visibleSeries.isEmpty) return const SizedBox.shrink();
+
+    final distinctMonths = <String>{};
+    for (final s in visibleSeries) {
+      for (final m in s.monthsList) {
+        distinctMonths.add(m.mname);
+      }
+    }
+    if (distinctMonths.isEmpty) return const SizedBox.shrink();
+
+    final granularity = _pickGranularity(distinctMonths.length);
+
+    // Aggregate each series' raw monthly totals into the chosen bucket
+    // resolution (sum within a bucket), then union + sort the bucket keys
+    // across all series so every line shares the same x-axis.
+    final bucketsByKey = <String, _TrendBucket>{};
+    final valuesBySeriesAndBucket = <int, Map<String, double>>{};
+
+    for (var i = 0; i < visibleSeries.length; i++) {
+      final totals = <String, double>{};
+      for (final m in visibleSeries[i].monthsList) {
+        final date = _parseMonth(m.mname);
+        if (date == null) continue;
+        final bucket = _bucketFor(date, granularity);
+        bucketsByKey[bucket.key] = bucket;
+        totals[bucket.key] = (totals[bucket.key] ?? 0.0) + _amount(m.total);
+      }
+      valuesBySeriesAndBucket[i] = totals;
+    }
+
+    final orderedBuckets = bucketsByKey.values.toList()
+      ..sort((a, b) => a.sortDate.compareTo(b.sortDate));
+    if (orderedBuckets.isEmpty) return const SizedBox.shrink();
+
+    final shortLabels = orderedBuckets.map((b) => b.shortLabel).toList();
+
+    var maxValue = 0.0;
+    for (final totals in valuesBySeriesAndBucket.values) {
+      for (final v in totals.values) {
+        maxValue = math.max(maxValue, v);
+      }
+    }
+    final maxY = _niceMax(maxValue);
+    final interval = maxY / 4;
+
+    // Even after bucketing, cap how many labels actually render so they
+    // never overlap - the rest are simply skipped, evenly spaced.
+    const maxVisibleLabels = 7;
+    final labelStep = (orderedBuckets.length / maxVisibleLabels).ceil().clamp(
+      1,
+      orderedBuckets.length,
+    );
+
+    final isDense = orderedBuckets.length > 24;
+    final barsData = <LineChartBarData>[
+      for (var i = 0; i < visibleSeries.length; i++)
+        LineChartBarData(
+          spots: [
+            for (var b = 0; b < orderedBuckets.length; b++)
+              FlSpot(
+                b.toDouble(),
+                valuesBySeriesAndBucket[i]![orderedBuckets[b].key] ?? 0.0,
+              ),
+          ],
+          isCurved: !isDense,
+          curveSmoothness: 0.22,
+          color: visibleSeries[i].color,
+          barWidth: 3,
+          isStrokeCapRound: true,
+          dotData: FlDotData(
+            show: !isDense,
+            getDotPainter: (spot, percent, barData, index) =>
+                FlDotCirclePainter(
+                  radius: 3.5,
+                  color: Colors.white,
+                  strokeWidth: 2,
+                  strokeColor: visibleSeries[i].color,
+                ),
+          ),
+          belowBarData: BarAreaData(show: false),
+        ),
+    ];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Theme.of(context).brightness == Brightness.dark
+            ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Trend Overview',
+            style: GoogleFonts.poppins(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: visibleSeries
+                .map((s) => _TrendLegendDot(color: s.color, label: s.label))
+                .toList(),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 220,
+            child: LineChart(
+              LineChartData(
+                minX: orderedBuckets.length > 1 ? -0.15 : -0.5,
+                maxX: orderedBuckets.length > 1
+                    ? orderedBuckets.length - 0.85
+                    : 0.5,
+                minY: 0,
+                maxY: maxY,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: interval,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: Theme.of(context).dividerColor,
+                    strokeWidth: 1,
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 52,
+                      interval: interval,
+                      getTitlesWidget: (value, meta) => Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          formatNumberAbbreviation(
+                            value,
+                            decimalPlaces: 1,
+                            showSuffix: false,
+                          ),
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      interval: labelStep.toDouble(),
+                      getTitlesWidget: (value, meta) {
+                        final index = value.round();
+                        if ((value - index).abs() > 0.01) {
+                          return const SizedBox.shrink();
+                        }
+                        if (index < 0 || index >= shortLabels.length) {
+                          return const SizedBox.shrink();
+                        }
+                        if (index % labelStep != 0) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            shortLabels[index],
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                ),
+                lineTouchData: LineTouchData(
+                  enabled: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (spots) {
+                      return spots.map((spot) {
+                        return LineTooltipItem(
+                          formatNumberAbbreviation(
+                            spot.y,
+                            decimalPlaces: 1,
+                            showSuffix: false,
+                          ),
+                          GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+                lineBarsData: barsData,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PartyTrendSeries {
+  final String label;
+  final Color color;
+  final List<months> monthsList;
+
+  const PartyTrendSeries({
+    required this.label,
+    required this.color,
+    required this.monthsList,
+  });
+}
+
+class _TrendLegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _TrendLegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class DetailRowTile extends StatelessWidget {
   final String label;
   final String value;
   final VoidCallback? onTap;
+  final Widget? valueWidget;
 
   const DetailRowTile({
     required this.label,
     required this.value,
     this.onTap,
+    this.valueWidget,
     super.key,
   });
 
@@ -4496,14 +5392,15 @@ class DetailRowTile extends StatelessWidget {
           ),
 
           // 🔹 Value
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
+          valueWidget ??
+              Text(
+                value,
+                style: GoogleFonts.poppins(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
         ],
       ),
     );
@@ -4518,6 +5415,7 @@ class PendingOrderTile extends StatelessWidget {
   final VoidCallback onTap;
   final int? decimal;
   final String? currencysymbol;
+  final String? currencyCode;
 
   const PendingOrderTile({
     super.key,
@@ -4526,6 +5424,7 @@ class PendingOrderTile extends StatelessWidget {
     required this.onTap,
     this.decimal,
     this.currencysymbol,
+    this.currencyCode,
   });
 
   LinearGradient _getGradient(String label) {
@@ -4610,11 +5509,12 @@ class PendingOrderTile extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Flexible(
-                    child: Text(
-                      formatCurrency(
+                    child: currencyAmountText(
+                      currencyCode: currencyCode ?? 'AED',
+                      symbol: currencysymbol ?? '',
+                      amountText: formatCurrency(
                         amount,
                         decimals: decimal ?? 2,
-                        currencySymbol: currencysymbol ?? '',
                         showCrDr: true,
                       ),
                       style: GoogleFonts.poppins(
@@ -4659,6 +5559,7 @@ class ReceivableBreakdownCard extends StatelessWidget {
 
   final int? decimal;
   final String? currencysymbol;
+  final String? currencyCode;
 
   const ReceivableBreakdownCard({
     super.key,
@@ -4670,6 +5571,7 @@ class ReceivableBreakdownCard extends StatelessWidget {
 
     this.decimal,
     this.currencysymbol,
+    this.currencyCode,
   });
 
   @override
@@ -4686,6 +5588,7 @@ class ReceivableBreakdownCard extends StatelessWidget {
       onTotalTap: onTotalTap,
       decimal: decimal,
       currencysymbol: currencysymbol,
+      currencyCode: currencyCode,
     );
   }
 }
@@ -4697,6 +5600,7 @@ class PayableBreakdownCard extends StatelessWidget {
   final VoidCallback onTotalTap;
   final int? decimal;
   final String? currencysymbol;
+  final String? currencyCode;
 
   const PayableBreakdownCard({
     super.key,
@@ -4706,6 +5610,7 @@ class PayableBreakdownCard extends StatelessWidget {
     required this.onTotalTap,
     this.decimal,
     this.currencysymbol,
+    this.currencyCode,
   });
 
   @override
@@ -4722,6 +5627,7 @@ class PayableBreakdownCard extends StatelessWidget {
       onTotalTap: onTotalTap,
       decimal: decimal,
       currencysymbol: currencysymbol,
+      currencyCode: currencyCode,
     );
   }
 }
@@ -4736,6 +5642,7 @@ class _BreakdownCardBase extends StatelessWidget {
   final VoidCallback onTotalTap;
   final int? decimal;
   final String? currencysymbol;
+  final String? currencyCode;
 
   const _BreakdownCardBase({
     required this.title,
@@ -4747,7 +5654,45 @@ class _BreakdownCardBase extends StatelessWidget {
     required this.onTotalTap,
     this.decimal,
     this.currencysymbol,
+    this.currencyCode,
   });
+
+  Widget _amountWidget(String amount, TextStyle style) {
+    String cleanAmount = amount;
+    String suffix;
+
+    if (amount.contains("-")) {
+      cleanAmount = amount.replaceAll("-", "");
+      suffix = "DR";
+    } else {
+      cleanAmount = amount == "null" ? "0" : amount;
+      suffix = "CR";
+    }
+
+    final amountDouble = double.tryParse(cleanAmount) ?? 0.0;
+    final parts = CurrencyFormatter.formatCurrencyParts(amountDouble);
+
+    return currencyAmountText(
+      currencyCode: currencyCode ?? 'AED',
+      symbol: currencysymbol ?? parts.symbol,
+      amountText: '${parts.number} $suffix',
+      style: style,
+    );
+  }
+
+  // For the bill-wise ageing rows (>180/>120/... etc): those come in as a
+  // plain number already suffixed with "DR"/"CR" (no currency symbol), so
+  // just prepend the symbol/Dirham glyph instead of re-parsing it.
+  Widget _rowAmountWidget(String amountWithSuffix, TextStyle style) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          currencySymbolSpan(currencyCode ?? 'AED', currencysymbol ?? '', style),
+          TextSpan(text: ' $amountWithSuffix', style: style),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4808,9 +5753,9 @@ class _BreakdownCardBase extends StatelessWidget {
                 ),
               ],
             ),
-            Text(
-              formatAmount(total),
-              style: GoogleFonts.poppins(
+            _amountWidget(
+              total,
+              GoogleFonts.poppins(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: Theme.of(context).brightness == Brightness.dark
@@ -4826,14 +5771,30 @@ class _BreakdownCardBase extends StatelessWidget {
           // Different icon + color per row
           _DetailRowTile(
             label: 'Total',
-            value: formatAmount(total),
+            value: '',
+            valueWidget: _amountWidget(
+              total,
+              GoogleFonts.poppins(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
             icon: Icons.summarize,
             iconColor: Colors.teal,
             onTap: onTotalTap,
           ),
           _DetailRowTile(
             label: 'On Account',
-            value: formatAmount(onAccount),
+            value: '',
+            valueWidget: _amountWidget(
+              onAccount,
+              GoogleFonts.poppins(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
             icon: Icons.account_balance_wallet,
             iconColor: Colors.indigo,
             // onTap: onTotalTap,
@@ -4844,7 +5805,15 @@ class _BreakdownCardBase extends StatelessWidget {
           for (final row in rows)
             _DetailRowTile(
               label: row['label'] ?? '',
-              value: row['value'] ?? '',
+              value: '',
+              valueWidget: _rowAmountWidget(
+                row['value'] ?? '',
+                GoogleFonts.poppins(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
               icon: Icons.circle, // 👈 you can map this dynamically
               iconColor: Colors.orange, // 👈 different color per row
               onTap: row['onTap'],
@@ -4861,6 +5830,7 @@ class _DetailRowTile extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
   final VoidCallback? onTap;
+  final Widget? valueWidget;
 
   const _DetailRowTile({
     required this.label,
@@ -4868,6 +5838,7 @@ class _DetailRowTile extends StatelessWidget {
     required this.icon,
     required this.iconColor,
     this.onTap,
+    this.valueWidget,
   });
 
   @override
@@ -4901,14 +5872,15 @@ class _DetailRowTile extends StatelessWidget {
           ),
           Row(
             children: [
-              Text(
-                value,
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
+              valueWidget ??
+                  Text(
+                    value,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
               if (onTap != null)
                 Padding(
                   padding: EdgeInsets.only(left: 6),
@@ -4925,6 +5897,20 @@ class _DetailRowTile extends StatelessWidget {
     );
 
     return onTap != null ? GestureDetector(onTap: onTap, child: row) : row;
+  }
+}
+
+// Some backends send qty as "12 Nos" (number + unit) rather than a bare
+// number - the unit is already shown as its own field elsewhere, so strip
+// it here to avoid showing it twice in a confusing "qty unit" run-on.
+String _stripUnitSuffix(String value) {
+  try {
+    final numberOnly = value.replaceAll(RegExp(r'[^0-9.]'), '');
+    if (numberOnly.isEmpty) return value;
+    final parsed = double.parse(numberOnly);
+    return parsed % 1 == 0 ? parsed.toInt().toString() : parsed.toString();
+  } catch (_) {
+    return value;
   }
 }
 
@@ -5020,7 +6006,7 @@ Widget _buildSoldPurchaseCard({
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  "Qty: $qty",
+                  "Qty: ${_stripUnitSuffix(qty)}",
                   style: GoogleFonts.poppins(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
@@ -5105,12 +6091,9 @@ Widget _buildSoldPurchaseCard({
                     const SizedBox(width: 8),
                     // 👇 this makes sure long text wraps and stays aligned to the right
                     Flexible(
-                      child: Text(
-                        CurrencyFormatter.formatCurrency_normal(rate),
-                        textAlign: TextAlign.right,
-                        softWrap: true,
-                        overflow: TextOverflow.visible,
-                        style: GoogleFonts.poppins(
+                      child: _rateAmountWidget(
+                        rate,
+                        GoogleFonts.poppins(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
                           color: Theme.of(context).colorScheme.onSurface,
@@ -5125,6 +6108,36 @@ Widget _buildSoldPurchaseCard({
         ],
       ),
     ),
+  );
+}
+
+// Rate display for _buildSoldPurchaseCard - top-level function so it can't
+// reach a widget's currencyCode field; reads the globally-saved currency
+// instead, same source CurrencyFormatter.formatCurrency_normal used, but
+// keeps the symbol in its own span so AED renders the Dirham glyph instead
+// of literal "AED" text.
+Widget _rateAmountWidget(String rate, TextStyle style) {
+  String cleaned = rate.trim();
+  String unit = "";
+  if (cleaned.contains("/")) {
+    final parts = cleaned.split("/");
+    cleaned = parts[0];
+    unit = "/${parts.sublist(1).join("/")}";
+  }
+  final parsed = double.tryParse(cleaned.replaceAll(",", "")) ?? 0.0;
+  final parts = CurrencyFormatter.formatCurrencyParts(parsed);
+  final currencyCode = CurrencyFormatter.getCurrencyCode();
+
+  return Text.rich(
+    TextSpan(
+      children: [
+        currencySymbolSpan(currencyCode, parts.symbol, style),
+        TextSpan(text: ' ${parts.number}$unit', style: style),
+      ],
+    ),
+    textAlign: TextAlign.right,
+    softWrap: true,
+    overflow: TextOverflow.visible,
   );
 }
 

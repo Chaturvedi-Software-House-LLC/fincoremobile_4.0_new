@@ -84,25 +84,6 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
 
   List<ReceiptModel> filteredReceiptEntries = [];
 
-  String formatAmount(String amount) {
-    String amount_string = "";
-    if (amount.contains("-")) {
-      amount = amount.replaceAll("-", "");
-      double amount_double = double.parse(amount);
-      amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
-      amount_string = amount_string;
-    } else {
-      if (amount == "null") {
-        amount = "0";
-      }
-      double amount_double = double.parse(amount);
-      amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
-      amount_string = amount_string;
-    }
-    // Apply any transformations or formatting to the 'amount' variable here
-    return amount_string;
-  }
-
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -112,7 +93,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
 
       print("serial_no: $serial_no");
       print("isVanSalesSerial: $isVanSalesSerial");
@@ -929,7 +910,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
                             voucherNo: '$vchno',
                             date: formattedDate,
                             partyName: partyLedger,
-                            amount: formatAmount(totalAmount.toString()),
+                            amount: totalAmount.toString(),
                             isSynced: card.isSynced == 1,
                             errorMessage:
                                 (card.isSynced == 2 && card.message != null)

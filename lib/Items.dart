@@ -208,23 +208,21 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   String? _selectedFilter = 'qty';
 
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   late int? decimal;
 
-  String formatAmountWithDRCR(String value) {
+  // Renders without the leading symbol, for use with _currencyValueWidget
+  // (which renders the symbol itself so it can swap in the Dirham glyph
+  // for AED).
+  String _formatAmountWithDRCRSuffix(String value) {
     if (value == "null" || value.isEmpty) {
       return "-";
     }
 
     double amount = double.tryParse(value) ?? 0;
-
     String formatted = formatAmountinDecimals(amount.abs(), decimal!);
-
-    if (amount < 0) {
-      return "$currencysymbol $formatted DR";
-    } else {
-      return "$currencysymbol $formatted CR";
-    }
+    return amount < 0 ? "$formatted DR" : "$formatted CR";
   }
 
   void showToast(String message) {
@@ -2118,6 +2116,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       currencyFormat = NumberFormat('#,##0');
     }
 
+    _currencyCode = currencyCode ?? 'AED';
+
     hostname = prefs.getString('hostname');
     company = prefs.getString('company_name');
     company_lowercase = company!.replaceAll(' ', '').toLowerCase();
@@ -2966,8 +2966,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    formatAmount(totalValue.toString()),
+                  formatAmountRich(
+                    totalValue.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
@@ -3065,8 +3065,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        formatAmount(totalValue.toString()),
+                      formatAmountRich(
+                        totalValue.toString(),
                         style: GoogleFonts.poppins(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
@@ -3173,25 +3173,58 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.itemname,
-                      softWrap: true,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.itemname,
+                            softWrap: true,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: formatAmountRich(
+                            item.c_amount,
+                            softWrap: true,
+                            textAlign: TextAlign.right,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      'Qty: ${removeUnit(item.c_qty)} ${item.unit}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Qty: ${removeUnit(item.c_qty)}',
+                            softWrap: true,
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${(share * 100).toStringAsFixed(1)}%',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
                     ClipRRect(
@@ -3208,29 +3241,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    formatAmount(item.c_amount),
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${(share * 100).toStringAsFixed(1)}%',
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -3392,8 +3402,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    formatAmount(bucket.value.toString()),
+                  formatAmountRich(
+                    bucket.value.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
@@ -3486,8 +3496,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                               Text(
                                 card.itemname,
                                 softWrap: true,
-                                maxLines: 3, // allow wrapping for long names
-                                overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.poppins(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w700,
@@ -3609,33 +3617,54 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                     _modernDetailRow(
                       Icons.sell_outlined,
                       "Last Sale Price",
-                      card.saleprice != "null"
-                          ? '$currencysymbol ${formatAmountinDecimals(double.parse(removeUnit(card.saleprice).toString()), decimal!)}'
-                          : "-",
+                      "-",
+                      valueWidget: card.saleprice != "null"
+                          ? _currencyValueWidget(
+                              formatAmountinDecimals(
+                                double.parse(removeUnit(card.saleprice).toString()),
+                                decimal!,
+                              ),
+                            )
+                          : null,
                     ),
 
                     _modernDetailRow(
                       Icons.local_offer_outlined,
                       "Standard Price",
-                      card.standardprice != "null"
-                          ? '$currencysymbol ${formatAmountinDecimals(double.parse(removeUnit(card.standardprice).toString()), decimal!)}'
-                          : "-",
+                      "-",
+                      valueWidget: card.standardprice != "null"
+                          ? _currencyValueWidget(
+                              formatAmountinDecimals(
+                                double.parse(removeUnit(card.standardprice).toString()),
+                                decimal!,
+                              ),
+                            )
+                          : null,
                     ),
 
                     if (rate_visibility && card.c_rate != "null")
                       _modernDetailRow(
                         Icons.attach_money,
                         "Rate",
-                        '$currencysymbol ${formatAmountinDecimals(double.parse(removeUnit(card.c_rate).toString()), decimal!)}',
+                        "-",
+                        valueWidget: _currencyValueWidget(
+                          formatAmountinDecimals(
+                            double.parse(removeUnit(card.c_rate).toString()),
+                            decimal!,
+                          ),
+                        ),
                       ),
 
                     if (amount_visibility)
                       _modernDetailRow(
                         Icons.payments,
                         "Amount",
-                        card.c_amount != "null"
-                            ? formatAmountWithDRCR(card.c_amount.toString())
-                            : "-",
+                        "-",
+                        valueWidget: card.c_amount != "null"
+                            ? _currencyValueWidget(
+                                _formatAmountWithDRCRSuffix(card.c_amount.toString()),
+                              )
+                            : null,
                       ),
 
                     if (_isInactiveList)
@@ -3654,8 +3683,30 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     );
   }
 
+  // 🔹 Value widget for _modernDetailRow's currency rows - renders the new
+  // Dirham glyph for AED (light/dark aware) while other currencies show
+  // their plain symbol text unchanged, matching _modernDetailRow's style.
+  Widget _currencyValueWidget(String amountText) {
+    return currencyAmountText(
+      currencyCode: _currencyCode,
+      symbol: currencysymbol,
+      amountText: amountText,
+      overflow: TextOverflow.visible,
+      style: GoogleFonts.poppins(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+
   // 🔹 Modern detail row with icon pill
-  Widget _modernDetailRow(IconData icon, String title, String value) {
+  Widget _modernDetailRow(
+    IconData icon,
+    String title,
+    String value, {
+    Widget? valueWidget,
+  }) {
     // Gradient selection based on title
     LinearGradient getGradient(String title) {
       if (title.contains("Sale")) {
@@ -3732,18 +3783,20 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           Expanded(
             child: Align(
               alignment: Alignment.centerRight,
-              child: Text(
-                value,
-                textAlign: TextAlign.right, // ✅ text inside also right aligned
+              child: valueWidget ??
+                  Text(
+                    value,
+                    textAlign:
+                        TextAlign.right, // ✅ text inside also right aligned
 
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-                overflow: TextOverflow.visible,
-                softWrap: true,
-              ),
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                    overflow: TextOverflow.visible,
+                    softWrap: true,
+                  ),
             ),
           ),
         ],

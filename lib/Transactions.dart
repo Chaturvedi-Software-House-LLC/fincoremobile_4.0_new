@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/utils/currency_helper.dart';
 /*import 'package:FincoreGo/currencyFormat.dart';*/
@@ -18,6 +20,7 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
+import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
@@ -174,6 +177,7 @@ class _TransactionsPageState extends State<Transactions>
   late NumberFormat currencyFormat;
 
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   String? hostname = "",
       company = "",
@@ -182,6 +186,11 @@ class _TransactionsPageState extends State<Transactions>
       username = "";
 
   bool _isLoading = false;
+
+  // Toggles between the transaction list and the voucher-type trend
+  // chart - having both stacked on screen at once was too cluttered, so
+  // only one shows at a time now, tab-style.
+  bool _isTrendTabSelected = false;
 
   String? HttpURL_Parent, HttpURL_transaction;
 
@@ -656,7 +665,8 @@ class _TransactionsPageState extends State<Transactions>
     if (_isTextEnabled) {
       final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
       String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate = DateTime.parse(startfrom!);
+      DateTime earliestDate =
+          DateTime.tryParse(startfrom ?? '') ?? DateTime(2000);
 
       DateTimeRange? selectedDateRange = await showDateRangePicker(
         context: context,
@@ -730,6 +740,186 @@ class _TransactionsPageState extends State<Transactions>
     String formattedDate = DateFormat("dd-MMM-yyyy").format(date);
 
     return formattedDate;
+  }
+
+  // Stacked bar - one bar per month, segments colored by voucher type.
+  // Aggregates the already-fetched transactions_list (no new API call).
+  // A multi-line chart with 8 crossing lines was too cluttered to read;
+  // stacking shows both the total monthly volume AND the type breakdown
+  // within it, in one view, with no overlapping lines.
+  static const List<Color> _voucherTrendPalette = [
+    Color(0xFF00BFA5),
+    Color(0xFFFF6D00),
+    Color(0xFF2979FF),
+    Color(0xFF8E24AA),
+    Color(0xFFFFC107),
+    Color(0xFF43A047),
+    Color(0xFFE53935),
+    Color(0xFF3949AB),
+  ];
+
+  Map<String, Map<String, double>> _buildVoucherStackedTotals() {
+    final totalsByTypeAndMonth = <String, Map<String, double>>{};
+
+    for (final t in transactions_list) {
+      final date = DateTime.tryParse(t.vchdate);
+      if (date == null) continue;
+      final monthLabel = DateFormat('MMMM yyyy').format(date);
+      final byMonth = totalsByTypeAndMonth.putIfAbsent(t.vchname, () => {});
+      byMonth[monthLabel] = (byMonth[monthLabel] ?? 0) + t.amount.abs();
+    }
+
+    return totalsByTypeAndMonth;
+  }
+
+  // Transaction COUNT per month (not amount) - summing mixed voucher-type
+  // amounts together (Sales + Purchase + Receipt + Payment + Journal...)
+  // doesn't produce a meaningful number since they're different kinds of
+  // economic events. Count is meaningful regardless of the type mix.
+  Map<String, int> _buildVoucherMonthCounts() {
+    final countByMonth = <String, int>{};
+    for (final t in transactions_list) {
+      final date = DateTime.tryParse(t.vchdate);
+      if (date == null) continue;
+      final monthLabel = DateFormat('MMMM yyyy').format(date);
+      countByMonth[monthLabel] = (countByMonth[monthLabel] ?? 0) + 1;
+    }
+    return countByMonth;
+  }
+
+  // Compact dropdown for the header - a small icon-labelled pill instead
+  // of a full-width bordered box, so the two dropdowns can sit side by
+  // side in one row instead of stacking full-width one under the other.
+  Widget _buildCompactDropdown<T>({
+    required T? value,
+    required IconData icon,
+    required List<T> items,
+    required String Function(T) itemLabel,
+    required void Function(T?) onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: Colors.teal),
+          const SizedBox(width: 6),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<T>(
+                value: value,
+                isExpanded: true,
+                isDense: true,
+                style: GoogleFonts.poppins(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+                dropdownColor: Theme.of(context).colorScheme.surface,
+                icon: const Icon(
+                  Icons.arrow_drop_down,
+                  color: Colors.teal,
+                  size: 20,
+                ),
+                items: items
+                    .map(
+                      (item) => DropdownMenuItem<T>(
+                        value: item,
+                        child: Text(
+                          itemLabel(item),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTransactionsTabRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildTransTabButton(
+              label: 'Overview',
+              isSelected: _isTrendTabSelected,
+              onTap: () => setState(() => _isTrendTabSelected = true),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildTransTabButton(
+              label: 'Transactions',
+              isSelected: !_isTrendTabSelected,
+              onTap: () => setState(() => _isTrendTabSelected = false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTransTabButton({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: [Colors.teal.shade400, Colors.teal.shade600],
+                )
+              : LinearGradient(
+                  colors: Theme.of(context).brightness == Brightness.dark
+                      ? [
+                          Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest.withOpacity(0.7),
+                          Theme.of(context).cardColor.withOpacity(0.95),
+                        ]
+                      : [Colors.grey.shade200, Colors.grey.shade100],
+                ),
+          borderRadius: BorderRadius.circular(50),
+          boxShadow: [
+            if (isSelected)
+              BoxShadow(
+                color: Colors.teal.withOpacity(0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+          ],
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: isSelected
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> fetchParentData(final String ledGroups) async {
@@ -1048,63 +1238,24 @@ class _TransactionsPageState extends State<Transactions>
         _IsSizeboxVisible = true;
       });
     } else if (_selecteddate == "Custom Date") {
+      // _startDate/_endDate are already loaded from the same 'startdate'/
+      // 'enddate' prefs Dashboard saved (see _initSharedPreferences) - use
+      // that range directly instead of forcing the native date-range
+      // picker open every time this runs. The picker should only appear
+      // when the user explicitly taps the date-range pill (_selectDateRange),
+      // not automatically on load - that was popping up unprompted and,
+      // if dismissed without picking, crashed on a force-unwrapped null.
       setState(() {
         _isTextEnabled = true;
-
         _isDashVisible = true;
         _isEnddateVisible = true;
         _IsSizeboxVisible = true;
-      });
-
-      _selectDateRange_auto(context);
-    }
-  }
-
-  Future<void> _selectDateRange_auto(BuildContext context) async {
-    if (_isTextEnabled) {
-      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
-      String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate = DateTime.parse(startfrom!);
-
-      DateTimeRange? selectedDateRange = await showDateRangePicker(
-        context: context,
-        initialDateRange: initialDateRange,
-        firstDate: earliestDate,
-        lastDate: DateTime(2100),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: app_color, // main accent color
-                onPrimary: Colors.white,
-                surface: Theme.of(context).colorScheme.surface,
-                onSurface: Theme.of(context).colorScheme.onSurface,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                rangeSelectionBackgroundColor: app_color.withOpacity(
-                  0.15,
-                ), // 🔹 light shade of your app_color
-                rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                  app_color.withOpacity(0.15),
-                ),
-              ),
-            ),
-            child: child!,
-          );
-        },
-      );
-
-      setState(() {
-        _startDate = selectedDateRange!.start;
-        _endDate = selectedDateRange!.end;
 
         DateTime start = _startDate;
         DateTime end = _endDate;
 
         String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
+        String sdf = DateFormat('MM').format(start);
         String startDay = DateFormat('dd').format(start);
         int startYear = start.year;
 
@@ -1119,12 +1270,9 @@ class _TransactionsPageState extends State<Transactions>
         startdate_text =
             startDay + "-" + startMonth + "-" + startYear.toString();
         enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchMainData();
       });
+
+      fetchMainData();
     }
   }
 
@@ -1271,11 +1419,11 @@ class _TransactionsPageState extends State<Transactions>
 
     setState(() {
       hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
+      company = prefs.getString('company_name') ?? '';
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
       datetype = prefs.getString('datetype') ?? date_range.first;
       decimal = prefs?.getInt('decimalplace') ?? 2;
 
@@ -1320,6 +1468,7 @@ class _TransactionsPageState extends State<Transactions>
         currencysymbol = format.currencySymbol;
         currencyFormat = NumberFormat('#,##0');
       }
+      _currencyCode = currencyCode ?? 'AED';
 
       PostDatedTransactionsHolder =
           prefs.getString("postdatedtransactions") ?? "True";
@@ -1337,8 +1486,18 @@ class _TransactionsPageState extends State<Transactions>
       _selecteddate = datetype;
 
       if (_selecteddate == 'Custom Date') {
-        _startDate = DateTime.parse(prefs.getString('startdate')!);
-        _endDate = DateTime.parse(prefs.getString('enddate')!);
+        // Dashboard can leave 'datetype'='Custom Date' saved without a
+        // matching startdate/enddate (e.g. the range picker was
+        // cancelled) - DateTime.parse(...)! on a null/empty string threw
+        // here, uncaught, aborting the rest of this setState (and every
+        // fetch that follows it), which is why the whole screen loaded
+        // nothing. Fall back to a sensible default range instead.
+        _startDate =
+            DateTime.tryParse(prefs.getString('startdate') ?? '') ??
+            DateTime.now().subtract(const Duration(days: 30));
+        _endDate =
+            DateTime.tryParse(prefs.getString('enddate') ?? '') ??
+            DateTime.now();
 
         DateTime start = _startDate;
         DateTime end = _endDate;
@@ -1597,15 +1756,19 @@ class _TransactionsPageState extends State<Transactions>
             CustomScrollView(
               controller: _scrollFabController,
               slivers: [
-                //top header layout
+                //top header layout - compact: both dropdowns share one row
+                //instead of stacking, and the date-range pill sits directly
+                //below with tight spacing, cutting overall header height
+                //roughly in half versus the previous 3-stacked-rows layout.
                 SliverToBoxAdapter(
                   child: Container(
-                    margin: EdgeInsets.only(
+                    margin: const EdgeInsets.only(
                       left: 12,
                       right: 12,
                       top: 8,
                       bottom: 0,
                     ),
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(20),
@@ -1614,201 +1777,117 @@ class _TransactionsPageState extends State<Transactions>
                           color: Colors.black12.withOpacity(0.08),
                           blurRadius: 10,
                           spreadRadius: 2,
-                          offset: Offset(0, 4),
+                          offset: const Offset(0, 4),
                         ),
                       ],
                     ),
-                    child: IntrinsicHeight(
-                      child: Align(
-                        alignment: Alignment.center,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 16, bottom: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              // Date Range Dropdown
-                              Container(
-                                margin: const EdgeInsets.only(
-                                  left: 16,
-                                  right: 16,
-                                  top: 4,
-                                  bottom: 8,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildCompactDropdown<dynamic>(
+                                value: _selecteddate,
+                                icon: Icons.event_repeat_rounded,
+                                items: date_range,
+                                itemLabel: (item) => item.toString(),
+                                onChanged: (value) {
+                                  setState(() {
+                                    _handleDate(value);
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _buildCompactDropdown<String>(
+                                value: _selectedtransaction,
+                                icon: Icons.receipt_long_rounded,
+                                items: spinner_list,
+                                itemLabel: (item) => item,
+                                onChanged: (newValue) {
+                                  setState(() {
+                                    _selectedtransaction = newValue;
+                                  });
+                                  fetchtransactionsData();
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+
+                        /// 📆 Compact date range selector
+                        InkWell(
+                          onTap: () => _selectDateRange(context),
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white.withOpacity(0.06)
+                                  : Colors.teal.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: app_color.withOpacity(0.4),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.calendar_month_rounded,
+                                  size: 15,
+                                  color: Colors.teal,
                                 ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).cardColor,
-                                  borderRadius: BorderRadius.circular(18),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black12,
-                                      blurRadius: 6,
-                                      offset: Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<dynamic>(
-                                    value: _selecteddate,
-                                    isExpanded: true,
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    "$startdate_text → $enddate_text",
+                                    overflow: TextOverflow.ellipsis,
                                     style: GoogleFonts.poppins(
-                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
                                     ),
-                                    dropdownColor: Theme.of(
-                                      context,
-                                    ).colorScheme.surface,
-                                    icon: const Icon(
-                                      Icons.arrow_drop_down,
-                                      color: Colors.teal,
-                                    ),
-                                    items: date_range.map((item) {
-                                      return DropdownMenuItem<dynamic>(
-                                        value: item,
-                                        child: Text(item),
-                                      );
-                                    }).toList(),
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _handleDate(value);
-                                      });
-                                    },
                                   ),
                                 ),
-                              ),
-
-                              // Transaction Dropdown
-                              Container(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).cardColor,
-                                  borderRadius: BorderRadius.circular(18),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black12,
-                                      blurRadius: 6,
-                                      offset: Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<String>(
-                                    value: _selectedtransaction,
-                                    isExpanded: true,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 16,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurface,
-                                    ),
-                                    dropdownColor: Theme.of(
-                                      context,
-                                    ).colorScheme.surface,
-                                    icon: const Icon(
-                                      Icons.arrow_drop_down,
-                                      color: Colors.teal,
-                                    ),
-                                    items: spinner_list.map((String value) {
-                                      return DropdownMenuItem<String>(
-                                        value: value,
-                                        child: Text(
-                                          value,
-
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      );
-                                    }).toList(),
-                                    onChanged: (String? newValue) {
-                                      setState(() {
-                                        _selectedtransaction = newValue;
-                                      });
-                                      fetchtransactionsData();
-                                    },
-                                  ),
-                                ),
-                              ),
-
-                              const SizedBox(height: 18),
-
-                              /// 📆 Modern Date Range Selector
-                              InkWell(
-                                onTap: () => _selectDateRange(context),
-                                borderRadius: BorderRadius.circular(50),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Theme.of(context)
-                                            .colorScheme
-                                            .surfaceContainerHighest
-                                            .withOpacity(
-                                              Theme.of(context).brightness ==
-                                                      Brightness.dark
-                                                  ? 0.72
-                                                  : 0.55,
-                                            ),
-                                        Theme.of(
-                                          context,
-                                        ).colorScheme.surface.withOpacity(
-                                          Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? 0.92
-                                              : 0.86,
-                                        ),
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                    border: Border.all(
-                                      color: app_color,
-                                      width: 1,
-                                    ),
-                                    borderRadius: BorderRadius.circular(50),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.calendar_month_rounded,
-                                        size: 18,
-                                        color: Colors.teal,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Text(
-                                        "$startdate_text → $enddate_text",
-                                        style: GoogleFonts.poppins(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 14,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
                 ),
 
+                if (transactions_list.isNotEmpty)
+                  SliverToBoxAdapter(child: _buildTransactionsTabRow()),
+
+                if (_isTrendTabSelected && transactions_list.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: VoucherOverviewChart(
+                        totalsByTypeAndMonth: _buildVoucherStackedTotals(),
+                        countByMonth: _buildVoucherMonthCounts(),
+                        palette: _voucherTrendPalette,
+                        currencysymbol: currencysymbol,
+                        currencyCode: _currencyCode,
+                      ),
+                    ),
+                  ),
+
+                if (!_isTrendTabSelected)
                 SliverToBoxAdapter(
                   child: Column(
                     children: [
@@ -2016,19 +2095,28 @@ class _TransactionsPageState extends State<Transactions>
                                     ),
                                   ),
                                 ),*/
-                            isVisibleNoDataFound
-                                ? _buildEmptyState(context)
-                                : ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: NeverScrollableScrollPhysics(),
-                                    controller: _scrollController_transactions,
-                                    itemCount:
-                                        filteredItems_transactions.length,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
-                                    ),
-                                    itemBuilder: (context, index) {
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // 📋 Transaction list - a real sliver (SliverList) so the
+                // CustomScrollView only builds cards near the viewport; the
+                // previous shrinkWrap ListView.builder forced eager layout
+                // of every transaction up front, which is what caused the
+                // same scroll-hang bug already fixed on the Party list.
+                if (!_isTrendTabSelected && isVisibleNoDataFound)
+                  SliverToBoxAdapter(child: _buildEmptyState(context))
+                else if (!_isTrendTabSelected)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
                                       final card =
                                           filteredItems_transactions[index];
                                       final double amt =
@@ -2040,7 +2128,7 @@ class _TransactionsPageState extends State<Transactions>
 
                                       // 🔹 Currency + Decimal + CR/DR
                                       final formattedAmount =
-                                          '$currencysymbol ${NumberFormat("#,##0.${"0" * decimal!}").format(amt.abs())} ${isDebit ? "DR" : "CR"}';
+                                          '${NumberFormat("#,##0.${"0" * decimal!}").format(amt.abs())} ${isDebit ? "DR" : "CR"}';
                                       return GestureDetector(
                                         onTap: () {
                                           Navigator.push(
@@ -2193,8 +2281,9 @@ class _TransactionsPageState extends State<Transactions>
                                                                   .colorScheme
                                                                   .onSurface,
                                                         ),
+                                                        maxLines: 1,
                                                         overflow: TextOverflow
-                                                            .visible,
+                                                            .ellipsis,
                                                       ),
                                                     ),
 
@@ -2261,10 +2350,30 @@ class _TransactionsPageState extends State<Transactions>
                                                 _modernDetailRow(
                                                   context,
                                                   "Amount",
-                                                  formattedAmount,
+                                                  '',
                                                   Icons.payments_outlined,
                                                   isDebit: isDebit,
                                                   isAmountRow: true,
+                                                  valueWidget: currencyAmountText(
+                                                    currencyCode:
+                                                        _currencyCode,
+                                                    symbol: currencysymbol,
+                                                    amountText:
+                                                        formattedAmount,
+                                                    textAlign:
+                                                        TextAlign.right,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: GoogleFonts.poppins(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurface,
+                                                    ),
+                                                  ),
                                                 ),
 
                                                 /// 🔹 Tags
@@ -2360,19 +2469,17 @@ class _TransactionsPageState extends State<Transactions>
                                           ),
                                         ),
                                       );
-                                    },
-                                  ),
-                          ],
-                        ),
-                      ),
-                    ],
+                      }, childCount: filteredItems_transactions.length),
+                    ),
                   ),
-                ),
               ],
             ),
 
             Visibility(
-              visible: isSortVisible,
+              // Sorting only applies to the transaction list, not the
+              // Overview chart tab - it was floating over the chart there
+              // before, which didn't make sense.
+              visible: isSortVisible && !_isTrendTabSelected,
 
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 50),
@@ -2493,6 +2600,7 @@ Widget _modernDetailRow(
   IconData icon, {
   bool? isDebit,
   bool? isAmountRow = false,
+  Widget? valueWidget,
 }) {
   LinearGradient _getGradient() {
     if (title.contains("Voucher")) {
@@ -2538,34 +2646,463 @@ Widget _modernDetailRow(
           child: Icon(icon, color: Colors.white, size: 18),
         ),
         const SizedBox(width: 14),
-        Expanded(
-          child: Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+        Text(
+          title,
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
+        const SizedBox(width: 8),
         Expanded(
           child: Align(
             alignment: Alignment.centerRight,
-            child: Text(
-              value,
-              textAlign: TextAlign.right, // ✅ text inside also right aligned
-
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              overflow: TextOverflow.visible,
-              softWrap: true,
-            ),
+            child:
+                valueWidget ??
+                Text(
+                  value,
+                  textAlign:
+                      TextAlign.right, // ✅ text inside also right aligned
+                  maxLines: 1,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                ),
           ),
         ),
       ],
     ),
   );
+}
+
+// Donut (proportion by voucher type, toggle % / amount) + transaction
+// COUNT per month (not amount - summing mixed voucher types like
+// Sales + Purchase + Receipt + Payment + Journal together doesn't
+// produce a meaningful number since they're different kinds of economic
+// events; count stays meaningful regardless of the type mix).
+class VoucherOverviewChart extends StatefulWidget {
+  final Map<String, Map<String, double>> totalsByTypeAndMonth;
+  final Map<String, int> countByMonth;
+  final List<Color> palette;
+  final String currencysymbol;
+  final String currencyCode;
+
+  const VoucherOverviewChart({
+    super.key,
+    required this.totalsByTypeAndMonth,
+    required this.countByMonth,
+    required this.palette,
+    required this.currencysymbol,
+    required this.currencyCode,
+  });
+
+  @override
+  State<VoucherOverviewChart> createState() => _VoucherOverviewChartState();
+}
+
+class _VoucherOverviewChartState extends State<VoucherOverviewChart> {
+  bool _showAmount = false;
+
+  double _niceMax(double rawMax) {
+    if (rawMax <= 0 || !rawMax.isFinite) return 1;
+    final padded = rawMax * 1.1;
+    final exponent = (math.log(padded) / math.ln10).floor();
+    final magnitude = math.pow(10, exponent).toDouble();
+    final normalized = padded / magnitude;
+    const steps = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+    final nice = steps.firstWhere(
+      (step) => normalized <= step,
+      orElse: () => 10,
+    );
+    return nice * magnitude;
+  }
+
+  String _formatCompact(double value) {
+    if (value >= 1000000) return '${(value / 1000000).toStringAsFixed(1)}M';
+    if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}K';
+    return value.toStringAsFixed(0);
+  }
+
+  Widget _legendValue(String type, double totalByType, double grandTotal) {
+    if (!_showAmount) {
+      final pct = grandTotal > 0 ? (totalByType / grandTotal * 100) : 0;
+      // A genuinely non-zero amount can still round to "0%" once its
+      // share is under 0.5% - showing "0%" then reads as if there's
+      // nothing there at all, so show "<1%" instead in that case.
+      final pctLabel = (pct.round() == 0 && totalByType > 0)
+          ? '<1%'
+          : '${pct.toStringAsFixed(0)}%';
+      return Text(
+        pctLabel,
+        style: GoogleFonts.poppins(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
+      );
+    }
+    return currencyAmountText(
+      currencyCode: widget.currencyCode,
+      symbol: widget.currencysymbol,
+      amountText: CurrencyFormatter.formatCurrencyParts(totalByType).number,
+      style: GoogleFonts.poppins(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w700,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _toggleTab(String label, bool isSelected, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.teal.shade500 : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: isSelected
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final types = widget.totalsByTypeAndMonth.keys.toList();
+    if (types.isEmpty) return const SizedBox.shrink();
+
+    // Totals by type, for the donut - sorted biggest first so the
+    // legend/slice order reads as a ranking.
+    final totalByType = <String, double>{
+      for (final type in types)
+        type: widget.totalsByTypeAndMonth[type]!.values.fold<double>(
+          0,
+          (a, b) => a + b,
+        ),
+    };
+    final sortedTypes = types.toList()
+      ..sort((a, b) => totalByType[b]!.compareTo(totalByType[a]!));
+    final grandTotal = totalByType.values.fold<double>(0, (a, b) => a + b);
+
+    // Months present, for the count bar.
+    final monthKeys = <String>{
+      ...widget.countByMonth.keys,
+      for (final byMonth in widget.totalsByTypeAndMonth.values) ...byMonth.keys,
+    };
+    final formatter = DateFormat('MMMM yyyy');
+    final months = monthKeys.toList()
+      ..sort((a, b) {
+        try {
+          return formatter.parse(a).compareTo(formatter.parse(b));
+        } catch (_) {
+          return a.compareTo(b);
+        }
+      });
+
+    final years = months
+        .map((m) {
+          try {
+            return formatter.parse(m).year;
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<int>()
+        .toSet();
+    final spansMultipleYears = years.length > 1;
+
+    final shortLabels = months.map((m) {
+      try {
+        final parsed = formatter.parse(m);
+        return spansMultipleYears
+            ? DateFormat("MMM ''yy").format(parsed)
+            : DateFormat('MMM').format(parsed);
+      } catch (_) {
+        return m;
+      }
+    }).toList();
+
+    final monthCounts = [
+      for (final m in months) (widget.countByMonth[m] ?? 0).toDouble(),
+    ];
+    final maxY = _niceMax(
+      monthCounts.isEmpty ? 0 : monthCounts.reduce(math.max),
+    );
+    final interval = math.max(1.0, (maxY / 4).roundToDouble());
+
+    const maxVisibleLabels = 7;
+    final labelStep = months.isEmpty
+        ? 1
+        : (months.length / maxVisibleLabels).ceil().clamp(1, months.length);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Theme.of(context).brightness == Brightness.dark
+            ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12.withOpacity(0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Share by Voucher Type',
+                style: GoogleFonts.poppins(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+              Container(
+                width: 132,
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white10
+                      : Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    _toggleTab(
+                      '%',
+                      !_showAmount,
+                      () => setState(() => _showAmount = false),
+                    ),
+                    _toggleTab(
+                      'Amt',
+                      _showAmount,
+                      () => setState(() => _showAmount = true),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 120,
+                height: 120,
+                child: PieChart(
+                  PieChartData(
+                    sectionsSpace: 2,
+                    centerSpaceRadius: 32,
+                    sections: [
+                      for (var i = 0; i < sortedTypes.length; i++)
+                        PieChartSectionData(
+                          value: totalByType[sortedTypes[i]],
+                          color:
+                              widget.palette[types.indexOf(sortedTypes[i]) %
+                                  widget.palette.length],
+                          radius: 26,
+                          showTitle: false,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final type in sortedTypes)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 9,
+                              height: 9,
+                              decoration: BoxDecoration(
+                                color: widget.palette[types.indexOf(type) %
+                                    widget.palette.length],
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                type,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            _legendValue(
+                              type,
+                              totalByType[type]!,
+                              grandTotal,
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Transactions per Month',
+            style: GoogleFonts.poppins(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 200,
+            child: months.isEmpty
+                ? const SizedBox.shrink()
+                : BarChart(
+                    BarChartData(
+                      minY: 0,
+                      maxY: maxY,
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: interval,
+                        getDrawingHorizontalLine: (value) => FlLine(
+                          color: Theme.of(context).dividerColor,
+                          strokeWidth: 1,
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 36,
+                            interval: interval,
+                            getTitlesWidget: (value, meta) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(
+                                value.toStringAsFixed(0),
+                                style: GoogleFonts.poppins(
+                                  fontSize: 10,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 28,
+                            getTitlesWidget: (value, meta) {
+                              final index = value.round();
+                              if ((value - index).abs() > 0.01) {
+                                return const SizedBox.shrink();
+                              }
+                              if (index < 0 ||
+                                  index >= shortLabels.length ||
+                                  index % labelStep != 0) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  shortLabels[index],
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                      ),
+                      barTouchData: BarTouchData(
+                        enabled: true,
+                        touchTooltipData: BarTouchTooltipData(
+                          getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                            return BarTooltipItem(
+                              rod.toY.toStringAsFixed(0),
+                              GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      barGroups: [
+                        for (var i = 0; i < months.length; i++)
+                          BarChartGroupData(
+                            x: i,
+                            barRods: [
+                              BarChartRodData(
+                                toY: monthCounts[i],
+                                width: months.length > 12 ? 10 : 18,
+                                borderRadius: BorderRadius.circular(3),
+                                color: const Color(0xFF00BFA5),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }

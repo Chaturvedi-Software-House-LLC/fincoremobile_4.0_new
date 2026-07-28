@@ -39,6 +39,20 @@ class Data {
   }
 }
 
+// Some backends send qty as "12 Nos" (number + unit) rather than a bare
+// number - the unit is already shown as its own field elsewhere, so strip
+// it here to avoid showing it twice in a confusing "qty unit" run-on.
+String _stripUnitSuffix(String value) {
+  try {
+    final numberOnly = value.replaceAll(RegExp(r'[^0-9.]'), '');
+    if (numberOnly.isEmpty) return value;
+    final parsed = double.parse(numberOnly);
+    return parsed % 1 == 0 ? parsed.toInt().toString() : parsed.toString();
+  } catch (_) {
+    return value;
+  }
+}
+
 class PartyClickedSoldPurchaseClicked extends StatefulWidget {
   final String startdate_string, enddate_string, type, ledger, item, unit;
 
@@ -112,10 +126,10 @@ class _PartyClickedSoldPurchaseClickedPageState
   String name = "";
 
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   late NumberFormat currencyFormat;
 
-  ScrollController _scrollController = ScrollController();
   final ScrollController _scrollFabController = ScrollController();
 
   TextEditingController searchController = TextEditingController();
@@ -153,7 +167,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems = List.from(item_list);
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -166,7 +180,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => a.vchno.compareTo(b.vchno));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -179,7 +193,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => b.vchno.compareTo(a.vchno));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -192,7 +206,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => a.vchdate.compareTo(b.vchdate));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -205,7 +219,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     setState(() {
       if (filteredItems.isNotEmpty) {
         filteredItems.sort((a, b) => b.vchdate.compareTo(a.vchdate));
-        _scrollController.animateTo(
+        _scrollFabController.animateTo(
           0.0,
           duration: Duration(milliseconds: 500),
           curve: Curves.easeInOut,
@@ -825,6 +839,7 @@ class _PartyClickedSoldPurchaseClickedPageState
       currencysymbol = format.currencySymbol;
       currencyFormat = NumberFormat('#,##0');
     }
+    _currencyCode = currencyCode;
     try {
       selectedSortOption = prefs.getString('sort')!;
       if (selectedSortOption == null || selectedSortOption == 'null') {
@@ -1293,15 +1308,21 @@ class _PartyClickedSoldPurchaseClickedPageState
 
                       const SizedBox(height: 8),
 
-                      // List section
-                      if (_isListVisible)
-                        ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          controller: _scrollController,
-                          itemCount: filteredItems.length,
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemBuilder: (context, index) {
+                    ],
+                  ),
+                ),
+              ),
+
+              // 📋 List section - a real sliver (SliverList) so the
+              // CustomScrollView only builds cards near the viewport; the
+              // previous shrinkWrap ListView.builder forced eager layout of
+              // every item up front, which is what caused the same
+              // scroll-hang bug already fixed on the Party list.
+              if (_isListVisible)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
                             final item = filteredItems[index];
                             final curr = currencysymbol ?? ''; // ✅ fallback
 
@@ -1409,7 +1430,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                                               ),
                                               const SizedBox(width: 5),
                                               Text(
-                                                'Qty: ${item.qty}',
+                                                'Qty: ${_stripUnitSuffix(item.qty)}',
                                                 style: GoogleFonts.poppins(
                                                   fontSize: 13.5,
                                                   fontWeight: FontWeight.w500,
@@ -1508,20 +1529,44 @@ class _PartyClickedSoldPurchaseClickedPageState
                                               children: [
                                                 Flexible(
                                                   fit: FlexFit.loose,
-                                                  child: Text(
-                                                    'Rate: ${currencysymbol ?? ''} ${formatRate(item.rate)}',
+                                                  child: Text.rich(
+                                                    TextSpan(
+                                                      children: [
+                                                        TextSpan(
+                                                          text: 'Rate: ',
+                                                          style: GoogleFonts.poppins(
+                                                            fontSize: 13.5,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                        currencySymbolSpan(
+                                                          _currencyCode,
+                                                          currencysymbol,
+                                                          GoogleFonts.poppins(
+                                                            fontSize: 13.5,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                        TextSpan(
+                                                          text:
+                                                              ' ${formatRate(item.rate)}',
+                                                          style: GoogleFonts.poppins(
+                                                            fontSize: 13.5,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                     textAlign: TextAlign.right,
                                                     softWrap: true,
-
                                                     overflow: TextOverflow
                                                         .visible, // 👈 makes long text fully visible
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: 13.5,
-
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: Colors.white,
-                                                    ),
                                                   ),
                                                 ),
                                               ],
@@ -1534,12 +1579,9 @@ class _PartyClickedSoldPurchaseClickedPageState
                                 ),
                               ),
                             );
-                          },
-                        ),
-                    ],
+                    }, childCount: filteredItems.length),
                   ),
                 ),
-              ),
             ],
           ),
 

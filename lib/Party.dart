@@ -1389,21 +1389,25 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
 
-                      // 📋 Party List
-                      Visibility(
-                        visible: _isAllList,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          physics: NeverScrollableScrollPhysics(),
-                          itemCount: filteredItems_parties.length,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          itemBuilder: (context, index) {
-                            final card = filteredItems_parties[index];
-                            return GestureDetector(
+                // 📋 Party List - a real sliver (SliverList) so the
+                // CustomScrollView only builds cards near the viewport;
+                // the previous shrinkWrap ListView.builder forced eager
+                // layout of every party up front, which is what made
+                // scrolling hang on large party lists.
+                if (_isAllList)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final card = filteredItems_parties[index];
+                        return GestureDetector(
                               onTap: () {
                                 Navigator.push(
                                   context,
@@ -1574,12 +1578,9 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                 ),
                               ),
                             );
-                          },
-                        ),
-                      ),
-                    ],
+                      }, childCount: filteredItems_parties.length),
+                    ),
                   ),
-                ),
               ],
             ),
             Visibility(

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'SerialSelect.dart';
 import 'package:http/http.dart' as http;
 import 'constants.dart';
+import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
@@ -264,278 +265,18 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
     });
 
     try {
-      if (ledgerentries == 'True') {
-        final url_ledgerentry = Uri.parse(HttpURL!);
-
-        Map<String, String> headers_ledgerentry = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_ledgerentry = jsonEncode({
-          'collection': ledgercollection,
-          'masterid': masterid,
-        });
-
-        final response_ledgerentry = await http.post(
-          url_ledgerentry,
-          body: body_ledgerentry,
-          headers: headers_ledgerentry,
-        );
-
-        if (response_ledgerentry.statusCode == 200) {
-          final List<dynamic> values_list_ledgerentry = jsonDecode(
-            response_ledgerentry.body,
-          );
-
-          print('ledger entries -> ${values_list_ledgerentry}');
-          if (values_list_ledgerentry != null) {
-            ledgerentries_list.addAll(
-              values_list_ledgerentry
-                  .map((json) => LedgerEntries.fromJson(json))
-                  .toList(),
-            );
-
-            if (!ledgerentries_list.isEmpty) {
-              setState(() {
-                isVisibleLedgerEntry = true;
-              });
-            }
-          } else {
-            throw Exception('Failed to fetch data');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(response_ledgerentry.body);
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = 'Something went wrong!!!';
-          }
-
-          showAppMessage(context, error);
-        }
-      }
-
-      if (billsentries == 'True') {
-        final url_bills = Uri.parse(HttpURL!);
-
-        Map<String, String> headers_bills = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_bills = jsonEncode({
-          'collection': billscollection,
-          'masterid': masterid,
-        });
-
-        final response_bills = await http.post(
-          url_bills,
-          body: body_bills,
-          headers: headers_bills,
-        );
-
-        if (response_bills.statusCode == 200) {
-          List<dynamic> values_list_bills = jsonDecode(response_bills.body);
-          print('bills -> ${values_list_bills}');
-
-          if (values_list_bills != null) {
-            if (!values_list_bills.isEmpty) {
-              bills_list.addAll(
-                values_list_bills.map((json) => Bills.fromJson(json)).toList(),
-              );
-              if (bills_list.isNotEmpty) {
-                for (var item in values_list_bills) {
-                  String billnoo = item['billno'].toString();
-                  String billamountt = item['amount'].toString();
-                  String billtypee = item['billtype'].toString();
-                  String billduedatee = item['duedate'].toString();
-                  String billdatee = item['billdate'].toString();
-
-                  if (billtypee == "On Account") {
-                    setState(() {
-                      isTopPanelBillsVisible = false;
-                      isDueDateBillsVisible = false;
-                    });
-                    billtype = billtypee;
-                    billamount = formatAmount(billamountt);
-                  } else if (billtypee == "Advance") {
-                    setState(() {
-                      isTopPanelBillsVisible = true;
-                      isDueDateBillsVisible = false;
-                    });
-                    billno = billnoo;
-                    billtype = billtypee;
-                    billamount = formatAmount(billamountt);
-                  } else if (billtypee == "Agst Ref" ||
-                      billtypee == "New Ref") {
-                    setState(() {
-                      isTopPanelBillsVisible = true;
-                      isDueDateBillsVisible = true;
-                    });
-
-                    if (billduedatee == "null") {
-                      billduedate = "N/A";
-                    } else {
-                      try {
-                        int days = int.parse(billduedatee.split(' ')[0]);
-
-                        DateTime billdate_date = DateTime.parse(billdatee);
-
-                        // Add the days to the billdate
-                        DateTime dueDate = billdate_date.add(
-                          Duration(days: days),
-                        );
-                        DateFormat dateFormat = DateFormat('dd-MMM-yy');
-                        String duedateafter_string = dateFormat.format(dueDate);
-
-                        billduedate = duedateafter_string;
-                      } catch (e) {
-                        billduedate = billduedatee;
-                      }
-                    }
-                    billno = billnoo;
-                    billtype = billtypee;
-                    billamount = formatAmount(billamountt);
-                  }
-                }
-
-                setState(() {
-                  isVisibleBills = true;
-                });
-              }
-            }
-          } else {
-            throw Exception('Failed to fetch data');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(response_bills.body);
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = 'Something went wrong!!!';
-          }
-
-          showAppMessage(context, error);
-        }
-      }
-
-      if (inventoryentries == 'True') {
-        final url_inventoryentry = Uri.parse(HttpURL!);
-
-        Map<String, String> headers_inventoryentry = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_inventoryentry = jsonEncode({
-          'collection': inventorycollections,
-          'masterid': masterid,
-        });
-
-        final response_inventoryentry = await http.post(
-          url_inventoryentry,
-          body: body_inventoryentry,
-          headers: headers_inventoryentry,
-        );
-
-        if (response_inventoryentry.statusCode == 200) {
-          final List<dynamic> values_list_inventoryentry = jsonDecode(
-            response_inventoryentry.body,
-          );
-          if (values_list_inventoryentry != null) {
-            inventoryentries_list.addAll(
-              values_list_inventoryentry
-                  .map((json) => InventoryEntries.fromJson(json))
-                  .toList(),
-            );
-
-            if (!inventoryentries_list.isEmpty) {
-              setState(() {
-                isVisibleInventoryEntry = true;
-              });
-            }
-          } else {
-            throw Exception('Failed to fetch data');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(response_inventoryentry.body);
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = 'Something went wrong!!!';
-          }
-
-          showAppMessage(context, error);
-        }
-      }
-
-      if (costcentreentries == 'True') {
-        final url_costcenter = Uri.parse(HttpURL!);
-
-        Map<String, String> headers_costcenter = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_costcenter = jsonEncode({
-          'collection': costcentercollections,
-          'masterid': masterid,
-        });
-
-        final response_costcenter = await http.post(
-          url_costcenter,
-          body: body_costcenter,
-          headers: headers_costcenter,
-        );
-
-        if (response_costcenter.statusCode == 200) {
-          final List<dynamic> values_list_costcenter = jsonDecode(
-            response_costcenter.body,
-          );
-
-          if (values_list_costcenter != null) {
-            costcenter_list.addAll(
-              values_list_costcenter
-                  .map((json) => CostCenter.fromJson(json))
-                  .toList(),
-            );
-
-            if (!costcenter_list.isEmpty) {
-              setState(() {
-                isVisibleCostCenter = true;
-              });
-            }
-          } else {
-            throw Exception('Failed to fetch data');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(response_costcenter.body);
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = 'Something went wrong!!!';
-          }
-
-          showAppMessage(context, error);
-        }
-      }
+      // These 4 collections are independent of each other (ledger/bills/
+      // inventory/cost-center) and were previously fetched one after
+      // another with `await`, adding up their latencies serially even
+      // though none depends on another's result. Firing them together
+      // with Future.wait cuts this screen's load time to whichever single
+      // call is slowest, instead of the sum of all four.
+      await Future.wait([
+        _fetchLedgerEntries(ledgercollection, masterid),
+        _fetchBills(billscollection, masterid),
+        _fetchInventoryEntries(inventorycollections, masterid),
+        _fetchCostCenter(costcentercollections, masterid),
+      ]);
 
       setState(() {
         _isLoading = false;
@@ -548,6 +289,295 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
         isVisibleCostCenter = false;
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _fetchLedgerEntries(
+    String ledgercollection,
+    String masterid,
+  ) async {
+    if (ledgerentries != 'True') return;
+
+    final url_ledgerentry = Uri.parse(HttpURL!);
+
+    Map<String, String> headers_ledgerentry = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body_ledgerentry = jsonEncode({
+      'collection': ledgercollection,
+      'masterid': masterid,
+    });
+
+    final response_ledgerentry = await http.post(
+      url_ledgerentry,
+      body: body_ledgerentry,
+      headers: headers_ledgerentry,
+    );
+
+    if (response_ledgerentry.statusCode == 200) {
+      final List<dynamic> values_list_ledgerentry = jsonDecode(
+        response_ledgerentry.body,
+      );
+
+      print('ledger entries -> ${values_list_ledgerentry}');
+      if (values_list_ledgerentry != null) {
+        ledgerentries_list.addAll(
+          values_list_ledgerentry
+              .map((json) => LedgerEntries.fromJson(json))
+              .toList(),
+        );
+
+        if (!ledgerentries_list.isEmpty) {
+          setState(() {
+            isVisibleLedgerEntry = true;
+          });
+        }
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+    } else {
+      Map<String, dynamic> data = json.decode(response_ledgerentry.body);
+      String error = '';
+
+      if (data.containsKey('error')) {
+        setState(() {
+          error = data['error'];
+        });
+      } else {
+        error = 'Something went wrong!!!';
+      }
+
+      showAppMessage(context, error);
+    }
+  }
+
+  Future<void> _fetchBills(String billscollection, String masterid) async {
+    if (billsentries != 'True') return;
+
+    final url_bills = Uri.parse(HttpURL!);
+
+    Map<String, String> headers_bills = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body_bills = jsonEncode({
+      'collection': billscollection,
+      'masterid': masterid,
+    });
+
+    final response_bills = await http.post(
+      url_bills,
+      body: body_bills,
+      headers: headers_bills,
+    );
+
+    if (response_bills.statusCode == 200) {
+      List<dynamic> values_list_bills = jsonDecode(response_bills.body);
+      print('bills -> ${values_list_bills}');
+
+      if (values_list_bills != null) {
+        if (!values_list_bills.isEmpty) {
+          bills_list.addAll(
+            values_list_bills.map((json) => Bills.fromJson(json)).toList(),
+          );
+          if (bills_list.isNotEmpty) {
+            for (var item in values_list_bills) {
+              String billnoo = item['billno'].toString();
+              String billamountt = item['amount'].toString();
+              String billtypee = item['billtype'].toString();
+              String billduedatee = item['duedate'].toString();
+              String billdatee = item['billdate'].toString();
+
+              if (billtypee == "On Account") {
+                setState(() {
+                  isTopPanelBillsVisible = false;
+                  isDueDateBillsVisible = false;
+                });
+                billtype = billtypee;
+                billamount = formatAmount(billamountt);
+              } else if (billtypee == "Advance") {
+                setState(() {
+                  isTopPanelBillsVisible = true;
+                  isDueDateBillsVisible = false;
+                });
+                billno = billnoo;
+                billtype = billtypee;
+                billamount = formatAmount(billamountt);
+              } else if (billtypee == "Agst Ref" || billtypee == "New Ref") {
+                setState(() {
+                  isTopPanelBillsVisible = true;
+                  isDueDateBillsVisible = true;
+                });
+
+                if (billduedatee == "null") {
+                  billduedate = "N/A";
+                } else {
+                  try {
+                    int days = int.parse(billduedatee.split(' ')[0]);
+
+                    DateTime billdate_date = DateTime.parse(billdatee);
+
+                    // Add the days to the billdate
+                    DateTime dueDate = billdate_date.add(
+                      Duration(days: days),
+                    );
+                    DateFormat dateFormat = DateFormat('dd-MMM-yy');
+                    String duedateafter_string = dateFormat.format(dueDate);
+
+                    billduedate = duedateafter_string;
+                  } catch (e) {
+                    billduedate = billduedatee;
+                  }
+                }
+                billno = billnoo;
+                billtype = billtypee;
+                billamount = formatAmount(billamountt);
+              }
+            }
+
+            setState(() {
+              isVisibleBills = true;
+            });
+          }
+        }
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+    } else {
+      Map<String, dynamic> data = json.decode(response_bills.body);
+      String error = '';
+
+      if (data.containsKey('error')) {
+        setState(() {
+          error = data['error'];
+        });
+      } else {
+        error = 'Something went wrong!!!';
+      }
+
+      showAppMessage(context, error);
+    }
+  }
+
+  Future<void> _fetchInventoryEntries(
+    String inventorycollections,
+    String masterid,
+  ) async {
+    if (inventoryentries != 'True') return;
+
+    final url_inventoryentry = Uri.parse(HttpURL!);
+
+    Map<String, String> headers_inventoryentry = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body_inventoryentry = jsonEncode({
+      'collection': inventorycollections,
+      'masterid': masterid,
+    });
+
+    final response_inventoryentry = await http.post(
+      url_inventoryentry,
+      body: body_inventoryentry,
+      headers: headers_inventoryentry,
+    );
+
+    if (response_inventoryentry.statusCode == 200) {
+      final List<dynamic> values_list_inventoryentry = jsonDecode(
+        response_inventoryentry.body,
+      );
+      if (values_list_inventoryentry != null) {
+        inventoryentries_list.addAll(
+          values_list_inventoryentry
+              .map((json) => InventoryEntries.fromJson(json))
+              .toList(),
+        );
+
+        if (!inventoryentries_list.isEmpty) {
+          setState(() {
+            isVisibleInventoryEntry = true;
+          });
+        }
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+    } else {
+      Map<String, dynamic> data = json.decode(response_inventoryentry.body);
+      String error = '';
+
+      if (data.containsKey('error')) {
+        setState(() {
+          error = data['error'];
+        });
+      } else {
+        error = 'Something went wrong!!!';
+      }
+
+      showAppMessage(context, error);
+    }
+  }
+
+  Future<void> _fetchCostCenter(
+    String costcentercollections,
+    String masterid,
+  ) async {
+    if (costcentreentries != 'True') return;
+
+    final url_costcenter = Uri.parse(HttpURL!);
+
+    Map<String, String> headers_costcenter = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body_costcenter = jsonEncode({
+      'collection': costcentercollections,
+      'masterid': masterid,
+    });
+
+    final response_costcenter = await http.post(
+      url_costcenter,
+      body: body_costcenter,
+      headers: headers_costcenter,
+    );
+
+    if (response_costcenter.statusCode == 200) {
+      final List<dynamic> values_list_costcenter = jsonDecode(
+        response_costcenter.body,
+      );
+
+      if (values_list_costcenter != null) {
+        costcenter_list.addAll(
+          values_list_costcenter
+              .map((json) => CostCenter.fromJson(json))
+              .toList(),
+        );
+
+        if (!costcenter_list.isEmpty) {
+          setState(() {
+            isVisibleCostCenter = true;
+          });
+        }
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+    } else {
+      Map<String, dynamic> data = json.decode(response_costcenter.body);
+      String error = '';
+
+      if (data.containsKey('error')) {
+        setState(() {
+          error = data['error'];
+        });
+      } else {
+        error = 'Something went wrong!!!';
+      }
+
+      showAppMessage(context, error);
     }
   }
 
@@ -613,7 +643,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       final relatedBills = billsByLedger[key] ?? [];
       return LedgerExpandableTile(
         ledgerName: entry.ledger,
-        amount: formatAmount(entry.amount),
+        amount: entry.amount,
         bills: relatedBills,
       );
     }).toList();
@@ -772,20 +802,40 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                                       buildInventoryRow(
                                         context,
                                         'Rate',
-                                        formatRate(card.rate),
+                                        '',
                                         'Disc',
                                         "${formatNullto0(card.discount)}%",
                                         leftIcon: Icons.price_change,
                                         rightIcon: Icons.percent,
+                                        leftValueWidget: _inventoryRateWidget(
+                                          card.rate,
+                                          GoogleFonts.poppins(
+                                            fontSize: 13.5,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurface,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                       ),
                                       buildInventoryRow(
                                         context,
                                         'Godown',
                                         handleGodown(card.godown),
                                         'Amt',
-                                        formatAmount(card.amount),
+                                        '',
                                         leftIcon: Icons.store,
                                         rightIcon: Icons.money,
+                                        rightValueWidget: formatAmountRich(
+                                          card.amount,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13.5,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurface,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                       ),
                                       const Divider(height: 24, thickness: 0.6),
                                     ],
@@ -838,7 +888,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                                   (card) => buildCostCenterRow(
                                     context,
                                     formatCostCenter(card.costcentre),
-                                    formatAmount(card.amount),
+                                    card.amount,
                                   ),
                                 )
                                 .toList(),
@@ -1256,8 +1306,9 @@ Widget buildLedgerRow(String ledger, String amount) {
                   Expanded(
                     child: Text(
                       ledger,
+                      maxLines: 2,
                       softWrap: true,
-                      overflow: TextOverflow.visible,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
@@ -1277,8 +1328,9 @@ Widget buildLedgerRow(String ledger, String amount) {
                 child: Text(
                   amount,
                   textAlign: TextAlign.right,
+                  maxLines: 1,
                   softWrap: true,
-                  overflow: TextOverflow.visible,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -1358,6 +1410,36 @@ Widget buildBillRow(
   );
 }
 
+// Currency-aware rate display for buildInventoryRow's "Rate" field - shows
+// the Dirham glyph for AED instead of a bare, symbol-less number.
+Widget _inventoryRateWidget(String rate, TextStyle style) {
+  if (rate == 'null' || rate.trim().isEmpty) {
+    return Text('Not Available', style: style);
+  }
+  // Rate arrives as "209.00/Nos" (number/unit) - split off the unit suffix
+  // before parsing, otherwise double.tryParse on the whole string fails
+  // and silently falls back to 0.
+  String cleaned = rate.trim();
+  String unit = "";
+  if (cleaned.contains("/")) {
+    final parts = cleaned.split("/");
+    cleaned = parts[0];
+    unit = "/${parts.sublist(1).join("/")}";
+  }
+  final parsed = double.tryParse(cleaned.replaceAll(',', '')) ?? 0.0;
+  final parts = CurrencyFormatter.formatCurrencyParts(parsed);
+  final currencyCode = CurrencyFormatter.getCurrencyCode();
+  return Text.rich(
+    TextSpan(
+      children: [
+        currencySymbolSpan(currencyCode, parts.symbol, style),
+        TextSpan(text: ' ${parts.number}$unit', style: style),
+      ],
+    ),
+    softWrap: true,
+  );
+}
+
 Widget buildInventoryRow(
   BuildContext context,
   String leftLabel,
@@ -1366,6 +1448,8 @@ Widget buildInventoryRow(
   String rightValue, {
   IconData? leftIcon,
   IconData? rightIcon,
+  Widget? leftValueWidget,
+  Widget? rightValueWidget,
 }) {
   return Container(
     margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1413,15 +1497,18 @@ Widget buildInventoryRow(
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          leftValue,
-                          softWrap: true,
-                          style: GoogleFonts.poppins(
-                            fontSize: 13.5,
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        leftValueWidget ??
+                            Text(
+                              leftValue,
+                              softWrap: true,
+                              style: GoogleFonts.poppins(
+                                fontSize: 13.5,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                       ],
                     ),
                   ),
@@ -1466,15 +1553,18 @@ Widget buildInventoryRow(
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          rightValue,
-                          softWrap: true,
-                          style: GoogleFonts.poppins(
-                            fontSize: 13.5,
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        rightValueWidget ??
+                            Text(
+                              rightValue,
+                              softWrap: true,
+                              style: GoogleFonts.poppins(
+                                fontSize: 13.5,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                       ],
                     ),
                   ),
@@ -1568,7 +1658,7 @@ Widget buildCostCenterRow(
             ),
             const SizedBox(width: 8),
             Flexible(
-              child: Text(
+              child: formatAmountRich(
                 amount,
                 textAlign: TextAlign.right,
                 softWrap: true,
@@ -1780,7 +1870,7 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
                     ),
                   ),
                 ),
-                Text(
+                formatAmountRich(
                   widget.amount,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
@@ -2035,7 +2125,20 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
                                           _billRow(
                                             Icons.attach_money,
                                             'Amount',
-                                            formatAmount(bill.amount),
+                                            '',
+                                            valueWidget: formatAmountRich(
+                                              bill.amount,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.right,
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w500,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurface,
+                                              ),
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -2143,7 +2246,12 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
         : dueDate;
   }
 
-  Widget _billRow(IconData icon, String label, String value) {
+  Widget _billRow(
+    IconData icon,
+    String label,
+    String value, {
+    Widget? valueWidget,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
@@ -2178,15 +2286,18 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
             width: 130, // 👈 you can adjust based on your layout width
             child: Align(
               alignment: Alignment.centerRight,
-              child: Text(
-                value,
-                overflow: TextOverflow.visible,
-                textAlign: TextAlign.right,
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
+              child:
+                  valueWidget ??
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
               ),
             ),
           ),

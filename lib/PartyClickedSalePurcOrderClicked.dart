@@ -343,6 +343,12 @@ class _PartyClickedSalePurcOrderClickedPageState
   }
 
   Future<void> generateAndSharePDF_SalePurc() async {
+    if (selectedTopValue == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select an item first")),
+      );
+      return;
+    }
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -701,7 +707,7 @@ class _PartyClickedSalePurcOrderClickedPageState
       selectedValue = null;
     }
     selectedTopValue = selectedValue;
-    fetchData(vchtype, ledger, type, endDateString, selectedTopValue!.item);
+    fetchData(vchtype, ledger, type, endDateString, selectedTopValue?.item ?? item);
   }
 
   @override
@@ -1206,7 +1212,7 @@ class _PartyClickedSalePurcOrderClickedPageState
 
                                                   // Pending Amount chip
                                                   _buildMetaChip(
-                                                    '${formatAmount(card.pendingAmount.toString())}',
+                                                    '',
                                                     Colors.green.withOpacity(
                                                       Theme.of(
                                                                 context,
@@ -1221,6 +1227,27 @@ class _PartyClickedSalePurcOrderClickedPageState
                                                             Brightness.dark
                                                         ? Colors.green.shade200
                                                         : Colors.green.shade800,
+                                                    textWidget: formatAmountRich(
+                                                      card.pendingAmount
+                                                          .toString(),
+                                                      style: GoogleFonts.poppins(
+                                                        color:
+                                                            Theme.of(
+                                                                      context,
+                                                                    ).brightness ==
+                                                                    Brightness
+                                                                        .dark
+                                                                ? Colors
+                                                                      .green
+                                                                      .shade200
+                                                                : Colors
+                                                                      .green
+                                                                      .shade800,
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
                                                   ),
                                                 ],
                                               ),
@@ -1307,21 +1334,28 @@ class _PartyClickedSalePurcOrderClickedPageState
     );
   }
 
-  Widget _buildMetaChip(String text, Color bgColor, Color textColor) {
+  Widget _buildMetaChip(
+    String text,
+    Color bgColor,
+    Color textColor, {
+    Widget? textWidget,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text(
-        text,
-        style: GoogleFonts.poppins(
-          color: textColor,
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      child:
+          textWidget ??
+          Text(
+            text,
+            style: GoogleFonts.poppins(
+              color: textColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
     );
   }
 

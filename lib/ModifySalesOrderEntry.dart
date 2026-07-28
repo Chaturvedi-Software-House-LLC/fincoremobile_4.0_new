@@ -117,8 +117,8 @@ class Unit {
 
   factory Unit.fromJson(Map<String, dynamic> json) {
     return Unit(
-      name: json['name'],
-      multiplier: double.parse(json['multiplier']),
+      name: (json['name'] ?? '').toString(),
+      multiplier: double.tryParse('${json['multiplier']}') ?? 1.0,
     );
   }
 }
@@ -2361,6 +2361,18 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
     }
   }
 
+  // Currency-symbol-aware value display - renders the Dirham glyph for AED
+  // instead of the literal "AED" text that getCurrencySymbol() falls back
+  // to (there's no distinct AED symbol glyph in the standard locale data).
+  Widget _currencyValueWidget(String numberText, TextStyle style) {
+    return currencyAmountText(
+      currencyCode: currencycode,
+      symbol: getCurrencySymbol(currencycode),
+      amountText: numberText,
+      style: style,
+    );
+  }
+
   Future<void> updateEntry(int id) async {
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
@@ -2666,16 +2678,16 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                             saledatetxt = formatlastsaledate(saledatestring);
                             _dateController.text = saledatetxt;
 
-                            _selectedvchtypename = vchtypenamedata[0];
+                            _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
                             fetchvchnos(_selectedvchtypename);
-                            _selectedpartyledger = partyledgerdata[0];
+                            _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
                             _partyLedgerController.text = _selectedpartyledger;
 
-                            _selectedsalesledger = salesledger_data[0];
+                            _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
                             _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-                            _selectedvatledger = vatledgerdata[0];
+                            _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
 
-                            _selecteditem = '${itemdata[0]['name']}';
+                            _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
                             _itemController.text = _selecteditem;
 
                             if (locationsdata.isNotEmpty) {
@@ -3063,7 +3075,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
           salesledger_data = jsonResponse["salesLedgers"].cast<String>();
 
           /*_selectedsalesledger = oldsalesledger;*/ // setting sales ledgers later
-          /* _selectedsalesledger = salesledger_data[0];*/
+          /* _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);*/
 
           if (data.containsKey("INVENTORYENTRIES.LIST") &&
               data["INVENTORYENTRIES.LIST"] is List) {
@@ -3089,7 +3101,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
           vatledgerdata.add('Not Applicable');
           vatledgerdata.addAll(jsonResponse["vatLedgers"].cast<String>());
 
-          _selectedvatledger = vatledgerdata[0];
+          _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
 
           try {
             // vat ledger name value setting
@@ -3217,7 +3229,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
           } catch (e) // if vat ledger has error
           {
             print(e);
-            _selectedvatledger = vatledgerdata[0];
+            _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
 
             totalVatAmount = 0;
             roundedtotalVatAmount = double.parse(
@@ -3377,7 +3389,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
 
           itemdata = jsonResponse["items"];
 
-          _selecteditem = '${itemdata[0]['name']}';
+          _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
           _itemController.text = _selecteditem;
           locationsdata = List<String>.from(jsonResponse['locations']);
           if (locationsdata.isNotEmpty) {
@@ -3428,7 +3440,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
       });
 
       if (unitdata.isNotEmpty) {
-        _selectedunit = unitdata[0].name;
+        _selectedunit = (unitdata.isNotEmpty ? unitdata[0].name : '');
 
         selectedMultiplier = unitdata[0].multiplier ?? 0.0;
       }
@@ -3917,9 +3929,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                           ),
                           borderRadius: BorderRadius.all(Radius.circular(8)),
                         ),
-                        child: Text(
+                        child: currencySymbolWidget(
+                          currencycode,
                           getCurrencySymbol(currencycode),
-                          style: GoogleFonts.poppins(
+                          GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -3955,9 +3968,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                           ),
                           borderRadius: BorderRadius.all(Radius.circular(8)),
                         ),
-                        child: Text(
+                        child: currencySymbolWidget(
+                          currencycode,
                           getCurrencySymbol(currencycode),
-                          style: GoogleFonts.poppins(
+                          GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -4542,9 +4556,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                           Radius.circular(8),
                                         ),
                                       ),
-                                      child: Text(
+                                      child: currencySymbolWidget(
+                                        currencycode,
                                         getCurrencySymbol(currencycode),
-                                        style: GoogleFonts.poppins(
+                                        GoogleFonts.poppins(
                                           color: Colors.white,
                                           fontSize: 13,
                                           fontWeight: FontWeight.bold,
@@ -4607,9 +4622,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                           Radius.circular(8),
                                         ),
                                       ),
-                                      child: Text(
+                                      child: currencySymbolWidget(
+                                        currencycode,
                                         getCurrencySymbol(currencycode),
-                                        style: GoogleFonts.poppins(
+                                        GoogleFonts.poppins(
                                           color: Colors.white,
                                           fontSize: 13,
                                           fontWeight: FontWeight.bold,
@@ -4838,9 +4854,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                               ),
                               borderRadius: BorderRadius.all(Radius.circular(8)),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -5272,9 +5289,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                             Radius.circular(8),
                                           ),
                                         ),
-                                        child: Text(
+                                        child: currencySymbolWidget(
+                                          currencycode,
                                           getCurrencySymbol(currencycode),
-                                          style: GoogleFonts.poppins(
+                                          GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -6163,16 +6181,27 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                                                     .colorScheme
                                                                     .onSurfaceVariant,
                                                               ),
-                                                              prefixText:
-                                                                  '${getCurrencySymbol(currencycode)} ',
-                                                              prefixStyle: GoogleFonts.poppins(
-                                                                fontSize: 14,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: Theme.of(
-                                                                  context,
-                                                                ).colorScheme.onSurface,
+                                                              prefix: Padding(
+                                                                padding:
+                                                                    const EdgeInsets.only(
+                                                                      right: 4,
+                                                                    ),
+                                                                child: currencySymbolWidget(
+                                                                  currencycode,
+                                                                  getCurrencySymbol(
+                                                                    currencycode,
+                                                                  ),
+                                                                  GoogleFonts.poppins(
+                                                                    fontSize:
+                                                                        14,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                    color: Theme.of(
+                                                                      context,
+                                                                    ).colorScheme.onSurface,
+                                                                  ),
+                                                                ),
                                                               ),
                                                               filled: true,
                                                               fillColor: isDark
@@ -6428,9 +6457,11 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                                                       ),
                                                                     ),
                                                                   ),
-                                                                  Text(
-                                                                    '${getCurrencySymbol(currencycode)} ${currencyFormatter.format(amount)}',
-                                                                    style: GoogleFonts.poppins(
+                                                                  _currencyValueWidget(
+                                                                    currencyFormatter.format(
+                                                                      amount,
+                                                                    ),
+                                                                    GoogleFonts.poppins(
                                                                       fontSize:
                                                                           15,
                                                                       fontWeight:
@@ -6775,7 +6806,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
         String formattedtotal = formatter.format(roundedtotalAmount);
         controller_totalamt.text = formattedtotal.toString();
 
-        _selecteditem = '${itemdata[0]['name']}';
+        _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
         _itemController.text = _selecteditem;
         if (locationsdata.isNotEmpty) {
           selectedLocation = locationsdata[0];
@@ -6931,7 +6962,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
       currencycode = prefs.getString('currencycode') ?? 'AED';
 
       vatperc = prefs.getDouble('vatperc') ?? 5.0;
@@ -7971,10 +8002,39 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                       itemName: item.itemName,
                                       quantity: item.itemQuantity,
                                       unit: itemUnit,
-                                      rate:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)))}",
-                                      amount:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)) * double.parse(item.itemQuantity))}",
+                                      rate: '',
+                                      amount: '',
+                                      rateWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          double.parse(
+                                            item.itemPrice.toStringAsFixed(
+                                              decimal!,
+                                            ),
+                                          ),
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      amountWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          double.parse(
+                                                item.itemPrice.toStringAsFixed(
+                                                  decimal!,
+                                                ),
+                                              ) *
+                                              double.parse(item.itemQuantity),
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: app_color,
+                                        ),
+                                      ),
                                       onIncrement: () {
                                         int currentQty =
                                             int.tryParse(item.itemQuantity) ??
@@ -8055,8 +8115,17 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                     final item = ledgerEntries[index];
                                     return EntryLedgerCard(
                                       ledgerName: item.ledgerName,
-                                      amount:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(item.ledgerAmount)}",
+                                      amount: '',
+                                      amountWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          item.ledgerAmount,
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.indigo,
+                                        ),
+                                      ),
                                       onDelete: () {
                                         _deleteLedger(index);
                                       },
@@ -8310,9 +8379,10 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                               Radius.circular(8),
                                             ),
                                           ),
-                                          child: Text(
+                                          child: currencySymbolWidget(
+                                            currencycode,
                                             getCurrencySymbol(currencycode),
-                                            style: GoogleFonts.poppins(
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontSize: 13,
                                               fontWeight: FontWeight.bold,

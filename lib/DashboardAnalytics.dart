@@ -151,8 +151,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     ),
                   ),
                 ),
-                Text(
-                  CurrencyFormatter.formatCurrency_double(amount),
+                currencyAmountText(
+                  currencyCode: CurrencyFormatter.getCurrencyCode(),
+                  symbol: CurrencyFormatter.formatCurrencyParts(amount).symbol,
+                  amountText: CurrencyFormatter.formatCurrencyParts(
+                    amount,
+                  ).number,
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -586,7 +590,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               Expanded(
                 child: _HeaderMetric(
                   label: "Sales",
-                  value: CurrencyFormatter.formatCurrency_double(_totalSales),
+                  value: '',
+                  valueWidget: currencyAmountText(
+                    currencyCode: CurrencyFormatter.getCurrencyCode(),
+                    symbol: CurrencyFormatter.formatCurrencyParts(
+                      _totalSales,
+                    ).symbol,
+                    amountText: CurrencyFormatter.formatCurrencyParts(
+                      _totalSales,
+                    ).number,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   icon: Icons.trending_up_rounded,
                 ),
               ),
@@ -594,8 +614,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               Expanded(
                 child: _HeaderMetric(
                   label: "Receipts",
-                  value: CurrencyFormatter.formatCurrency_double(
-                    _totalReceipts,
+                  value: '',
+                  valueWidget: currencyAmountText(
+                    currencyCode: CurrencyFormatter.getCurrencyCode(),
+                    symbol: CurrencyFormatter.formatCurrencyParts(
+                      _totalReceipts,
+                    ).symbol,
+                    amountText: CurrencyFormatter.formatCurrencyParts(
+                      _totalReceipts,
+                    ).number,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   icon: Icons.account_balance_wallet_rounded,
                 ),
@@ -959,11 +993,13 @@ class _HeaderMetric extends StatelessWidget {
   final String label;
   final String value;
   final IconData icon;
+  final Widget? valueWidget;
 
   const _HeaderMetric({
     required this.label,
     required this.value,
     required this.icon,
+    this.valueWidget,
   });
 
   @override
@@ -980,16 +1016,17 @@ class _HeaderMetric extends StatelessWidget {
         children: [
           Icon(icon, color: Colors.white, size: 20),
           const SizedBox(height: 10),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+          valueWidget ??
+              Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
           const SizedBox(height: 2),
           Text(
             label,
@@ -1442,7 +1479,12 @@ class _PieLegend extends StatelessWidget {
         final color = colors[index % colors.length];
         final value = showPercentage
             ? "${(total == 0 ? 0 : amount / total * 100).toStringAsFixed(1)}%"
-            : CurrencyFormatter.formatCurrency_double(amount);
+            : null;
+        final valueStyle = GoogleFonts.poppins(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: Theme.of(context).colorScheme.onSurface,
+        );
 
         return Container(
           margin: EdgeInsets.only(bottom: index == data.length - 1 ? 0 : 8),
@@ -1474,14 +1516,18 @@ class _PieLegend extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                value,
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
+              value != null
+                  ? Text(value, style: valueStyle)
+                  : currencyAmountText(
+                      currencyCode: CurrencyFormatter.getCurrencyCode(),
+                      symbol: CurrencyFormatter.formatCurrencyParts(
+                        amount,
+                      ).symbol,
+                      amountText: CurrencyFormatter.formatCurrencyParts(
+                        amount,
+                      ).number,
+                      style: valueStyle,
+                    ),
             ],
           ),
         );

@@ -142,18 +142,7 @@ class _PartyClickedSalePurcOrderPageState
   List<dynamic> myData = [];
   bool _isLoading = false;
 
-  List<Data> item_list = [
-    Data(item: 'LED TV 55 inch', totalQty: '12', totalAmount: 58000.0),
-    Data(item: 'Washing Machine 8kg', totalQty: '5', totalAmount: 24500.0),
-    Data(item: 'Refrigerator 300L', totalQty: '8', totalAmount: 38000.0),
-    Data(item: 'Microwave Oven 25L', totalQty: '15', totalAmount: 15000.0),
-    Data(item: 'Air Conditioner 1.5 Ton', totalQty: '6', totalAmount: 72000.0),
-    Data(item: 'Smartphone XYZ Pro', totalQty: '25', totalAmount: 95000.0),
-    Data(item: 'Bluetooth Headphones', totalQty: '40', totalAmount: 12000.0),
-    Data(item: 'Gaming Laptop', totalQty: '3', totalAmount: 180000.0),
-    Data(item: 'Office Chair Ergonomic', totalQty: '10', totalAmount: 25000.0),
-    Data(item: 'Tablet 10 inch', totalQty: '7', totalAmount: 31500.0),
-  ];
+  List<Data> item_list = [];
 
   void _showSelectionWindow(BuildContext context) {
     final List<IconData> icons = [
@@ -811,18 +800,11 @@ class _PartyClickedSalePurcOrderPageState
               AppNavigation.backOrDashboard(context);
             },
           ),
-          centerTitle: true,
-          title: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 2.4),
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min, // prevent forcing full height
-                children: [
+          centerTitle: false,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min, // prevent forcing full height
+            children: [
                   SizedBox(
                     height: 32,
                     child: SingleChildScrollView(
@@ -873,8 +855,6 @@ class _PartyClickedSalePurcOrderPageState
                   ),
                 ],
               ),
-            ),
-          ),
 
           actions: [
             IconButton(
@@ -1111,21 +1091,32 @@ class _PartyClickedSalePurcOrderPageState
                                   ),
                                 ),
 
-                              Visibility(
-                                visible: _isListVisible,
-                                child: ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                    itemCount: filteredItems.length,
-                                    itemBuilder: (context, index) {
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // 📋 Order list - a real sliver (SliverList) so the
+              // CustomScrollView only builds cards near the viewport; the
+              // previous shrinkWrap ListView.builder forced eager layout of
+              // every order up front, which is what caused the same
+              // scroll-hang bug already fixed on the Party list.
+              if (_isListVisible)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
                                       final card = filteredItems[index];
 
                                       return GestureDetector(
                                         onTap: () {
+                                          if (selectedTopValue == null) return;
                                           String item = card.item;
                                           String party =
                                               selectedTopValue!.Partyledger;
@@ -1316,8 +1307,9 @@ class _PartyClickedSalePurcOrderPageState
                                                             .shade50,
                                                       ),
                                                     ),
-                                                    child: Text(
-                                                      '${formatAmount(card.totalAmount.toString())}',
+                                                    child: formatAmountRich(
+                                                      card.totalAmount
+                                                          .toString(),
                                                       style:
                                                           GoogleFonts.poppins(
                                                             fontSize: 13,
@@ -1335,16 +1327,9 @@ class _PartyClickedSalePurcOrderPageState
                                           ),
                                         ),
                                       );
-                                    },
-                                  ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
+                    }, childCount: filteredItems.length),
                   ),
                 ),
-              ),
             ],
           ),
 

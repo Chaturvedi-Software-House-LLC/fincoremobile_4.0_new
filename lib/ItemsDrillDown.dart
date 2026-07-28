@@ -776,7 +776,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
         child: AppBar(
           backgroundColor: app_color,
           elevation: 6,
-          centerTitle: true,
+          centerTitle: false,
           automaticallyImplyLeading: false,
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
@@ -785,32 +785,30 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
             icon: const Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () => AppNavigation.backOrDashboard(context),
           ),
-          title: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 5.2),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.type,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.type,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
-                Text(
-                  widget.item_name,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                widget.item_name,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                  color: Colors.white70,
+                  fontSize: 13,
                 ),
-              ],
-            ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
           actions: [
             IconButton(
@@ -925,7 +923,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Center(
-                        child: Text(
+                        child: formatAmountRich(
                           widget.total,
                           style: GoogleFonts.poppins(
                             fontSize: 24,
@@ -1383,7 +1381,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     startdate_string: widget.startdate_string,
                     enddate_string: widget.enddate_string,
                     type: widget.type,
-                    total: _formatAmount(item.amount),
+                    total: item.amount.toString(),
                     item_name: widget.item_name,
                     lockedLedger: item.Partyledger,
                     lockedCostcenter: widget.lockedCostcenter,
@@ -1437,7 +1435,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     startdate_string: widget.startdate_string,
                     enddate_string: widget.enddate_string,
                     type: widget.type,
-                    total: _formatAmount(item.amount),
+                    total: item.amount.toString(),
                     item_name: widget.item_name,
                     lockedLedger: widget.lockedLedger,
                     lockedCostcenter: widget.lockedCostcenter,
@@ -1473,7 +1471,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     startdate_string: widget.startdate_string,
                     enddate_string: widget.enddate_string,
                     type: widget.type,
-                    total: _formatAmount(item.amount),
+                    total: item.amount.toString(),
                     item_name: widget.item_name,
                     lockedLedger: widget.lockedLedger,
                     lockedCostcenter: item.costcentre,
@@ -1670,8 +1668,8 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                       color: Theme.of(context).dividerColor.withOpacity(0.75),
                     ),
                   ),
-                  child: Text(
-                    _formatAmount(amount),
+                  child: formatAmountRich(
+                    amount.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w600,

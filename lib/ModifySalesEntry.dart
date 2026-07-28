@@ -3176,6 +3176,18 @@ _itemController.text = _selecteditem;
     }
   }
 
+  // Currency-symbol-aware value display - renders the Dirham glyph for AED
+  // instead of the literal "AED" text that getCurrencySymbol() falls back
+  // to (there's no distinct AED symbol glyph in the standard locale data).
+  Widget _currencyValueWidget(String numberText, TextStyle style) {
+    return currencyAmountText(
+      currencyCode: currencycode,
+      symbol: getCurrencySymbol(currencycode),
+      amountText: numberText,
+      style: style,
+    );
+  }
+
   Future<void> updateEntry(int id) async {
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
@@ -4618,9 +4630,10 @@ _itemController.text = _selecteditem;
                           ),
                           borderRadius: BorderRadius.all(Radius.circular(8)),
                         ),
-                        child: Text(
+                        child: currencySymbolWidget(
+                          currencycode,
                           getCurrencySymbol(currencycode),
-                          style: GoogleFonts.poppins(
+                          GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -4656,9 +4669,10 @@ _itemController.text = _selecteditem;
                           ),
                           borderRadius: BorderRadius.all(Radius.circular(8)),
                         ),
-                        child: Text(
+                        child: currencySymbolWidget(
+                          currencycode,
                           getCurrencySymbol(currencycode),
-                          style: GoogleFonts.poppins(
+                          GoogleFonts.poppins(
                             color: Colors.white,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -5441,16 +5455,27 @@ _itemController.text = _selecteditem;
                                                                     .colorScheme
                                                                     .onSurfaceVariant,
                                                               ),
-                                                              prefixText:
-                                                                  '${getCurrencySymbol(currencycode)} ',
-                                                              prefixStyle: GoogleFonts.poppins(
-                                                                fontSize: 14,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: Theme.of(
-                                                                  context,
-                                                                ).colorScheme.onSurface,
+                                                              prefix: Padding(
+                                                                padding:
+                                                                    const EdgeInsets.only(
+                                                                      right: 4,
+                                                                    ),
+                                                                child: currencySymbolWidget(
+                                                                  currencycode,
+                                                                  getCurrencySymbol(
+                                                                    currencycode,
+                                                                  ),
+                                                                  GoogleFonts.poppins(
+                                                                    fontSize:
+                                                                        14,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                    color: Theme.of(
+                                                                      context,
+                                                                    ).colorScheme.onSurface,
+                                                                  ),
+                                                                ),
                                                               ),
                                                               filled: true,
                                                               fillColor: isDark
@@ -5594,9 +5619,11 @@ _itemController.text = _selecteditem;
                                                                       ),
                                                                     ),
                                                                   ),
-                                                                  Text(
-                                                                    '${getCurrencySymbol(currencycode)} ${currencyFormatter.format(amount)}',
-                                                                    style: GoogleFonts.poppins(
+                                                                  _currencyValueWidget(
+                                                                    currencyFormatter.format(
+                                                                      amount,
+                                                                    ),
+                                                                    GoogleFonts.poppins(
                                                                       fontSize:
                                                                           15,
                                                                       fontWeight:
@@ -6323,9 +6350,10 @@ _itemController.text = _selecteditem;
                                           Radius.circular(8),
                                         ),
                                       ),
-                                      child: Text(
+                                      child: currencySymbolWidget(
+                                        currencycode,
                                         getCurrencySymbol(currencycode),
-                                        style: GoogleFonts.poppins(
+                                        GoogleFonts.poppins(
                                           color: Colors.white,
                                           fontSize: 13,
                                           fontWeight: FontWeight.bold,
@@ -6388,9 +6416,10 @@ _itemController.text = _selecteditem;
                                           Radius.circular(8),
                                         ),
                                       ),
-                                      child: Text(
+                                      child: currencySymbolWidget(
+                                        currencycode,
                                         getCurrencySymbol(currencycode),
-                                        style: GoogleFonts.poppins(
+                                        GoogleFonts.poppins(
                                           color: Colors.white,
                                           fontSize: 13,
                                           fontWeight: FontWeight.bold,
@@ -6619,9 +6648,10 @@ _itemController.text = _selecteditem;
                               ),
                               borderRadius: BorderRadius.all(Radius.circular(8)),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -7052,9 +7082,10 @@ _itemController.text = _selecteditem;
                                             Radius.circular(8),
                                           ),
                                         ),
-                                        child: Text(
+                                        child: currencySymbolWidget(
+                                          currencycode,
                                           getCurrencySymbol(currencycode),
-                                          style: GoogleFonts.poppins(
+                                          GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -7479,7 +7510,7 @@ _itemController.text = _selecteditem;
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
       currencycode = prefs.getString('currencycode') ?? 'AED';
 
       company_trn = prefs.getString("company_trn") ?? "null";
@@ -8584,10 +8615,39 @@ _itemController.text = _selecteditem;
                                       itemName: item.itemName,
                                       quantity: item.itemQuantity,
                                       unit: itemUnit,
-                                      rate:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)))}",
-                                      amount:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)) * double.parse(item.itemQuantity))}",
+                                      rate: '',
+                                      amount: '',
+                                      rateWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          double.parse(
+                                            item.itemPrice.toStringAsFixed(
+                                              decimal!,
+                                            ),
+                                          ),
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      amountWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          double.parse(
+                                                item.itemPrice.toStringAsFixed(
+                                                  decimal!,
+                                                ),
+                                              ) *
+                                              double.parse(item.itemQuantity),
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: app_color,
+                                        ),
+                                      ),
                                       onIncrement: () {
                                         int currentQty =
                                             int.tryParse(item.itemQuantity) ??
@@ -8668,8 +8728,17 @@ _itemController.text = _selecteditem;
                                     final item = ledgerEntries[index];
                                     return EntryLedgerCard(
                                       ledgerName: item.ledgerName,
-                                      amount:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(item.ledgerAmount)}",
+                                      amount: '',
+                                      amountWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          item.ledgerAmount,
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.indigo,
+                                        ),
+                                      ),
                                       onDelete: () {
                                         _deleteLedger(index);
                                       },
@@ -8928,9 +8997,10 @@ _itemController.text = _selecteditem;
                                               Radius.circular(8),
                                             ),
                                           ),
-                                          child: Text(
+                                          child: currencySymbolWidget(
+                                            currencycode,
                                             getCurrencySymbol(currencycode),
-                                            style: GoogleFonts.poppins(
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontSize: 13,
                                               fontWeight: FontWeight.bold,
@@ -9010,6 +9080,7 @@ _itemController.text = _selecteditem;
                             ? controller_totalamt.text
                             : "0.00",
                         currencySymbol: getCurrencySymbol(currencycode),
+                        currencyCode: currencycode,
                       ),
 
                       EntrySaveButton(

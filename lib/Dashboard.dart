@@ -178,6 +178,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   bool _isRefreshing = false;
 
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   dynamic _selecteddate = "Today";
 
@@ -1339,21 +1340,48 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
               generateMonthsList();
 
-              // Month-over-month trend: compare the two most recent months
-              // in the flattened series (salesDataList is stored negated for
-              // the chart's bar direction, so undo that before comparing).
-              if (salesDataList.length >= 2) {
-                final latest = salesDataList[salesDataList.length - 1].abs();
-                final previous = salesDataList[salesDataList.length - 2].abs();
-                setState(() {
-                  _salesTrendPercent = previous > 0.0001
-                      ? ((latest - previous) / previous) * 100
-                      : null;
-                });
-              } else {
+              // Month-over-month trend: only meaningful for ranges anchored
+              // to "now" (This Month/This Year/Year To Date), where the last
+              // two months in the series really are "this month vs last
+              // month". For a fully historical range (Last Year, a past
+              // Custom Date range, etc.) the last two months are just some
+              // arbitrary past months, and a diff between them isn't what
+              // "vs last month" implies to the user - so suppress it there.
+              const trendEligibleRanges = {
+                'This Month',
+                'This Year',
+                'Year To Date',
+              };
+              if (!trendEligibleRanges.contains(_selecteddate)) {
                 setState(() {
                   _salesTrendPercent = null;
                 });
+              } else {
+                // salesDataList is stored negated for the chart's bar
+                // direction, so undo that before comparing. The selected
+                // range can still include a trailing month with no postings
+                // yet (the current, still-in-progress month) - blindly
+                // diffing the last two array slots against that padding
+                // zero produced a bogus "100% down" badge, so skip trailing
+                // zero months to find the real latest one.
+                int latestIndex = salesDataList.length - 1;
+                while (latestIndex >= 0 &&
+                    salesDataList[latestIndex].abs() <= 0.0001) {
+                  latestIndex--;
+                }
+                if (latestIndex >= 1) {
+                  final latest = salesDataList[latestIndex].abs();
+                  final previous = salesDataList[latestIndex - 1].abs();
+                  setState(() {
+                    _salesTrendPercent = previous > 0.0001
+                        ? ((latest - previous) / previous) * 100
+                        : null;
+                  });
+                } else {
+                  setState(() {
+                    _salesTrendPercent = null;
+                  });
+                }
               }
             } else {
               Map<String, dynamic> data = json.decode(response_charts.body);
@@ -1615,147 +1643,100 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   }
 
   Future<void> _selectDateRange_auto(BuildContext context) async {
-    if (_isTextEnabled) {
-      startdate_pref = prefs.getString('startdate');
-      enddate_pref = prefs.getString('enddate');
+    if (!_isTextEnabled) return;
 
-      if (startdate_pref == null ||
-          enddate_pref == null ||
-          startdate_pref == "") {
-        startdate_pref = prefs.getString('startfrom')!;
+    // Always show the picker when "Custom Date" is chosen, instead of
+    // only the very first time ever - the old gate (skip the picker once
+    // startdate/enddate already existed in prefs) meant every later
+    // "Custom Date" selection silently reused the old cached range with
+    // no way to actually pick a new one. And since the fallback branch's
+    // prefs.setString calls ran even when the picker was cancelled (using
+    // whatever stale/empty startDateString happened to be set), other
+    // screens like Transactions could end up reading an empty date and
+    // falling back to their own unrelated default range.
+    final cachedStart = DateTime.tryParse(prefs.getString('startdate') ?? '');
+    final cachedEnd = DateTime.tryParse(prefs.getString('enddate') ?? '');
+    final initialDateRange = DateTimeRange(
+      start: cachedStart ?? _startDate,
+      end: cachedEnd ?? _endDate,
+    );
+    final startfrom = prefs.getString('startfrom');
+    DateTime earliestDate = DateTime.tryParse(startfrom ?? '') ?? DateTime(2000);
 
-        final initialDateRange = DateTimeRange(
-          start: _startDate,
-          end: _endDate,
-        );
-        String? startfrom = startdate_pref;
-        DateTime earliestDate = DateTime.parse(startfrom!);
+    DateTimeRange? selectedDateRange = await showDateRangePicker(
+      context: context,
+      initialDateRange: initialDateRange,
+      firstDate: earliestDate,
+      lastDate: DateTime(2100),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: app_color, // main accent color
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
 
-        DateTimeRange? selectedDateRange = await showDateRangePicker(
-          context: context,
-          initialDateRange: initialDateRange,
-          firstDate: earliestDate,
-          lastDate: DateTime(2100),
-          builder: (BuildContext context, Widget? child) {
-            return Theme(
-              data: Theme.of(context).copyWith(
-                colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: app_color, // main accent color
-                  onPrimary: Colors.white,
-                  surface: Theme.of(context).colorScheme.surface,
-                  onSurface: Theme.of(context).colorScheme.onSurface,
-                ),
-
-                datePickerTheme: DatePickerThemeData(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).scaffoldBackgroundColor, // 🔹 THIS fixes the picker bg
-                  surfaceTintColor: Colors.transparent,
-                  rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
-                  rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                    app_color.withOpacity(0.15),
-                  ),
-                ),
-                dialogTheme: DialogThemeData(
-                  backgroundColor: Theme.of(context).colorScheme.surface,
-                ),
-                dialogBackgroundColor: Theme.of(context).colorScheme.surface,
+            datePickerTheme: DatePickerThemeData(
+              backgroundColor: Theme.of(
+                context,
+              ).scaffoldBackgroundColor, // 🔹 THIS fixes the picker bg
+              surfaceTintColor: Colors.transparent,
+              rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
+              rangeSelectionOverlayColor: MaterialStatePropertyAll(
+                app_color.withOpacity(0.15),
               ),
-              child: child!,
-            );
-          },
+            ),
+            dialogTheme: DialogThemeData(
+              backgroundColor: Theme.of(context).colorScheme.surface,
+            ),
+            dialogBackgroundColor: Theme.of(context).colorScheme.surface,
+          ),
+          child: child!,
         );
+      },
+    );
 
-        if (selectedDateRange != null &&
-            selectedDateRange != initialDateRange) {
-          setState(() async {
-            _startDate = selectedDateRange.start;
-            _endDate = selectedDateRange.end;
+    // Cancelled - leave whatever range was already active alone, don't
+    // touch prefs at all (previously this still overwrote startdate/
+    // enddate with stale/empty values on cancel).
+    if (selectedDateRange == null) return;
 
-            DateTime start = _startDate;
-            DateTime end = _endDate;
+    setState(() {
+      _startDate = selectedDateRange.start;
+      _endDate = selectedDateRange.end;
 
-            String startMonth = DateFormat('MMM').format(start);
-            String sdf = DateFormat(
-              'MM',
-            ).format(start); // converting month into string
-            String startDay = DateFormat('dd').format(start);
-            int startYear = start.year;
+      DateTime start = _startDate;
+      DateTime end = _endDate;
 
-            String endMonth = DateFormat('MMM').format(end);
-            String sdfEnd = DateFormat('MM').format(end);
-            String endDay = DateFormat('dd').format(end);
-            int endYear = end.year;
+      String startMonth = DateFormat('MMM').format(start);
+      String sdf = DateFormat(
+        'MM',
+      ).format(start); // converting month into string
+      String startDay = DateFormat('dd').format(start);
+      int startYear = start.year;
 
-            startDateString = '$startYear$sdf$startDay';
-            endDateString = '$endYear$sdfEnd$endDay';
+      String endMonth = DateFormat('MMM').format(end);
+      String sdfEnd = DateFormat('MM').format(end);
+      String endDay = DateFormat('dd').format(end);
+      int endYear = end.year;
 
-            startdate_text =
-                startDay + "-" + startMonth + "-" + startYear.toString();
-            enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
+      startDateString = '$startYear$sdf$startDay';
+      endDateString = '$endYear$sdfEnd$endDay';
 
-            print(startDateString);
-            print(endDateString);
+      startdate_text =
+          startDay + "-" + startMonth + "-" + startYear.toString();
+      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
 
-            fetchDashData(startDateString, endDateString);
-          });
-        }
+      print(startDateString);
+      print(endDateString);
 
-        prefs.setString('startdate', startDateString);
-        prefs.setString('enddate', endDateString);
-      } else {
-        if (!_isRefreshing) {
-          showAppMessage(context, "Swipe Down to Refresh Data");
-        }
+      fetchDashData(startDateString, endDateString);
+    });
 
-        double? sales = prefs.getDouble('sales');
-        double? purchase = prefs.getDouble('purchase');
-        double? receipt = prefs.getDouble('receipt');
-        double? payment = prefs.getDouble('payment');
-        double? receivable = prefs.getDouble('receivable');
-        double? payable = prefs.getDouble('payable');
-        double? cash = prefs.getDouble('cash');
-
-        DateTime start = DateTime.parse(startdate_pref!);
-        DateTime end = DateTime.parse(enddate_pref!);
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        if (sales != null) {
-          sales_value = sales;
-          purchase_value = purchase!;
-          receipt_value = receipt!;
-          payment_value = payment!;
-          outstandingreceivable_value = receivable!;
-          outstandingpayable_value = payable!;
-          cash_value = cash!;
-        }
-        /*fetchDashData(startDateString,endDateString);*/
-
-        prefs.setString('startdate', startDateString);
-        prefs.setString('enddate', endDateString);
-      }
-    }
+    prefs.setString('startdate', startDateString);
+    prefs.setString('enddate', endDateString);
   }
 
   Future<void> _selectDateRange(BuildContext context) async {
@@ -2663,6 +2644,8 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       currencyFormat = NumberFormat('#,##0');
     }
 
+    _currencyCode = currencyCode ?? 'AED';
+
     // String default_value = currencyFormat.format(0) + " CR";
     sales_value = 0.0;
     purchase_value = 0.0;
@@ -3207,7 +3190,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Sales - Credit Note",
-                                "$currencysymbol ${formatNumberAbbreviation(sales_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(sales_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "sales", // 👈 type auto handle karega
                                 () {
                                   vchtype = "Sales";
@@ -3229,7 +3214,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Purchase - Debit Note",
-                                "$currencysymbol ${formatNumberAbbreviation(purchase_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(purchase_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "purchase",
                                 () {
                                   vchtype = "Purchase";
@@ -3250,7 +3237,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Receipt",
-                                "$currencysymbol ${formatNumberAbbreviation(receipt_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(receipt_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "receipt",
                                 () {
                                   vchtype = "Receipt";
@@ -3271,7 +3260,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Payment",
-                                "$currencysymbol ${formatNumberAbbreviation(payment_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(payment_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "payment",
                                 () {
                                   vchtype = "Payment";
@@ -3292,7 +3283,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Outstanding Receivable",
-                                "$currencysymbol ${formatNumberAbbreviation(outstandingreceivable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(outstandingreceivable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "receivable",
                                 () {
                                   vchtype = "Receivable";
@@ -3313,7 +3306,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Outstanding Payable",
-                                "$currencysymbol ${formatNumberAbbreviation(outstandingpayable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(outstandingpayable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "payable",
                                 () {
                                   vchtype = "Payable";
@@ -3334,7 +3329,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               _buildDecentCard(
                                 context,
                                 "Cash / Bank Balance",
-                                "$currencysymbol ${formatNumberAbbreviation(cash_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true)}",
+                                currencysymbol,
+                                formatNumberAbbreviation(cash_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
+                                _currencyCode,
                                 "Cash", // type (for icon + gradient auto handle)
                                 () {
                                   vchtype = "Cash";
@@ -4027,7 +4024,9 @@ Widget _buildFloatingTile(
 Widget _buildDecentCard(
   BuildContext context,
   String label,
-  String value,
+  String symbol,
+  String amountText,
+  String currencyCode,
   String type,
   VoidCallback onTap, {
   double? trendPercent,
@@ -4147,8 +4146,10 @@ Widget _buildDecentCard(
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
+                  child: currencyAmountText(
+                    currencyCode: currencyCode,
+                    symbol: symbol,
+                    amountText: amountText,
                     maxLines: 1,
                     style: GoogleFonts.poppins(
                       fontSize: 17,

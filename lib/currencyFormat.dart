@@ -15,6 +15,23 @@ class CurrencyFormatter {
     return _preferences?.getString('currencycode') ?? 'AED';
   }
 
+  /// 🔹 Public accessor for the saved currency code (needed by widget-based
+  /// formatters that must know whether to render the Dirham glyph).
+  static String getCurrencyCode() => _getCurrencyCode();
+
+  /// 🔹 Symbol and formatted number kept separate, for callers that need to
+  /// style the currency symbol independently from the amount (e.g. to swap
+  /// in the Dirham glyph for AED without affecting the amount's font).
+  static ({String symbol, String number}) formatCurrencyParts(double amount) {
+    final code = _getCurrencyCode();
+    final format = _buildFormat(code);
+    final symbol = format.currencySymbol;
+    final number = NumberFormat(
+      "#,##0.${'0' * _getDecimalPlaces()}",
+    ).format(amount);
+    return (symbol: symbol, number: number);
+  }
+
   /// 🔹 Build NumberFormat safely
   static NumberFormat _buildFormat(String code, {int? decimals}) {
     final decimalDigits = decimals ?? _getDecimalPlaces();

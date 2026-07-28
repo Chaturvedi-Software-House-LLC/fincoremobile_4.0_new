@@ -256,9 +256,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           ),
           borderRadius: const BorderRadius.all(Radius.circular(8)),
         ),
-        child: Text(
+        child: currencySymbolWidget(
+          currencycode,
           getCurrencySymbol(currencycode),
-          style: GoogleFonts.poppins(
+          GoogleFonts.poppins(
             color: Colors.white,
             fontSize: 13,
             fontWeight: FontWeight.bold,
@@ -3864,6 +3865,18 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     }
   }
 
+  // Currency-symbol-aware value display - renders the Dirham glyph for AED
+  // instead of the literal "AED" text that getCurrencySymbol() falls back
+  // to (there's no distinct AED symbol glyph in the standard locale data).
+  Widget _currencyValueWidget(String numberText, TextStyle style) {
+    return currencyAmountText(
+      currencyCode: currencycode,
+      symbol: getCurrencySymbol(currencycode),
+      amountText: numberText,
+      style: style,
+    );
+  }
+
   Future<void> saveEntry() async {
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
@@ -5481,9 +5494,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                 ),
                                 borderRadius: BorderRadius.all(Radius.circular(8)),
                               ),
-                              child: Text(
+                              child: currencySymbolWidget(
+                                currencycode,
                                 getCurrencySymbol(currencycode),
-                                style: GoogleFonts.poppins(
+                                GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
@@ -5519,9 +5533,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                 ),
                                 borderRadius: BorderRadius.all(Radius.circular(8)),
                               ),
-                              child: Text(
+                              child: currencySymbolWidget(
+                                currencycode,
                                 getCurrencySymbol(currencycode),
-                                style: GoogleFonts.poppins(
+                                GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
@@ -6335,16 +6350,27 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                                     .colorScheme
                                                                     .onSurfaceVariant,
                                                               ),
-                                                              prefixText:
-                                                                  '${getCurrencySymbol(currencycode)} ',
-                                                              prefixStyle: GoogleFonts.poppins(
-                                                                fontSize: 14,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: Theme.of(
-                                                                  context,
-                                                                ).colorScheme.onSurface,
+                                                              prefix: Padding(
+                                                                padding:
+                                                                    const EdgeInsets.only(
+                                                                      right: 4,
+                                                                    ),
+                                                                child: currencySymbolWidget(
+                                                                  currencycode,
+                                                                  getCurrencySymbol(
+                                                                    currencycode,
+                                                                  ),
+                                                                  GoogleFonts.poppins(
+                                                                    fontSize:
+                                                                        14,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                    color: Theme.of(
+                                                                      context,
+                                                                    ).colorScheme.onSurface,
+                                                                  ),
+                                                                ),
                                                               ),
                                                               filled: true,
                                                               fillColor: isDark
@@ -6486,9 +6512,11 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                                       ),
                                                                     ),
                                                                   ),
-                                                                  Text(
-                                                                    '${getCurrencySymbol(currencycode)} ${currencyFormatter.format(amount)}',
-                                                                    style: GoogleFonts.poppins(
+                                                                  _currencyValueWidget(
+                                                                    currencyFormatter.format(
+                                                                      amount,
+                                                                    ),
+                                                                    GoogleFonts.poppins(
                                                                       fontSize:
                                                                           15,
                                                                       fontWeight:
@@ -7515,9 +7543,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               ),
                               borderRadius: BorderRadius.all(Radius.circular(8)),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -7947,9 +7976,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                             Radius.circular(8),
                                           ),
                                         ),
-                                        child: Text(
+                                        child: currencySymbolWidget(
+                                          currencycode,
                                           getCurrencySymbol(currencycode),
-                                          style: GoogleFonts.poppins(
+                                          GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -9042,10 +9072,39 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                 itemName: item.itemName,
                                 quantity: item.itemQuantity,
                                 unit: itemUnit,
-                                rate:
-                                    "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)))}",
-                                amount:
-                                    "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)) * double.parse(item.itemQuantity))}",
+                                rate: '',
+                                amount: '',
+                                rateWidget: _currencyValueWidget(
+                                  currencyFormat.format(
+                                    double.parse(
+                                      item.itemPrice.toStringAsFixed(
+                                        decimal!,
+                                      ),
+                                    ),
+                                  ),
+                                  GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                amountWidget: _currencyValueWidget(
+                                  currencyFormat.format(
+                                    double.parse(
+                                          item.itemPrice.toStringAsFixed(
+                                            decimal!,
+                                          ),
+                                        ) *
+                                        double.parse(item.itemQuantity),
+                                  ),
+                                  GoogleFonts.poppins(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: app_color,
+                                  ),
+                                ),
                                 onIncrement: () {
                                   int currentQty =
                                       int.tryParse(item.itemQuantity) ?? 0;
@@ -9123,8 +9182,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               final item = ledgerEntries[index];
                               return EntryLedgerCard(
                                 ledgerName: item.ledgerName,
-                                amount:
-                                    "${getCurrencySymbol(currencycode)} ${currencyFormat.format(item.ledgerAmount)}",
+                                amount: '',
+                                amountWidget: _currencyValueWidget(
+                                  currencyFormat.format(item.ledgerAmount),
+                                  GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.indigo,
+                                  ),
+                                ),
                                 onDelete: () {
                                   _deleteLedger(index);
                                 },
@@ -9361,9 +9427,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                             8,
                                           ),
                                         ),
-                                        child: Text(
+                                        child: currencySymbolWidget(
+                                          currencycode,
                                           getCurrencySymbol(currencycode),
-                                          style: GoogleFonts.poppins(
+                                          GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -9433,6 +9500,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                             ? controller_totalamt.text
                             : "0.00",
                         currencySymbol: getCurrencySymbol(currencycode),
+                        currencyCode: currencycode,
                       ),
 
                       // ── Save Button ──

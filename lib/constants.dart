@@ -102,6 +102,98 @@ void closeKeyboard(BuildContext context) {
 
 const Color app_color = Colors.teal;
 
+// New official UAE Dirham symbol (capital "D" split by two horizontal
+// lines), shipped as a single glyph in the bundled `Dirham` font by the
+// uae_dirham_symbol package. It must stay in its own TextSpan/Text - mixing
+// it into the same style as the amount digits would render the digits in
+// the Dirham font's own (unstyled) glyphs instead of the app's normal font.
+const String dirhamGlyph = 'ê';
+const String _dirhamFontFamily = 'packages/uae_dirham_symbol/Dirham';
+
+// The Dirham font's glyph occupies a visually larger box than the app's
+// normal font at the same nominal fontSize (different font metrics), so an
+// identical fontSize number does not produce a matching *visual* size. The
+// central bank guideline that the symbol always match the amount's size
+// means visually, not just the property value - this factor compensates.
+const double _dirhamSizeScale = 0.89;
+
+// The glyph's own vertical anchor sits lower within its font em-box than
+// the digits' do, so even correct baseline alignment makes it visually
+// "hang" below the amount text. Nudge it upward to compensate. Expressed
+// as a ratio of fontSize (not a fixed pixel amount) so the correction
+// scales correctly across screens that use different font sizes - a fixed
+// pixel offset tuned for one size looks wrong at another.
+const double _dirhamVerticalOffsetRatio = -0.10;
+
+/// Builds the currency-symbol span for a Text.rich: the new Dirham glyph
+/// for AED (theme-aware since it just inherits `style`'s color), or the
+/// plain symbol text for every other currency - unchanged either way.
+InlineSpan currencySymbolSpan(String currencyCode, String symbol, TextStyle style) {
+  if (currencyCode.toUpperCase() == 'AED') {
+    final baseFontSize = style.fontSize ?? 14;
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: Transform.translate(
+        offset: Offset(0, baseFontSize * _dirhamVerticalOffsetRatio),
+        child: Text(
+          dirhamGlyph,
+          style: style.copyWith(
+            fontFamily: _dirhamFontFamily,
+            fontFamilyFallback: [
+              if (style.fontFamily != null) style.fontFamily!,
+            ],
+            fontSize: baseFontSize * _dirhamSizeScale,
+          ),
+        ),
+      ),
+    );
+  }
+  return TextSpan(text: symbol, style: style);
+}
+
+/// Drop-in replacement for `Text(symbol, style: style)` where only the bare
+/// currency symbol is shown on its own (e.g. as a TextField prefix or a
+/// standalone label next to an amount rendered separately) - renders the
+/// Dirham glyph for AED, plain symbol text for everything else.
+Widget currencySymbolWidget(
+  String currencyCode,
+  String symbol,
+  TextStyle style,
+) {
+  return Text.rich(currencySymbolSpan(currencyCode, symbol, style));
+}
+
+/// Drop-in replacement for `Text('$symbol $amountText', style: style)` that
+/// renders the new Dirham glyph for AED (light/dark aware via `style`'s
+/// color) while leaving every other currency exactly as plain text.
+Widget currencyAmountText({
+  required String currencyCode,
+  required String symbol,
+  required String amountText,
+  required TextStyle style,
+  int? maxLines,
+  TextOverflow? overflow,
+  TextAlign? textAlign,
+  bool? softWrap,
+}) {
+  return Text.rich(
+    TextSpan(
+      children: [
+        currencySymbolSpan(currencyCode, symbol, style),
+        // Non-breaking space so the symbol can never wrap/truncate away
+        // from the amount it belongs to (a plain space is a valid line
+        // break point, which can strand the symbol on its own line).
+        TextSpan(text: ' $amountText', style: style),
+      ],
+    ),
+    maxLines: maxLines,
+    overflow: overflow,
+    textAlign: textAlign,
+    softWrap: softWrap,
+  );
+}
+
 String formatAmount(String amount) {
   String amount_string = "";
 
@@ -121,6 +213,46 @@ String formatAmount(String amount) {
   }
 
   return amount_string;
+}
+
+/// Widget counterpart to `formatAmount` - same DR/CR logic, but renders the
+/// currency symbol in its own span so AED can show the new Dirham glyph
+/// (other currencies render identically to `formatAmount`'s plain string).
+/// `formatAmount` itself is left untouched for String-only contexts (CSV/PDF
+/// export, etc.) where a Widget can't be used.
+Widget formatAmountRich(
+  String amount, {
+  required TextStyle style,
+  int? maxLines,
+  TextOverflow? overflow,
+  TextAlign? textAlign,
+  bool? softWrap,
+}) {
+  String cleanAmount = amount;
+  String suffix;
+
+  if (amount.contains("-")) {
+    cleanAmount = amount.replaceAll("-", "");
+    suffix = "DR";
+  } else {
+    cleanAmount = amount == "null" ? "0" : amount;
+    suffix = "CR";
+  }
+
+  final amountDouble = double.parse(cleanAmount);
+  final parts = CurrencyFormatter.formatCurrencyParts(amountDouble);
+  final currencyCode = CurrencyFormatter.getCurrencyCode();
+
+  return currencyAmountText(
+    currencyCode: currencyCode,
+    symbol: parts.symbol,
+    amountText: '${parts.number} $suffix',
+    style: style,
+    maxLines: maxLines,
+    overflow: overflow,
+    textAlign: textAlign,
+    softWrap: softWrap,
+  );
 }
 
 String formatNullto0(String value) {

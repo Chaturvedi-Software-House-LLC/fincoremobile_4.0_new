@@ -160,6 +160,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   late int? decimal;
   late NumberFormat currencyFormat;
   late String currencysymbol = '';
+  String _currencyCode = 'AED';
 
   bool _isDashVisible = true,
       _isEnddateVisible = true,
@@ -524,6 +525,8 @@ class _ItemsClickedPageState extends State<ItemsClicked>
       currencysymbol = format.currencySymbol;
       currencyFormat = NumberFormat('#,##0');
     }
+
+    _currencyCode = currencyCode ?? 'AED';
 
     if (_selecteddate == 'Custom Date') {
       _startDate = DateTime.parse(prefs.getString('startdate')!);
@@ -1544,11 +1547,24 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     bool isSales,
   ) {
     return Column(
-      children: list.map((card) {
-        final month = card.month;
-        final amount = double.parse(card.amount).toStringAsFixed(decimal!);
-        final date = DateFormat('MMMM yyyy').parse(month);
-        final startOfMonth = DateFormat(
+      children: list
+          .map((card) {
+            final month = card.month;
+            final parsedAmount = double.tryParse(card.amount);
+            DateTime? parsedDate;
+            try {
+              parsedDate = DateFormat('MMMM yyyy').parse(month);
+            } catch (_) {
+              parsedDate = null;
+            }
+            // Skip entries the backend sent with an unparseable amount/month
+            // instead of throwing and crashing the whole list.
+            if (parsedAmount == null || parsedDate == null) {
+              return const SizedBox.shrink();
+            }
+            final amount = parsedAmount.toStringAsFixed(decimal!);
+            final date = parsedDate;
+            final startOfMonth = DateFormat(
           'yyyyMMdd',
         ).format(DateTime(date.year, date.month, 1));
         final endOfMonth = DateFormat(
@@ -1565,7 +1581,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                   startdate_string: startOfMonth,
                   enddate_string: endOfMonth,
                   type: vchtype,
-                  total: formatAmount(amount),
+                  total: amount,
                   item_name: itemname,
                 ),
               ),
@@ -1627,8 +1643,10 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                 ),
 
                 // 🔹 Amount with arrow
-                Text(
-                  '$currencysymbol ${formatTotal(amount, decimals: decimal!)} ',
+                currencyAmountText(
+                  currencyCode: _currencyCode,
+                  symbol: currencysymbol,
+                  amountText: formatTotal(amount, decimals: decimal!),
                   style: GoogleFonts.poppins(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -1687,7 +1705,22 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     );
   }
 
-  Widget _buildSummaryMetric(String label, String value) {
+  // Matches _buildSummaryMetric's value Text style (fontSize 14, w700,
+  // onSurface) so the Dirham glyph swap-in is visually seamless.
+  Widget _summaryCurrencyValue(String amountText) {
+    return currencyAmountText(
+      currencyCode: _currencyCode,
+      symbol: currencysymbol,
+      amountText: amountText,
+      style: GoogleFonts.poppins(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _buildSummaryMetric(String label, String value, {Widget? valueWidget}) {
     IconData icon = Icons.info;
     LinearGradient gradient = LinearGradient(
       colors: [Colors.grey.shade400, Colors.grey.shade600],
@@ -1775,14 +1808,15 @@ class _ItemsClickedPageState extends State<ItemsClicked>
           ),
 
           // 🔹 Value
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
+          valueWidget ??
+              Text(
+                value,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
         ],
       ),
     );
@@ -1794,9 +1828,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
         ? Icons.trending_up_rounded
         : Icons.shopping_cart_outlined;
     final total = _formatIntValue(
-      isSales
-          ? '$currencysymbol ${sales_totalnetsales}'
-          : '$currencysymbol ${purchase_totalnetpurchase}',
+      isSales ? sales_totalnetsales : purchase_totalnetpurchase,
     );
     final lastDate = _formatValue(
       isSales ? sales_lastsaledate : purchase_lastpurchasedate,
@@ -1820,6 +1852,13 @@ class _ItemsClickedPageState extends State<ItemsClicked>
         : isPurchaseClickableCard;
     final isExpanded = isSales ? isClicked_Salesicon : isClicked_Purchaseicon;
     final isVisible = isSales ? isVisibleSalesList : isVisiblePurchaseList;
+    final hasData =
+        (isSales ? sales_noofinvoices : purchase_noofinvoices) !=
+        'Not Available';
+
+    if (!hasData) {
+      return _buildSummaryEmptyState(title, icon, isSales);
+    }
 
     return Container(
       margin: EdgeInsets.only(bottom: 8),
@@ -1850,7 +1889,8 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             /// Data Rows
             _buildSummaryMetric(
               'Total Net ${isSales ? 'Sales' : 'Purchase'}',
-              '$total',
+              '',
+              valueWidget: _summaryCurrencyValue(total),
             ),
             _buildSummaryMetric(
               'Last ${isSales ? 'Sale' : 'Purchase'} Date',
@@ -1858,14 +1898,23 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             ),
             _buildSummaryMetric(
               'Last ${isSales ? 'Sale' : 'Purchase'} Price',
-              '${currencysymbol} $lastPrice',
+              '',
+              valueWidget: _summaryCurrencyValue(lastPrice),
             ),
             _buildSummaryMetric(
               'Total ${isSales ? 'Sale' : 'Purchase'} Qty',
               qty,
             ),
-            _buildSummaryMetric('Min Rate', '${currencysymbol} $minRate'),
-            _buildSummaryMetric('Max Rate', '${currencysymbol} $maxRate'),
+            _buildSummaryMetric(
+              'Min Rate',
+              '',
+              valueWidget: _summaryCurrencyValue(minRate),
+            ),
+            _buildSummaryMetric(
+              'Max Rate',
+              '',
+              valueWidget: _summaryCurrencyValue(maxRate),
+            ),
             _buildSummaryMetric('No of Invoices', invoices),
 
             Divider(height: 18),
@@ -1951,8 +2000,10 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                     SizedBox(width: 4),
 
                     // 🔹 Total value
-                    Text(
-                      total,
+                    currencyAmountText(
+                      currencyCode: _currencyCode,
+                      symbol: currencysymbol,
+                      amountText: total,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w700,
                         fontSize: 14.5,
@@ -1982,6 +2033,60 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                   child: _buildMonthlyList(context, listData, isSales),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🔹 Shown instead of the full metrics list when there's no Sales/Purchase
+  // data for the selected period, so the card doesn't fill up with
+  // meaningless "0"/"Not Available" rows.
+  Widget _buildSummaryEmptyState(String title, IconData icon, bool isSales) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Theme.of(context).brightness == Brightness.dark
+            ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12.withOpacity(0.08),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            buildSectionTitle(icon, title),
+            SizedBox(height: 16),
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: 32,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'No ${isSales ? 'sales' : 'purchase'} recorded for this period',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

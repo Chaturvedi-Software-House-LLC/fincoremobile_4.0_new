@@ -29,12 +29,19 @@ class SalesOrderModel {
   });
 
   factory SalesOrderModel.fromJson(Map<String, dynamic> json) {
+    final rawData = json['data'];
     return SalesOrderModel(
-      id: json['id'],
-      data: json['data'],
-      type: json['type'],
-      isSynced: json['isSynced'],
-      message: json['message'],
+      id: json['id'] is int ? json['id'] : int.tryParse('${json['id']}') ?? 0,
+      data: rawData is Map<String, dynamic>
+          ? rawData
+          : (rawData is String
+                ? jsonDecode(rawData) as Map<String, dynamic>
+                : <String, dynamic>{}),
+      type: (json['type'] ?? '').toString(),
+      isSynced: json['isSynced'] is int
+          ? json['isSynced']
+          : int.tryParse('${json['isSynced']}') ?? 0,
+      message: json['message']?.toString(),
     );
   }
 }
@@ -96,25 +103,6 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
     return vanSalesSerialNo.any((s) => s.trim().toLowerCase() == currentSerial);
   }
 
-  String formatAmount(String amount) {
-    String amount_string = "";
-    if (amount.contains("-")) {
-      amount = amount.replaceAll("-", "");
-      double amount_double = double.parse(amount);
-      amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
-      amount_string = amount_string;
-    } else {
-      if (amount == "null") {
-        amount = "0";
-      }
-      double amount_double = double.parse(amount);
-      amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
-      amount_string = amount_string;
-    }
-    // Apply any transformations or formatting to the 'amount' variable here
-    return amount_string;
-  }
-
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -124,7 +112,7 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
 
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -923,7 +911,7 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
                             voucherNo: '$vchno',
                             date: formattedDate,
                             partyName: partyLedger,
-                            amount: formatAmount(totalAmount.toString()),
+                            amount: totalAmount.toString(),
                             isSynced: card.isSynced == 1,
                             errorMessage:
                                 (card.isSynced == 2 && card.message != null)

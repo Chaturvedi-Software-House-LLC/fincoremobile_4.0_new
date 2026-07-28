@@ -83,25 +83,6 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
 
   final Set<int> expandedCards = {};
 
-  String formatAmount(String amount) {
-    String amount_string = "";
-    if (amount.contains("-")) {
-      amount = amount.replaceAll("-", "");
-      double amount_double = double.parse(amount);
-      amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
-      amount_string = amount_string;
-    } else {
-      if (amount == "null") {
-        amount = "0";
-      }
-      double amount_double = double.parse(amount);
-      amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
-      amount_string = amount_string;
-    }
-    // Apply any transformations or formatting to the 'amount' variable here
-    return amount_string;
-  }
-
   bool get isVanSalesSerial {
     final currentSerial = serial_no?.trim().toLowerCase();
 
@@ -121,7 +102,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
 
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -1006,7 +987,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                             voucherNo: '$vchno',
                             date: formattedDate,
                             partyName: partyLedger,
-                            amount: formatAmount(totalAmount.toString()),
+                            amount: totalAmount.toString(),
                             isSynced: card.isSynced == 1,
                             errorMessage:
                                 (card.isSynced == 2 && card.message != null)

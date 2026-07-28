@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:sunmi_printer_plus/sunmi_printer_plus.dart';
 import '../constants.dart';
+import '../currencyFormat.dart';
 
 // ─── Section Header ──────────────────────────────────────────────
 class EntrySection extends StatelessWidget {
@@ -342,6 +343,12 @@ class EntryItemCard extends StatelessWidget {
   // +/- controls) - used for meter-reading items whose quantity is
   // derived from the start/end reading, not manually editable.
   final bool quantityLocked;
+  // Override the plain rate/amount Text with a currency-symbol-aware
+  // widget (renders the Dirham glyph for AED) - rate/amount stay as
+  // plain strings for callers that don't need this (e.g. legacy screens
+  // not yet converted).
+  final Widget? rateWidget;
+  final Widget? amountWidget;
 
   const EntryItemCard({
     super.key,
@@ -355,6 +362,8 @@ class EntryItemCard extends StatelessWidget {
     required this.onDelete,
     this.onTap,
     this.quantityLocked = false,
+    this.rateWidget,
+    this.amountWidget,
   });
 
   @override
@@ -445,27 +454,45 @@ class EntryItemCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          'Rate: $rate',
-                          style: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                          textAlign: TextAlign.right,
-                        ),
+                        rateWidget != null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Rate: ',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  rateWidget!,
+                                ],
+                              )
+                            : Text(
+                                'Rate: $rate',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                                textAlign: TextAlign.right,
+                              ),
                         const SizedBox(height: 2),
-                        Text(
-                          amount,
-                          style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: app_color,
-                          ),
-                          textAlign: TextAlign.right,
-                        ),
+                        amountWidget ??
+                            Text(
+                              amount,
+                              style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: app_color,
+                              ),
+                              textAlign: TextAlign.right,
+                            ),
                       ],
                     ),
                   ),
@@ -701,12 +728,14 @@ class EntryTotalBar extends StatelessWidget {
   final String label;
   final String value;
   final String? currencySymbol;
+  final String? currencyCode;
 
   const EntryTotalBar({
     super.key,
     this.label = 'Total',
     required this.value,
     this.currencySymbol,
+    this.currencyCode,
   });
 
   @override
@@ -761,14 +790,25 @@ class EntryTotalBar extends StatelessWidget {
               ),
             ],
           ),
-          Text(
-            currencySymbol != null ? '$currencySymbol $value' : value,
-            style: GoogleFonts.poppins(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: app_color,
-            ),
-          ),
+          currencySymbol != null
+              ? currencyAmountText(
+                  currencyCode: currencyCode ?? 'AED',
+                  symbol: currencySymbol!,
+                  amountText: value,
+                  style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: app_color,
+                  ),
+                )
+              : Text(
+                  value,
+                  style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: app_color,
+                  ),
+                ),
         ],
       ),
     );
@@ -818,12 +858,14 @@ class EntryLedgerCard extends StatelessWidget {
   final String ledgerName;
   final String amount;
   final VoidCallback onDelete;
+  final Widget? amountWidget;
 
   const EntryLedgerCard({
     super.key,
     required this.ledgerName,
     required this.amount,
     required this.onDelete,
+    this.amountWidget,
   });
 
   @override
@@ -882,14 +924,15 @@ class EntryLedgerCard extends StatelessWidget {
                 ),
               ),
             ),
-            Text(
-              amount,
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.indigo,
-              ),
-            ),
+            amountWidget ??
+                Text(
+                  amount,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.indigo,
+                  ),
+                ),
           ],
         ),
       ),
@@ -1013,13 +1056,28 @@ class PendingEntryCard extends StatelessWidget {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(
-                            amount,
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: app_color,
-                            ),
+                          Builder(
+                            builder: (context) {
+                              final parsed =
+                                  double.tryParse(
+                                    amount.replaceAll(',', ''),
+                                  ) ??
+                                  0.0;
+                              final parts = CurrencyFormatter.formatCurrencyParts(
+                                parsed,
+                              );
+                              return currencyAmountText(
+                                currencyCode:
+                                    CurrencyFormatter.getCurrencyCode(),
+                                symbol: parts.symbol,
+                                amountText: parts.number,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: app_color,
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(height: 2),
                           Container(

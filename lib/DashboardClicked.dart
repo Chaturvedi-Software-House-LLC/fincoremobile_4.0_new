@@ -2532,7 +2532,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         String opening = data['opening'].toString();
         setState(()
         {
-          opening_value = formatOpening(opening);
+          opening_value = opening;
         });
 
         String values = jsonEncode(data['values']);
@@ -2755,7 +2755,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           Map<String, dynamic> data = jsonDecode(response.body);
           String opening = data['opening'].toString();
           setState(() {
-            opening_value = formatOpening(opening);
+            opening_value = opening;
           });
           String values = jsonEncode(data['values']);
 
@@ -3036,24 +3036,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   }
 */
-
-  String formatOpening(String opening) {
-    String opening_string = "";
-
-    if (opening.contains("-")) {
-      opening = opening.replaceAll("-", "");
-      double opening_double = double.parse(opening);
-      // int opening_int = opening_double.round();
-      opening_string = CurrencyFormatter.formatCurrency_double(opening_double);
-      opening_string = opening_string + " DR";
-    } else {
-      double opening_double = double.parse(opening);
-      // int opening_int = opening_double.round();
-      opening_string = CurrencyFormatter.formatCurrency_double(opening_double);
-      opening_string = opening_string + " CR";
-    }
-    return opening_string;
-  }
 
   String convertDateFormat(String dateStr) {
     try {
@@ -3759,8 +3741,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                 ),
               ),
               const Spacer(),
-              Text(
-                formatAmount(total.toString()),
+              formatAmountRich(
+                total.toString(),
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -3798,8 +3780,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                 color: color,
               ),
               const SizedBox(width: 4),
-              Text(
-                formatAmount(amount.toString()),
+              formatAmountRich(
+                amount.toString(),
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   color: color,
@@ -4490,8 +4472,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   ),
                                 ),
                                 const Spacer(),
-                                Text(
-                                  formatOpening(opening_value!),
+                                formatAmountRich(
+                                  opening_value!,
                                   style: GoogleFonts.poppins(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700,
@@ -4722,9 +4704,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                             const SizedBox(height: 4),
                                             Align(
                                               alignment: Alignment.centerRight,
-                                              child: Text(
+                                              child: formatAmountRich(
+                                                amount.toString(),
                                                 textAlign: TextAlign.end,
-                                                formatAmount(amount.toString()),
                                                 style: GoogleFonts.poppins(
                                                   fontSize: 16,
                                                   fontWeight: FontWeight.w700,
@@ -5506,8 +5488,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 ),
                               ),
                             const SizedBox(height: 4),
-                            Text(
-                              formatAmount(card.amount.toString()),
+                            formatAmountRich(
+                              card.amount.toString(),
                               softWrap: true,
                               style: GoogleFonts.poppins(
                                 fontSize: 18,
@@ -5898,8 +5880,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        formatAmount(entry.overdueAmount.toString()),
+                      formatAmountRich(
+                        entry.overdueAmount.toString(),
                         softWrap: true,
                         style: GoogleFonts.poppins(
                           fontSize: 16,
@@ -6010,8 +5992,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    formatAmount(bucket.amount.toString()),
+                  formatAmountRich(
+                    bucket.amount.toString(),
                     softWrap: true,
                     style: GoogleFonts.poppins(
                       fontSize: 16,
@@ -6133,8 +6115,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        formatAmount(entry.amount.toString()),
+                      formatAmountRich(
+                        entry.amount.toString(),
                         softWrap: true,
                         style: GoogleFonts.poppins(
                           fontSize: 16,
@@ -6245,8 +6227,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               softWrap: true,
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              formatAmount(card.outstanding.toString()),
+                            formatAmountRich(
+                              card.outstanding.toString(),
                               softWrap: true,
                               style: GoogleFonts.poppins(
                                 fontSize: 18,

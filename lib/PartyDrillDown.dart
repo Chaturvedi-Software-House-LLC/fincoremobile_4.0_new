@@ -720,7 +720,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
         child: AppBar(
           backgroundColor: app_color,
           elevation: 6,
-          centerTitle: true,
+          centerTitle: false,
           automaticallyImplyLeading: false,
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
@@ -729,32 +729,30 @@ class _PartyDrillDownState extends State<PartyDrillDown>
             icon: const Icon(Icons.arrow_back, color: Colors.white),
             onPressed: () => AppNavigation.backOrDashboard(context),
           ),
-          title: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 5.2),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.type,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.type,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
-                Text(
-                  widget.ledger,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: 13,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                widget.ledger,
+                maxLines: 1,
+                style: GoogleFonts.poppins(
+                  color: Colors.white70,
+                  fontSize: 13,
                 ),
-              ],
-            ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
           actions: [
             IconButton(
@@ -867,7 +865,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Center(
-                        child: Text(
+                        child: formatAmountRich(
                           widget.total,
                           style: GoogleFonts.poppins(
                             fontSize: 24,
@@ -1039,6 +1037,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                     ],
                   ),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       if (_isSearchViewVisible) ...[
                         Padding(
@@ -1092,11 +1091,11 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                           ),
                         ),
                       ],
-                      _buildListSection(),
                     ],
                   ),
                 ),
               ),
+              _buildListSection(),
             ],
           ),
 
@@ -1301,138 +1300,138 @@ class _PartyDrillDownState extends State<PartyDrillDown>
   // List section
   // ---------------------------------------------------------------------------
 
+  // Returns a real sliver (SliverList) instead of a shrinkWrap ListView.builder
+  // so the CustomScrollView only builds cards near the viewport - a
+  // shrinkWrap+NeverScrollableScrollPhysics list forces eager layout of
+  // every item up front, which hangs scrolling on large lists.
   Widget _buildListSection() {
     switch (_selectedgroup) {
       case 'Items':
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: filteredItems.length,
+        return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-          itemBuilder: (_, i) {
-            final item = filteredItems[i];
-            return _buildCard(
-              title: item.item,
-              amount: item.amount,
-              qty: item.qty,
-              listType: 'Items',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PartyDrillDown(
-                    startdate_string: widget.startdate_string,
-                    enddate_string: widget.enddate_string,
-                    type: widget.type,
-                    total: _formatAmount(item.amount),
-                    ledger: widget.ledger,
-                    lockedItem: item.item,
-                    lockedCostcenter: widget.lockedCostcenter,
-                    lockedVchname: widget.lockedVchname,
-                    trail: [
-                      ...widget.trail,
-                      {'type': 'Item', 'label': item.item},
-                    ],
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate((_, i) {
+              final item = filteredItems[i];
+              return _buildCard(
+                title: item.item,
+                amount: item.amount,
+                qty: item.qty,
+                listType: 'Items',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PartyDrillDown(
+                      startdate_string: widget.startdate_string,
+                      enddate_string: widget.enddate_string,
+                      type: widget.type,
+                      total: item.amount.toString(),
+                      ledger: widget.ledger,
+                      lockedItem: item.item,
+                      lockedCostcenter: widget.lockedCostcenter,
+                      lockedVchname: widget.lockedVchname,
+                      trail: [
+                        ...widget.trail,
+                        {'type': 'Item', 'label': item.item},
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            }, childCount: filteredItems.length),
+          ),
         );
 
       case 'Bills':
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: filteredBills.length,
+        return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemBuilder: (_, i) {
-            final item = filteredBills[i];
-            return _buildCard(
-              title: item.vchno,
-              amount: item.amount,
-              date: item.vchdate,
-              listType: 'Bills',
-            );
-          },
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate((_, i) {
+              final item = filteredBills[i];
+              return _buildCard(
+                title: item.vchno,
+                amount: item.amount,
+                date: item.vchdate,
+                listType: 'Bills',
+              );
+            }, childCount: filteredBills.length),
+          ),
         );
 
       case 'Voucher Type':
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: filteredVchtype.length,
+        return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemBuilder: (_, i) {
-            final item = filteredVchtype[i];
-            return _buildCard(
-              title: item.vchname,
-              amount: item.amount,
-              listType: 'Voucher Type',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PartyDrillDown(
-                    startdate_string: widget.startdate_string,
-                    enddate_string: widget.enddate_string,
-                    type: widget.type,
-                    total: _formatAmount(item.amount),
-                    ledger: widget.ledger,
-                    lockedItem: widget.lockedItem,
-                    lockedCostcenter: widget.lockedCostcenter,
-                    lockedVchname: item.vchname,
-                    trail: [
-                      ...widget.trail,
-                      {'type': 'Vch Type', 'label': item.vchname},
-                    ],
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate((_, i) {
+              final item = filteredVchtype[i];
+              return _buildCard(
+                title: item.vchname,
+                amount: item.amount,
+                listType: 'Voucher Type',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PartyDrillDown(
+                      startdate_string: widget.startdate_string,
+                      enddate_string: widget.enddate_string,
+                      type: widget.type,
+                      total: item.amount.toString(),
+                      ledger: widget.ledger,
+                      lockedItem: widget.lockedItem,
+                      lockedCostcenter: widget.lockedCostcenter,
+                      lockedVchname: item.vchname,
+                      trail: [
+                        ...widget.trail,
+                        {'type': 'Vch Type', 'label': item.vchname},
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            }, childCount: filteredVchtype.length),
+          ),
         );
 
       case 'Cost Center':
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: filteredCostcenter.length,
+        return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemBuilder: (_, i) {
-            final item = filteredCostcenter[i];
-            return _buildCard(
-              title: _formatCostCenter(item.costcentre),
-              amount: item.amount,
-              listType: 'Cost Center',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PartyDrillDown(
-                    startdate_string: widget.startdate_string,
-                    enddate_string: widget.enddate_string,
-                    type: widget.type,
-                    total: _formatAmount(item.amount),
-                    ledger: widget.ledger,
-                    lockedItem: widget.lockedItem,
-                    lockedCostcenter: item.costcentre,
-                    lockedVchname: widget.lockedVchname,
-                    trail: [
-                      ...widget.trail,
-                      {
-                        'type': 'Cost Center',
-                        'label': item.costcentre == 'null'
-                            ? 'Not Applicable'
-                            : item.costcentre,
-                      },
-                    ],
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate((_, i) {
+              final item = filteredCostcenter[i];
+              return _buildCard(
+                title: _formatCostCenter(item.costcentre),
+                amount: item.amount,
+                listType: 'Cost Center',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PartyDrillDown(
+                      startdate_string: widget.startdate_string,
+                      enddate_string: widget.enddate_string,
+                      type: widget.type,
+                      total: item.amount.toString(),
+                      ledger: widget.ledger,
+                      lockedItem: widget.lockedItem,
+                      lockedCostcenter: item.costcentre,
+                      lockedVchname: widget.lockedVchname,
+                      trail: [
+                        ...widget.trail,
+                        {
+                          'type': 'Cost Center',
+                          'label': item.costcentre == 'null'
+                              ? 'Not Applicable'
+                              : item.costcentre,
+                        },
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            }, childCount: filteredCostcenter.length),
+          ),
         );
 
       default:
-        return const SizedBox.shrink();
+        return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
   }
 
@@ -1588,8 +1587,8 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                       color: Theme.of(context).dividerColor.withOpacity(0.75),
                     ),
                   ),
-                  child: Text(
-                    _formatAmount(amount),
+                  child: formatAmountRich(
+                    amount.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 14.5,
                       fontWeight: FontWeight.w600,

@@ -401,9 +401,11 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                           else
                             Row(
                               children: [
-                                Text(
-                                  "${getCurrencySymbol(currencycode)} ${formatAmountVoucher(displayBalance.toString())}",
-                                  style: GoogleFonts.poppins(
+                                _currencyValueWidget(
+                                  formatAmountVoucher(
+                                    displayBalance.toString(),
+                                  ),
+                                  GoogleFonts.poppins(
                                     fontSize: 18,
                                     color: balanceType == "DR"
                                         ? Colors.redAccent
@@ -646,9 +648,11 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Text(
-                                                "${getCurrencySymbol(currencycode)} ${formatAmountVoucher(billDisplayAmount.toString())}",
-                                                style: GoogleFonts.poppins(
+                                              _currencyValueWidget(
+                                                formatAmountVoucher(
+                                                  billDisplayAmount.toString(),
+                                                ),
+                                                GoogleFonts.poppins(
                                                   fontSize: 13,
                                                   fontWeight: FontWeight.w700,
                                                   color: billType == "DR"
@@ -757,7 +761,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       if (bills.isEmpty) {
         isVisibleBillHeading = false;
         isChequeVisible = false;
-        _selectedpaymentmode = paymentmode_data.first;
+        _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
         cheque.clear();
         updateChequeAmount();
         instNoController.clear();
@@ -774,7 +778,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         isVisibleBillHeading = true;
         if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.first;
+          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
           cheque.clear();
           updateChequeAmount();
           isVisibleChequeHeading = false;
@@ -787,7 +791,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               isVisibleChequeHeading = true;
             } else {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -796,7 +800,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             }
           } else {
             isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             cheque.clear();
             updateChequeAmount();
 
@@ -1076,7 +1080,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                             _dateController.text = receiptdatetxt;
 
                             if (serial_no != uniGasSerialNumber) {
-                              _selectedvchtypename = vchtypenamedata.first;
+                              _selectedvchtypename = vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '';
                             }
                             fetchvchnos(_selectedvchtypename);
 
@@ -1198,7 +1202,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                             receiptdatetxt = formatlastsaledate(receiptdatestring);
                             _dateController.text = receiptdatetxt;
 
-                            _selectedvchtypename = vchtypenamedata.first;
+                            _selectedvchtypename = vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '';
                             fetchvchnos(_selectedvchtypename);
 
                             // _selectedparty = partydata.first;
@@ -2395,7 +2399,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       receiptdatetxt = formatlastsaledate(receiptdatestring);
       _dateController.text = receiptdatetxt;
       if (serial_no != uniGasSerialNumber) {
-        _selectedvchtypename = vchtypenamedata.first;
+        _selectedvchtypename = vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '';
       }
 
       fetchvchnos(_selectedvchtypename);
@@ -3005,6 +3009,18 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     }
   }
 
+  // Currency-symbol-aware value display - renders the Dirham glyph for AED
+  // instead of the literal "AED" text that getCurrencySymbol() falls back
+  // to (there's no distinct AED symbol glyph in the standard locale data).
+  Widget _currencyValueWidget(String numberText, TextStyle style) {
+    return currencyAmountText(
+      currencyCode: currencycode,
+      symbol: getCurrencySymbol(currencycode),
+      amountText: numberText,
+      style: style,
+    );
+  }
+
   bool isNumeric(String s) {
     if (s == null) {
       return false;
@@ -3374,7 +3390,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
           vchtypenamedata = List<String>.from(jsonResponse['vchTypes']);
 
-          _selectedvchtypename = vchtypenamedata.first;
+          _selectedvchtypename = vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '';
           isVoucherTypeLocked = false;
 
           if (isUniGasSerial && allocation != null) {
@@ -3434,7 +3450,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           if (_selectedbankcashname != null) {
             if (isSelectedBankCashInHand) {
               isPaymentModeVisible = false;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -3454,7 +3470,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                 else
                 {
                   isPaymentModeVisible = true;
-                  _selectedpaymentmode = paymentmode_data.first;
+                  _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
                   cheque.clear();
                   updateChequeAmount();
 
@@ -3465,7 +3481,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               else
               {
                 isPaymentModeVisible = true;
-                _selectedpaymentmode = paymentmode_data.first;
+                _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
                 cheque.clear();
                 updateChequeAmount();
 
@@ -3648,7 +3664,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           if (_selectedbankcashname != null) {
             if (isSelectedBankCashInHand) {
               isPaymentModeVisible = false;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
 
@@ -3662,7 +3678,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                   isVisibleChequeHeading = true;
                 } else {
                   isPaymentModeVisible = true;
-                  _selectedpaymentmode = paymentmode_data.first;
+                  _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
                   cheque.clear();
                   updateChequeAmount();
 
@@ -3671,7 +3687,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                 }
               } else {
                 isPaymentModeVisible = true;
-                _selectedpaymentmode = paymentmode_data.first;
+                _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
                 cheque.clear();
                 updateChequeAmount();
 
@@ -4050,9 +4066,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                               ),
                               borderRadius: BorderRadius.all(Radius.circular(8)),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -4558,9 +4575,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                               Radius.circular(8),
                                             ),
                                           ),
-                                          child: Text(
+                                          child: currencySymbolWidget(
+                                            currencycode,
                                             getCurrencySymbol(currencycode),
-                                            style: GoogleFonts.poppins(
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontSize: 13,
                                               fontWeight: FontWeight.bold,
@@ -4987,9 +5005,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   alignment: Alignment.center,
-                                  child: Text(
-                                    getCurrencySymbol('$currencycode'),
-                                    style: GoogleFonts.poppins(
+                                  child: currencySymbolWidget(
+                                    currencycode,
+                                    getCurrencySymbol(currencycode),
+                                    GoogleFonts.poppins(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
@@ -5536,9 +5555,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                             ),
                                           ),
                                           alignment: Alignment.center,
-                                          child: Text(
-                                            getCurrencySymbol('$currencycode'),
-                                            style: GoogleFonts.poppins(
+                                          child: currencySymbolWidget(
+                                            currencycode,
+                                            getCurrencySymbol(currencycode),
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 12,
@@ -5772,7 +5792,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             (_selectedbill == "Agst Ref" || _selectedbill == 'New Ref');
         if (_selectedbankcashname != null && isSelectedBankCashInHand) {
           isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.first;
+          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
           cheque.clear();
           updateChequeAmount();
           isVisibleChequeHeading = false;
@@ -5785,7 +5805,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
               isVisibleChequeHeading = true;
             } else {
               isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.first;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
               cheque.clear();
               updateChequeAmount();
               isVisibleChequeHeading = false;
@@ -5793,7 +5813,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             }
           } else {
             isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.first;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
             cheque.clear();
             updateChequeAmount();
             isVisibleChequeHeading = false;
@@ -5824,7 +5844,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       setState(() {
         FocusManager.instance.primaryFocus?.unfocus();
         isPaymentModeVisible = false;
-        _selectedpaymentmode = paymentmode_data.first;
+        _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
         cheque.clear();
         updateChequeAmount();
         isVisibleChequeHeading = false;
@@ -6024,7 +6044,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       paymentmode_data.add("ATM");
       paymentmode_data.add("Card");
       paymentmode_data.add('Cheque/DD');
-      _selectedpaymentmode = paymentmode_data.first;
+      _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
 
       billAmountController.clear();
 
@@ -6663,7 +6683,9 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                                   ?.unfocus();
                                               isPaymentModeVisible = false;
                                               _selectedpaymentmode =
-                                                  paymentmode_data.first;
+                                                  paymentmode_data.isNotEmpty
+                                                  ? paymentmode_data.first
+                                                  : '';
                                               cheque.clear();
                                               updateChequeAmount();
                                               isVisibleChequeHeading = false;
@@ -6679,7 +6701,9 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                               } else {
                                                 isPaymentModeVisible = true;
                                                 _selectedpaymentmode =
-                                                    paymentmode_data.first;
+                                                    paymentmode_data.isNotEmpty
+                                                    ? paymentmode_data.first
+                                                    : '';
                                                 cheque.clear();
                                                 updateChequeAmount();
                                                 isVisibleChequeHeading = false;
@@ -7007,9 +7031,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                                 ),
                                               ),
                                               alignment: Alignment.center,
-                                              child: Text(
-                                                getCurrencySymbol(currencycode),
-                                                style: GoogleFonts.poppins(
+                                              child: currencySymbolWidget(
+                                                currencycode,
+                                                getCurrencySymbol(
+                                                  currencycode,
+                                                ),
+                                                GoogleFonts.poppins(
                                                   color: Colors.white,
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 11,
@@ -7296,11 +7323,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                                   ),
                                                 ),
                                                 child: Center(
-                                                  child: Text(
+                                                  child: currencySymbolWidget(
+                                                    currencycode,
                                                     getCurrencySymbol(
                                                       currencycode,
                                                     ),
-                                                    style: GoogleFonts.poppins(
+                                                    GoogleFonts.poppins(
                                                       color: Colors.white,
                                                       fontWeight:
                                                           FontWeight.bold,
@@ -7358,6 +7386,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                               ? controller_totalamt.text
                               : "0.00",
                           currencySymbol: getCurrencySymbol(currencycode),
+                          currencyCode: currencycode,
                         ),
 
                         // ── Save Button ──

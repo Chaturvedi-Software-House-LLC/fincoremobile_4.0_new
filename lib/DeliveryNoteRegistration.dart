@@ -2411,7 +2411,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       bulkReceiverEidController.clear();
       bulkReceiverSignatureBytes = null;
 
-      _selectedsalesledger = salesledger_data[0];
+      // Don't reassign _selectedsalesledger on UniGas either - it's locked
+      // to the allocation-assigned sales ledger, same as the voucher type
+      // above, and shouldn't fall back to the first option on reset.
+      if (!isUniGasSerial(serial_no)) {
+        _selectedsalesledger = salesledger_data[0];
+      }
 
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
 
@@ -3386,6 +3391,18 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     }
   }
 
+  // Currency-symbol-aware value display - renders the Dirham glyph for AED
+  // instead of the literal "AED" text that getCurrencySymbol() falls back
+  // to (there's no distinct AED symbol glyph in the standard locale data).
+  Widget _currencyValueWidget(String numberText, TextStyle style) {
+    return currencyAmountText(
+      currencyCode: currencycode,
+      symbol: getCurrencySymbol(currencycode),
+      amountText: numberText,
+      style: style,
+    );
+  }
+
   Future<void> saveEntry() async {
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
@@ -3506,10 +3523,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           "BILLEDQTY": "${item.itemQuantity} ${item.itemUnit}",
           "BATCHALLOCATIONS.LIST": item.batchAllocationList,
           "ACCOUNTINGALLOCATIONS.LIST": item.accountingAllocationList,
-          "METER_FROM": item.meterFrom.trim().isEmpty
-              ? null
-              : item.meterFrom.trim(),
-          "METER_TO": item.meterTo.trim().isEmpty ? null : item.meterTo.trim(),
         };
       }).toList();
 
@@ -5408,9 +5421,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                     ),
                                     borderRadius: const BorderRadius.all(Radius.circular(8)),
                                   ),
-                                  child: Text(
+                                  child: currencySymbolWidget(
+                                    currencycode,
                                     getCurrencySymbol(currencycode),
-                                    style: GoogleFonts.poppins(
+                                    GoogleFonts.poppins(
                                       color: Colors.white,
                                       fontSize: 13,
                                       fontWeight: FontWeight.bold,
@@ -5481,9 +5495,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                               ),
                               borderRadius: const BorderRadius.all(Radius.circular(8)),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -6515,16 +6530,27 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                                     .colorScheme
                                                                     .onSurfaceVariant,
                                                               ),
-                                                              prefixText:
-                                                                  '${getCurrencySymbol(currencycode)} ',
-                                                              prefixStyle: GoogleFonts.poppins(
-                                                                fontSize: 14,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: Theme.of(
-                                                                  context,
-                                                                ).colorScheme.onSurface,
+                                                              prefix: Padding(
+                                                                padding:
+                                                                    const EdgeInsets.only(
+                                                                      right: 4,
+                                                                    ),
+                                                                child: currencySymbolWidget(
+                                                                  currencycode,
+                                                                  getCurrencySymbol(
+                                                                    currencycode,
+                                                                  ),
+                                                                  GoogleFonts.poppins(
+                                                                    fontSize:
+                                                                        14,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                    color: Theme.of(
+                                                                      context,
+                                                                    ).colorScheme.onSurface,
+                                                                  ),
+                                                                ),
                                                               ),
                                                               filled: true,
                                                               fillColor: isDark
@@ -6778,9 +6804,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                                       ),
                                                                     ),
                                                                   ),
-                                                                  Text(
-                                                                    '${getCurrencySymbol(currencycode)} ${currencyFormatter.format(amount)}',
-                                                                    style: GoogleFonts.poppins(
+                                                                  _currencyValueWidget(
+                                                                    currencyFormatter.format(
+                                                                      amount,
+                                                                    ),
+                                                                    GoogleFonts.poppins(
                                                                       fontSize:
                                                                           15,
                                                                       fontWeight:
@@ -7894,9 +7922,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           ),
           borderRadius: const BorderRadius.all(Radius.circular(8)),
         ),
-        child: Text(
+        child: currencySymbolWidget(
+          currencycode,
           getCurrencySymbol(currencycode),
-          style: GoogleFonts.poppins(
+          GoogleFonts.poppins(
             color: Colors.white,
             fontSize: 13,
             fontWeight: FontWeight.bold,
@@ -8198,9 +8227,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                 Radius.circular(8),
                               ),
                             ),
-                            child: Text(
+                            child: currencySymbolWidget(
+                              currencycode,
                               getCurrencySymbol(currencycode),
-                              style: GoogleFonts.poppins(
+                              GoogleFonts.poppins(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -8668,9 +8698,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                             Radius.circular(8),
                                           ),
                                         ),
-                                        child: Text(
+                                        child: currencySymbolWidget(
+                                          currencycode,
                                           getCurrencySymbol(currencycode),
-                                          style: GoogleFonts.poppins(
+                                          GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -9901,10 +9932,39 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                       itemName: item.itemName,
                                       quantity: item.itemQuantity,
                                       unit: itemUnit,
-                                      rate:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)))}",
-                                      amount:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(double.parse(item.itemPrice.toStringAsFixed(decimal!)) * double.parse(item.itemQuantity))}",
+                                      rate: '',
+                                      amount: '',
+                                      rateWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          double.parse(
+                                            item.itemPrice.toStringAsFixed(
+                                              decimal!,
+                                            ),
+                                          ),
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      amountWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          double.parse(
+                                                item.itemPrice.toStringAsFixed(
+                                                  decimal!,
+                                                ),
+                                              ) *
+                                              double.parse(item.itemQuantity),
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: app_color,
+                                        ),
+                                      ),
                                       quantityLocked:
                                           _isQtyLockedByMeterReading(
                                             item.meterFrom,
@@ -10242,8 +10302,17 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                     final item = ledgerEntries[index];
                                     return EntryLedgerCard(
                                       ledgerName: item.ledgerName,
-                                      amount:
-                                          "${getCurrencySymbol(currencycode)} ${currencyFormat.format(item.ledgerAmount)}",
+                                      amount: '',
+                                      amountWidget: _currencyValueWidget(
+                                        currencyFormat.format(
+                                          item.ledgerAmount,
+                                        ),
+                                        GoogleFonts.poppins(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.indigo,
+                                        ),
+                                      ),
                                       onDelete: () {
                                         _deleteLedger(index);
                                       },
@@ -10447,9 +10516,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                               Radius.circular(8),
                                             ),
                                           ),
-                                          child: Text(
+                                          child: currencySymbolWidget(
+                                            currencycode,
                                             getCurrencySymbol(currencycode),
-                                            style: GoogleFonts.poppins(
+                                            GoogleFonts.poppins(
                                               color: Colors.white,
                                               fontSize: 13,
                                               fontWeight: FontWeight.bold,
@@ -10529,6 +10599,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                             ? controller_totalamt.text
                             : "0.00",
                         currencySymbol: getCurrencySymbol(currencycode),
+                        currencyCode: currencycode,
                       ),
 
                       EntrySaveButton(
