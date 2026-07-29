@@ -1374,7 +1374,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
         ),
       ),
       body: _isLoading
-          ? Center(child: AppLogoLoader())
+          ? _buildSkeletonItemDetail()
           : ListView(
               padding: EdgeInsets.only(left: 16, right: 16, bottom: 12, top: 8),
               children: [
@@ -1391,6 +1391,76 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                   _buildSummaryCard(context, isSales: false),
               ],
             ),
+    );
+  }
+
+  // Skeleton stand-in for the item overview card + sales/purchase summary
+  // cards while the initial fetch is in flight - mirrors
+  // _buildItemOverviewCard/_buildSummaryCard's rough layout (icon badge +
+  // text rows) at a placeholder level so the transition into real content
+  // doesn't visibly jump. Replaces the old centered AppLogoLoader spinner.
+  Widget _buildSkeletonItemDetail() {
+    Widget skeletonRow() {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+        child: Row(
+          children: [
+            const ShimmerBox(width: 34, height: 34, borderRadius: 12),
+            const SizedBox(width: 14),
+            Expanded(child: const ShimmerBox(height: 13)),
+            const SizedBox(width: 12),
+            const ShimmerBox(width: 60, height: 13),
+          ],
+        ),
+      );
+    }
+
+    Widget skeletonCard({int rows = 3}) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12.withOpacity(0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const ShimmerBox(width: 34, height: 34, borderRadius: 12),
+                  const SizedBox(width: 10),
+                  Expanded(child: const ShimmerBox(height: 16, width: 140)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (int i = 0; i < rows; i++) skeletonRow(),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12, top: 8),
+        children: [
+          skeletonCard(rows: 4),
+          const SizedBox(height: 8),
+          skeletonCard(rows: 3),
+          const SizedBox(height: 8),
+          skeletonCard(rows: 3),
+        ],
+      ),
     );
   }
 

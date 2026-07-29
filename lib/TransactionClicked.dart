@@ -936,8 +936,108 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
             ),
           ),
 
-          // Loader stays outside of scrollable content
-          if (_isLoading) Center(child: AppLogoLoader()),
+          // Skeleton stays outside of scrollable content, overlaying the
+          // whole screen while the initial fetch is in flight - replaces
+          // the old dimmed spinner-over-stale-content overlay so the
+          // loading state reads as "content incoming" instead of a blank
+          // page.
+          if (_isLoading)
+            Positioned.fill(
+              child: Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: _buildSkeletonDetail(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the voucher detail card + expandable
+  // accounting/inventory rows - mirrors _buildVoucherCard's icon-row
+  // layout at a generic level (icon + label line + value line, repeated),
+  // plus a couple of section blocks for the expandable ledger/cost-center
+  // lists further down the page.
+  Widget _buildSkeletonDetail() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blueGrey.withOpacity(0.1),
+                  blurRadius: 12,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (int i = 0; i < 4; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        const ShimmerBox(
+                          width: 32,
+                          height: 32,
+                          borderRadius: 10,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const ShimmerBox(height: 10, width: 80),
+                              const SizedBox(height: 6),
+                              ShimmerBox(
+                                height: 13,
+                                width: MediaQuery.of(context).size.width * 0.4,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          for (int i = 0; i < 2; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.blueGrey.withOpacity(0.1),
+                    blurRadius: 12,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const ShimmerBox(height: 14, width: 120),
+                  const SizedBox(height: 10),
+                  const ShimmerBox(height: 40, borderRadius: 12),
+                  const SizedBox(height: 8),
+                  const ShimmerBox(height: 40, borderRadius: 12),
+                  const SizedBox(height: 8),
+                  const ShimmerBox(height: 40, borderRadius: 12),
+                ],
+              ),
+            ),
         ],
       ),
     );

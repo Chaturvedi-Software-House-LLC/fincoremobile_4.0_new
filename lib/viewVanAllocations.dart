@@ -194,6 +194,75 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
     );
   }
 
+  // Skeleton stand-in for the header + allocation list while the initial
+  // fetch is in flight - replaces the old centered spinner so the loading
+  // state reads as "content incoming" instead of a blank page. Generic
+  // (icon badge + 2 text lines + trailing value) rather than mirroring the
+  // exact allocation card variants, since the shape is close enough for
+  // the transition to feel seamless.
+  Widget _buildSkeletonList() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const ShimmerBox(height: 38, borderRadius: 12),
+          ),
+          for (int i = 0; i < 6; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+                border: Border.all(
+                  color: Theme.of(context).dividerColor.withOpacity(0.55),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const ShimmerBox(width: 38, height: 38, borderRadius: 12),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        ShimmerBox(height: 13, width: 140),
+                        SizedBox(height: 6),
+                        ShimmerBox(height: 11, width: 90),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const ShimmerBox(height: 15, width: 70),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -252,7 +321,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
       ),
 
       body: isLoading
-          ? Center(child: AppLogoLoader())
+          ? _buildSkeletonList()
           : RefreshIndicator(
               color: primaryColor,
               onRefresh: fetchAllocations,

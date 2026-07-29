@@ -1138,7 +1138,13 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
             ],
           ),
 
-          if (_isLoading) const Center(child: AppLogoLoader()),
+          if (_isLoading)
+            Positioned.fill(
+              child: Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: _buildSkeletonList(),
+              ),
+            ),
 
           if (isSortVisible)
             Positioned(
@@ -1332,6 +1338,82 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: widgets,
+    );
+  }
+
+  // Skeleton stand-in for the summary card + detail list while the initial
+  // fetch is in flight - replaces the old dimmed spinner-over-stale-content
+  // overlay so the loading state reads as "content incoming" instead of a
+  // blank/frozen page. Generic (icon + 2 text lines + amount) rather than
+  // mirroring every row variant on this screen, since the shape is close
+  // enough for the transition to feel seamless.
+  Widget _buildSkeletonList() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const ShimmerBox(height: 38, borderRadius: 12),
+                const SizedBox(height: 8),
+                const ShimmerBox(height: 38, borderRadius: 12),
+              ],
+            ),
+          ),
+          for (int i = 0; i < 6; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+                border: Border.all(
+                  color: Theme.of(context).dividerColor.withOpacity(0.55),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const ShimmerBox(width: 38, height: 38, borderRadius: 12),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const ShimmerBox(height: 13, width: 140),
+                        const SizedBox(height: 6),
+                        const ShimmerBox(height: 11, width: 90),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const ShimmerBox(height: 15, width: 70),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 

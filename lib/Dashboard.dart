@@ -3099,32 +3099,39 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   child: Column(
                     children: [
                       _buildDashboardHeader(),
-                      Container(
-                        margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        padding: EdgeInsets.all(0),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).cardColor,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black12.withOpacity(0.08),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (isVisibleDate)
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [buildDateFilterCard(context)],
+                      if (_isLoading)
+                        _buildSkeletonDateCard()
+                      else
+                        Container(
+                          margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                          padding: EdgeInsets.all(0),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).cardColor,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black12.withOpacity(0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
                               ),
-                          ],
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isVisibleDate)
+                                Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [buildDateFilterCard(context)],
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
 
+                      if (_isLoading)
+                        _buildSkeletonGrid()
+                      else
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
@@ -3565,15 +3572,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     ),
                   ),
                 ),*/
-            Visibility(
-              visible: _isLoading,
-              child: Container(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.black.withOpacity(0.58)
-                    : Colors.white.withOpacity(0.72),
-                child: const Center(child: AppLogoLoader()),
-              ),
-            ),
           ],
         ),
 
@@ -3770,6 +3768,107 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       default:
         return option;
     }
+  }
+
+  // Skeleton stand-in for the date-filter card while the dashboard's first
+  // fetch is in flight - shown instead of the real card (rather than
+  // dimming stale/zeroed content under a spinner) so the loading state
+  // reads as "content incoming" instead of "something broke".
+  Widget _buildSkeletonDateCard() {
+    return ShimmerLoading(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12.withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const ShimmerBox(width: 34, height: 34, borderRadius: 12),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const ShimmerBox(width: 90, height: 12),
+                      const SizedBox(height: 6),
+                      ShimmerBox(
+                        width: MediaQuery.of(context).size.width * 0.4,
+                        height: 10,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const ShimmerBox(height: 40, borderRadius: 12),
+            const SizedBox(height: 8),
+            const ShimmerBox(height: 40, borderRadius: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the tile grid (Sales/Purchase/Receipt/... cards)
+  // while data is loading - mirrors _buildDecentCard's layout (icon badge,
+  // chevron badge, 2-line label, amount line) so the transition into real
+  // content doesn't visibly jump.
+  Widget _buildSkeletonGrid() {
+    return ShimmerLoading(
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 220,
+          childAspectRatio: 1.28,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: 6,
+        itemBuilder: (context, index) {
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const ShimmerBox(width: 32, height: 32, borderRadius: 10),
+                    const Spacer(),
+                    const ShimmerBox(width: 24, height: 24, borderRadius: 12),
+                  ],
+                ),
+                const Spacer(),
+                const ShimmerBox(height: 11, width: 90),
+                const SizedBox(height: 4),
+                const ShimmerBox(height: 11, width: 60),
+                const SizedBox(height: 6),
+                const ShimmerBox(height: 16, width: 80),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget buildDateFilterCard(BuildContext context) {

@@ -285,6 +285,74 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
     });
   }
 
+  Widget _buildSkeletonList() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const ShimmerBox(height: 48, borderRadius: 18),
+          ),
+          for (int i = 0; i < 6; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+                border: Border.all(
+                  color: Theme.of(context).dividerColor.withOpacity(0.55),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const ShimmerBox(width: 48, height: 48, borderRadius: 24),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const ShimmerBox(height: 14, width: 150),
+                        const SizedBox(height: 8),
+                        const ShimmerBox(height: 11, width: 100),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const ShimmerBox(width: 32, height: 32, borderRadius: 16),
+                  const SizedBox(width: 10),
+                  const ShimmerBox(width: 32, height: 32, borderRadius: 16),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> fetchUsers(String selectedserial) async {
     setState(() {
       _isLoading = true;
@@ -721,7 +789,13 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                 ],
               ),
 
-              if (_isLoading) const Center(child: AppLogoLoader()),
+              if (_isLoading)
+                Positioned.fill(
+                  child: Container(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    child: _buildSkeletonList(),
+                  ),
+                ),
 
               Positioned(
                 bottom: 30,

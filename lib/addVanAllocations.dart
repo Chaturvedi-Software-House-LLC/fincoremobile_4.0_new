@@ -658,7 +658,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
         ),
       ),
       body: isLoading
-          ? Center(child: AppLogoLoader())
+          ? _buildSkeletonForm()
           : LayoutBuilder(
               builder: (context, constraints) {
                 final bool isMobile = constraints.maxWidth < 700;
@@ -771,6 +771,46 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the allocation form while the initial user/config
+  // fetch is in flight - replaces the old centered spinner so the loading
+  // state reads as "content incoming" instead of a blank page. Generic
+  // (label line + input-box) pairs matching the dropdown fields below,
+  // rather than mirroring each field exactly, since the shape is close
+  // enough for the transition to feel seamless.
+  Widget _buildSkeletonForm() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: _cardDecoration(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const ShimmerBox(height: 18, width: 180),
+                const SizedBox(height: 18),
+                for (int i = 0; i < 7; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        ShimmerBox(height: 12, width: 120),
+                        SizedBox(height: 8),
+                        ShimmerBox(height: 52, borderRadius: 22),
+                      ],
+                    ),
+                  ),
+                const ShimmerBox(height: 48, borderRadius: 22),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

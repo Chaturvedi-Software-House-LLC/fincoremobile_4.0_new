@@ -2649,8 +2649,17 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             ],
           ),
 
-          // 🔹 Loader Overlay
-          if (_isLoading) Container(child: Center(child: AppLogoLoader())),
+          // 🔹 Loader Overlay - skeleton stand-in for the header (parent
+          // dropdown + view selector) plus a list of item-card-shaped
+          // placeholders while the initial fetch is in flight, replacing
+          // the old dimmed spinner-over-stale-content overlay.
+          if (_isLoading)
+            Positioned.fill(
+              child: Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: _buildSkeletonItemsList(),
+              ),
+            ),
           ScrollFab(controller: _scrollFabController),
         ],
       ),
@@ -3541,6 +3550,97 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the header (parent dropdown + view selector card)
+  // plus a list of item-card-shaped placeholders (icon badge + name line +
+  // qty/amount line) while the initial fetch is in flight - mirrors
+  // _buildParentDropdown/_buildViewSelector and _buildItemCard's rough
+  // layout so the transition into real content doesn't visibly jump.
+  Widget _buildSkeletonHeaderCard() {
+    return Container(
+      margin: const EdgeInsets.only(top: 8, left: 12, right: 12, bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12.withOpacity(0.08),
+            blurRadius: 10,
+            spreadRadius: 2,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const ShimmerBox(height: 40, borderRadius: 12),
+          const SizedBox(height: 8),
+          const ShimmerBox(height: 40, borderRadius: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkeletonItemsList() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 90),
+        children: [
+          _buildSkeletonHeaderCard(),
+          for (int i = 0; i < 8; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 4,
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black12.withOpacity(0.1),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                  border: Border.all(
+                    color: Theme.of(context).dividerColor.withOpacity(0.55),
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const ShimmerBox(height: 16, width: 160),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const ShimmerBox(
+                          width: 70,
+                          height: 22,
+                          borderRadius: 30,
+                        ),
+                        const SizedBox(width: 8),
+                        const ShimmerBox(
+                          width: 80,
+                          height: 22,
+                          borderRadius: 20,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const ShimmerBox(height: 12, width: 100),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -2055,9 +2055,72 @@ class _ModifyRolePageState extends State<ModifyRole>
                 ),
               ],
             ),
-            if (_isLoading) Center(child: AppLogoLoader()),
+            if (_isLoading)
+              Positioned.fill(
+                child: Container(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  child: _buildSkeletonForm(),
+                ),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSkeletonForm() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.all(10),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const ShimmerBox(height: 46, borderRadius: 12),
+          ),
+          for (int i = 0; i < 6; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 16,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+                border: Border.all(
+                  color: Theme.of(context).dividerColor.withOpacity(0.55),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const ShimmerBox(width: 32, height: 32, borderRadius: 10),
+                  const SizedBox(width: 12),
+                  Expanded(child: const ShimmerBox(height: 15, width: 140)),
+                  const SizedBox(width: 8),
+                  const ShimmerBox(width: 44, height: 24, borderRadius: 12),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

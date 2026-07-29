@@ -4176,10 +4176,91 @@ class _PartyClickedPageState extends State<PartyClicked>
             ),
           ),
 
-          Visibility(
-            visible: _isLoading,
-            child: Center(child: AppLogoLoader()),
+          if (_isLoading)
+            Positioned.fill(
+              child: Container(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                child: _buildSkeletonPartyDetail(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the summary header + breakdown cards while the
+  // initial fetch is in flight - replaces the old dimmed spinner overlay so
+  // the loading state reads as "content incoming" instead of a blank page.
+  // Generic (icon badge + title line + amount line per card) rather than
+  // mirroring every SummaryExpansionCard/_BreakdownCardBase variant, since
+  // the shape is close enough across all of them for the transition to
+  // feel seamless.
+  Widget _buildSkeletonPartyDetail() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 90),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    ShimmerBox(width: 34, height: 34, borderRadius: 12),
+                    SizedBox(width: 10),
+                    Expanded(child: ShimmerBox(height: 16, width: 120)),
+                    SizedBox(width: 8),
+                    ShimmerBox(height: 16, width: 70),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const ShimmerBox(height: 12, width: 180),
+                const SizedBox(height: 8),
+                const ShimmerBox(height: 12, width: 150),
+              ],
+            ),
           ),
+          for (int i = 0; i < 5; i++)
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 14,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12.withOpacity(0.12),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: const [
+                  ShimmerBox(width: 34, height: 34, borderRadius: 12),
+                  SizedBox(width: 10),
+                  Expanded(child: ShimmerBox(height: 15, width: 130)),
+                  SizedBox(width: 8),
+                  ShimmerBox(height: 15, width: 80),
+                ],
+              ),
+            ),
         ],
       ),
     );

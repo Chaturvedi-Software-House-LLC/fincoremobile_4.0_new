@@ -7004,6 +7004,30 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     controller_totalamt.text = formatter.format(roundedtotalAmount).toString();
   }
 
+  // Skeleton stand-in for the entry form while the initial dropdown/lookup
+  // data (parties, ledgers, items, locations, etc.) is being fetched -
+  // replaces the old full-page spinner so the loading state mirrors the
+  // shape of the form (label + input pairs) instead of a blank centered spinner.
+  Widget _buildSkeletonForm() {
+    return ShimmerLoading(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (int i = 0; i < 6; i++) ...[
+              const ShimmerBox(height: 13, width: 110),
+              const SizedBox(height: 8),
+              const ShimmerBox(height: 46, borderRadius: 12),
+              const SizedBox(height: 18),
+            ],
+            const ShimmerBox(height: 46, borderRadius: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_isInitialDataLoaded) {
@@ -7024,7 +7048,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
             );
           },
         ),
-        body: Center(child: AppLogoLoader()),
+        body: _buildSkeletonForm(),
       );
     }
 

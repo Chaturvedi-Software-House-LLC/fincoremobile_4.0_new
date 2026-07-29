@@ -405,3 +405,95 @@ class _LogoLoaderRingPainter extends CustomPainter {
     return false;
   }
 }
+
+/// Gate around a subtree of [ShimmerBox] placeholders - each box animates
+/// its own shimmer sweep independently, this widget just switches between
+/// the skeleton and the real content based on [isLoading].
+class ShimmerLoading extends StatelessWidget {
+  const ShimmerLoading({super.key, required this.child, this.isLoading = true});
+
+  final Widget child;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+/// A single skeleton placeholder rectangle with its own independent
+/// sweeping-gradient shimmer animation - a lightweight, dependency-free
+/// stand-in for the `shimmer` package. Each box runs its own animation
+/// (rather than one sweep shared across a whole subtree), so a screen full
+/// of these shimmers as a field of independently-pulsing tiles.
+class ShimmerBox extends StatefulWidget {
+  const ShimmerBox({
+    super.key,
+    this.width,
+    this.height,
+    this.borderRadius = 8,
+  });
+
+  final double? width;
+  final double? height;
+  final double borderRadius;
+
+  @override
+  State<ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final baseColor = isDark ? Colors.white10 : Colors.grey.shade300;
+    final highlightColor = isDark ? Colors.white24 : Colors.grey.shade100;
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) {
+            // Sweep right-to-left with no dead time: the highlight's
+            // midpoint moves linearly from the right edge (alignment 1) at
+            // slide=0 straight to the left edge (alignment -1) at slide=1,
+            // covering the whole cycle instead of pausing off-screen first.
+            final slide = _controller.value;
+            return LinearGradient(
+              colors: [baseColor, highlightColor, baseColor],
+              stops: const [0.35, 0.5, 0.65],
+              begin: Alignment(-slide * 2, 0),
+              end: Alignment(2 - slide * 2, 0),
+            ).createShader(bounds);
+          },
+          child: child,
+        );
+      },
+      child: Container(
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+        ),
+      ),
+    );
+  }
+}

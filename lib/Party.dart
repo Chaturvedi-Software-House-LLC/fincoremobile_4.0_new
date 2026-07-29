@@ -1513,13 +1513,106 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                   ),
               ],
             ),
-            Visibility(
-              visible: _isLoading,
-              child: Center(child: AppLogoLoader()),
-            ),
+            if (_isLoading)
+              Positioned.fill(
+                child: Container(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  child: _buildSkeletonPartyList(),
+                ),
+              ),
             ScrollFab(controller: _scrollFabController),
           ],
         ),
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the header (dropdown + toggle buttons) and party
+  // list while the initial fetch is in flight - replaces the old dimmed
+  // spinner overlay so the loading state reads as "content incoming"
+  // instead of a blank page. Generic (icon badge + name line + alias line +
+  // pill line) rather than mirroring every party card variant, since the
+  // shape is close enough for the transition to feel seamless.
+  Widget _buildSkeletonPartyList() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 90),
+        children: [
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black12.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                const ShimmerBox(height: 38, borderRadius: 12),
+                const SizedBox(height: 8),
+                Row(
+                  children: const [
+                    Expanded(child: ShimmerBox(height: 34, borderRadius: 12)),
+                    SizedBox(width: 8),
+                    Expanded(child: ShimmerBox(height: 34, borderRadius: 12)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          for (int i = 0; i < 7; i++)
+            Container(
+              margin: const EdgeInsets.only(top: 5, bottom: 5),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 16,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+                border: Border.all(
+                  color: Theme.of(context).dividerColor.withOpacity(0.55),
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: const [
+                      ShimmerBox(width: 36, height: 36, borderRadius: 18),
+                      SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ShimmerBox(height: 15, width: 140),
+                            SizedBox(height: 6),
+                            ShimmerBox(height: 11, width: 90),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const ShimmerBox(height: 24, width: 160, borderRadius: 30),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

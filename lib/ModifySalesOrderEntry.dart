@@ -7133,7 +7133,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
             );
           },
         ),
-        body: Center(child: AppLogoLoader()),
+        body: _buildSkeletonForm(),
       );
     }
 
@@ -8488,12 +8488,41 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
               ],
             ),
 
-            Visibility(
-              visible: _isLoading,
-              child: Center(child: AppLogoLoader()),
-            ),
+            if (_isLoading)
+              Positioned.fill(
+                child: Container(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  child: _buildSkeletonForm(),
+                ),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  // Skeleton stand-in for the modify-entry form while the existing voucher's
+  // data (and dependent dropdown data) is being fetched - replaces the old
+  // dimmed spinner-over-stale-content overlay. Mirrors the generic
+  // label + input-box shape of the form fields rather than a list-card shape.
+  Widget _buildSkeletonForm() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          for (int i = 0; i < 6; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const ShimmerBox(height: 12, width: 100),
+                  const SizedBox(height: 8),
+                  const ShimmerBox(height: 44, borderRadius: 10),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
