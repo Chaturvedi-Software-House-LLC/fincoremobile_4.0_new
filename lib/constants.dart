@@ -196,10 +196,11 @@ Widget currencyAmountText({
 
 String formatAmount(String amount) {
   String amount_string = "";
+  amount = amount.replaceAll(',', '');
 
   if (amount.contains("-")) {
     amount = amount.replaceAll("-", "");
-    double amount_double = double.parse(amount);
+    double amount_double = double.tryParse(amount) ?? 0.0;
     amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
     amount_string = "$amount_string DR";
   } else {
@@ -207,7 +208,7 @@ String formatAmount(String amount) {
       amount = "0";
     }
 
-    double amount_double = double.parse(amount);
+    double amount_double = double.tryParse(amount) ?? 0.0;
     amount_string = CurrencyFormatter.formatCurrency_double(amount_double);
     amount_string = "$amount_string CR";
   }
@@ -228,18 +229,18 @@ Widget formatAmountRich(
   TextAlign? textAlign,
   bool? softWrap,
 }) {
-  String cleanAmount = amount;
+  String cleanAmount = amount.replaceAll(',', '');
   String suffix;
 
-  if (amount.contains("-")) {
-    cleanAmount = amount.replaceAll("-", "");
+  if (cleanAmount.contains("-")) {
+    cleanAmount = cleanAmount.replaceAll("-", "");
     suffix = "DR";
   } else {
-    cleanAmount = amount == "null" ? "0" : amount;
+    cleanAmount = cleanAmount == "null" ? "0" : cleanAmount;
     suffix = "CR";
   }
 
-  final amountDouble = double.parse(cleanAmount);
+  final amountDouble = double.tryParse(cleanAmount) ?? 0.0;
   final parts = CurrencyFormatter.formatCurrencyParts(amountDouble);
   final currencyCode = CurrencyFormatter.getCurrencyCode();
 

@@ -18,6 +18,7 @@ import 'package:FincoreGo/Transactions.dart';
 import 'package:FincoreGo/UserView.dart';
 import 'package:FincoreGo/constants.dart';
 import 'package:FincoreGo/viewVanAllocations.dart';
+import 'package:FincoreGo/l10n/app_localizations.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -277,7 +278,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
         child: Row(
           children: [
             _navTile(
-              "Dashboard",
+              AppLocalizations.of(context).navDashboard,
               Icons.dashboard_rounded,
               true,
               AppBottomNavTab.dashboard,
@@ -286,7 +287,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
               },
             ),
             _navTile(
-              "Items",
+              AppLocalizations.of(context).navItems,
               Icons.inventory_outlined,
               showItems,
               AppBottomNavTab.items,
@@ -295,7 +296,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
               },
             ),
             _navTile(
-              "Parties",
+              AppLocalizations.of(context).navParties,
               Icons.groups_outlined,
               showParty,
               AppBottomNavTab.party,
@@ -304,7 +305,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
               },
             ),
             _navTile(
-              "Transactions",
+              AppLocalizations.of(context).navTransactions,
               Icons.payment_outlined,
               showRegister,
               AppBottomNavTab.transactions,
@@ -313,7 +314,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
               },
             ),
             _navTile(
-              "Entries",
+              AppLocalizations.of(context).navEntries,
               Icons.receipt_long,
               showEntries,
               AppBottomNavTab.entries,
@@ -322,7 +323,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
               },
             ),
             _navTile(
-              "More...",
+              AppLocalizations.of(context).navMore,
               Icons.grid_view_rounded,
               true,
               AppBottomNavTab.more,

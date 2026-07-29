@@ -912,22 +912,22 @@ class _PartyClickedSoldPurchaseClickedPageState
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60),
+        preferredSize: const Size.fromHeight(52),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
 
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               Navigator.pop(context);
             },
           ),
-          centerTitle: true,
+          centerTitle: false,
           title: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -936,7 +936,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                   ledger,
                   style: GoogleFonts.poppins(
                     color: Colors.white,
-                    fontSize: 20,
+                    fontSize: 16,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -954,7 +954,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                 searchController.clear();
                 filteredItems = item_list;
               },
-              icon: Icon(Icons.search, color: Colors.white, size: 30),
+              icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
             IconButton(
               onPressed: () {
@@ -1068,47 +1068,34 @@ class _PartyClickedSoldPurchaseClickedPageState
                   margin: EdgeInsets.only(
                     left: 12,
                     right: 12,
-                    top: 12,
+                    top: 8,
                     bottom: 6,
                   ),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black12.withOpacity(0.08),
-                        blurRadius: 10,
-                        spreadRadius: 2,
-                        offset: Offset(0, 4),
+                        blurRadius: 8,
+                        offset: Offset(0, 3),
                       ),
                     ],
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                    child: Column(
+                  child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Padding(
-                          padding: EdgeInsets.only(
-                            top: 0,
-                            left: 20,
-                            right: 20,
-                            bottom: 10,
-                          ),
-                          child: Container(
-                            child: Center(
-                              child: Text(
-                                item,
-                                textAlign: TextAlign.center,
-
-                                style: GoogleFonts.poppins(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 17,
-                                ),
-                              ),
+                        Center(
+                          child: Text(
+                            item,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
                             ),
                           ),
                         ),
@@ -1116,69 +1103,51 @@ class _PartyClickedSoldPurchaseClickedPageState
                         SizedBox(height: 8),
 
                         /// 📆 Date Range (Single Widget)
-                        InkWell(
-                          onTap: () {},
-                          borderRadius: BorderRadius.circular(50),
-                          child: Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                      .withOpacity(
-                                        Theme.of(context).brightness ==
-                                                Brightness.dark
-                                            ? 0.85
-                                            : 0.35,
-                                      ),
-                                  Theme.of(context).cardColor.withOpacity(
-                                    Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? 0.95
-                                        : 0.9,
-                                  ),
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness ==
+                                    Brightness.dark
+                                ? Colors.white.withOpacity(0.06)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.calendar_month_rounded,
+                                size: 16,
+                                color: app_color,
                               ),
-                              border: Border.all(color: app_color, width: 1),
-                              borderRadius: BorderRadius.circular(50),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.calendar_month_rounded,
-                                  size: 18,
-                                  color: app_color,
-                                ),
-                                SizedBox(width: 10),
-                                Text(
+                              SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
                                   "$startdate_text → $enddate_text",
                                   style: GoogleFonts.poppins(
                                     fontWeight: FontWeight.w600,
-                                    fontSize: 14,
+                                    fontSize: 12.5,
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurface,
                                   ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
+              if (_isSearchViewVisible || isVisibleNoDataFound)
+                SliverToBoxAdapter(
+                  child: Container(
                   margin: const EdgeInsets.only(
                     left: 12,
                     right: 12,
@@ -1209,12 +1178,10 @@ class _PartyClickedSoldPurchaseClickedPageState
                           padding: const EdgeInsets.only(
                             left: 12,
                             right: 12,
-                            top: 12,
+                            top: 10,
                           ),
-                          child: Material(
-                            elevation: 2,
-                            borderRadius: BorderRadius.circular(18),
-                            shadowColor: Colors.black12,
+                          child: SizedBox(
+                            height: 46,
                             child: TextField(
                               controller: searchController,
                               onChanged: (value) {
@@ -1233,41 +1200,44 @@ class _PartyClickedSoldPurchaseClickedPageState
                                 });
                               },
                               style: GoogleFonts.poppins(
-                                fontSize: 15,
+                                fontSize: 13.5,
                                 color: Theme.of(context).colorScheme.onSurface,
                               ),
                               decoration: InputDecoration(
+                                isDense: true,
                                 hintText: 'Search...',
+                                hintStyle: GoogleFonts.poppins(fontSize: 13),
                                 prefixIcon: Icon(
                                   Icons.search,
+                                  size: 18,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
                                 ),
                                 filled: true,
                                 fillColor:
-                                    Theme.of(
-                                      context,
-                                    ).inputDecorationTheme.fillColor ??
-                                    Theme.of(
-                                      context,
-                                    ).colorScheme.surfaceContainerHighest,
+                                    Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.white.withOpacity(0.06)
+                                        : Colors.grey.shade100,
                                 contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                  horizontal: 16,
+                                  vertical: 8,
+                                  horizontal: 12,
                                 ),
                                 enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                  borderSide: BorderSide(
-                                    color: Theme.of(context).dividerColor,
-                                  ),
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
                                 ),
                                 focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                  borderSide: const BorderSide(
-                                    color: app_color,
-                                    width: 1.5,
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide(
+                                    color: app_color.withOpacity(0.6),
+                                    width: 1.4,
                                   ),
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
                                 ),
                               ),
                             ),

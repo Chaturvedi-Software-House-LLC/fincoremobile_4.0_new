@@ -824,16 +824,16 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
 
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(50),
+        preferredSize: Size.fromHeight(44),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               AppNavigation.backOrDashboard(context);
             },
@@ -841,7 +841,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
           title: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 2.4),
+                  MediaQuery.of(context).size.width - (kToolbarHeight * 1.6),
             ),
             child: GestureDetector(
               onTap: () {
@@ -859,19 +859,19 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
                       style: GoogleFonts.poppins(
                         color: Colors.white,
-                        fontSize: 20,
+                        fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_drop_down, color: Colors.white),
+                  SizedBox(width: 2),
+                  Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
                 ],
               ),
             ),
           ),
-          centerTitle: true,
+          centerTitle: false,
           actions: [
             /*IconButton(
               onPressed: () {
@@ -1015,19 +1015,19 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                 SliverToBoxAdapter(
                   child: Container(
                     width: MediaQuery.of(context).size.width,
-                    margin: const EdgeInsets.only(left: 12, right: 12, top: 12),
+                    margin: const EdgeInsets.only(left: 12, right: 12, top: 10),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
+                      horizontal: 10,
+                      vertical: 10,
                     ),
                     decoration: BoxDecoration(
                       color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
+                          color: Colors.black12.withOpacity(0.08),
+                          blurRadius: 8,
+                          offset: Offset(0, 3),
                         ),
                       ],
                     ),
@@ -1037,23 +1037,15 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                       children: [
                         // Dropdown
                         Container(
+                          height: 38,
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 4,
+                            horizontal: 12,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 6,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Colors.white.withOpacity(0.06)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
@@ -1137,7 +1129,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                           ),
                         ),
 
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 8),
 
                         // Toggle Buttons
                         Row(
@@ -1161,7 +1153,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
                             if (allparties_visibility &&
                                 inactiveparties_visibility)
-                              const SizedBox(width: 10),
+                              const SizedBox(width: 8),
 
                             if (inactiveparties_visibility)
                               Expanded(
@@ -1199,18 +1191,16 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                       // 🔍 Modern Search Bar
                       Padding(
                         padding: EdgeInsets.only(
-                          left: 18,
-                          right: 18,
-                          top: 10,
-                          bottom: 5,
+                          left: 12,
+                          right: 12,
+                          top: 8,
+                          bottom: 4,
                         ),
-                        child: Material(
-                          elevation: 2,
-                          borderRadius: BorderRadius.circular(20),
-                          shadowColor: Colors.black12,
-
+                        child: SizedBox(
+                          height: 46,
                           child: TextField(
                             controller: searchController,
+                            style: GoogleFonts.poppins(fontSize: 13.5),
                             onChanged: (value) {
                               value = value.toLowerCase();
                               setState(() {
@@ -1232,10 +1222,12 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                               });
                             },
                             decoration: InputDecoration(
+                              isDense: true,
                               hintText: "Search Parties...",
                               hintStyle: GoogleFonts.poppins(fontSize: 13),
                               prefixIcon: Icon(
                                 Icons.search,
+                                size: 18,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
@@ -1243,114 +1235,52 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
                               filled: true,
                               fillColor:
-                                  Theme.of(
-                                    context,
-                                  ).inputDecorationTheme.fillColor ??
-                                  Theme.of(
-                                    context,
-                                  ).colorScheme.surfaceContainerHighest,
+                                  Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white.withOpacity(0.06)
+                                      : Colors.grey.shade100,
                               contentPadding: const EdgeInsets.symmetric(
-                                vertical: 14,
-                                horizontal: 16,
+                                vertical: 8,
+                                horizontal: 12,
+                              ),
+                              suffixIcon: Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Center(
+                                  widthFactor: 1,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: app_color.withOpacity(0.10),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      party_count,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: app_color,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                               enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(20),
-                                borderSide: BorderSide(
-                                  color: Theme.of(context).dividerColor,
-                                ),
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
                               ),
                               focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(20),
-                                borderSide: const BorderSide(
-                                  color: app_color,
-                                  width: 1.5,
-                                ),
-                              ),
-                              border: InputBorder.none,
-                            ),
-                          ),
-                        ),
-                      ),
-                      // 📊 Party Count
-                      Padding(
-                        padding: const EdgeInsets.only(
-                          left: 16,
-                          right: 16,
-                          top: 5,
-                          bottom: 0,
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                            child: Container(
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).cardColor.withOpacity(0.65),
-                                borderRadius: BorderRadius.circular(30),
-                                border: Border.all(
-                                  color: app_color,
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide(
+                                  color: app_color.withOpacity(0.6),
                                   width: 1.4,
                                 ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.04),
-                                    blurRadius: 10,
-                                    offset: Offset(0, 4),
-                                  ),
-                                ],
                               ),
-                              padding: EdgeInsets.only(
-                                left: 10,
-                                right: 10,
-                                top: 5,
-                                bottom: 5,
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  // 🔵 Icon
-                                  Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: app_color.withOpacity(0.1),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.people_alt_rounded,
-                                      size: 16,
-                                      color: app_color,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-
-                                  // 🔢 Count Text
-                                  RichText(
-                                    text: TextSpan(
-                                      children: [
-                                        TextSpan(
-                                          text:
-                                              "${party_count} ", // <-- Replace dynamically with $party_count
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: app_color,
-                                          ),
-                                        ),
-                                        TextSpan(
-                                          text: party_text,
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w500,
-                                            color: app_color,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
                               ),
                             ),
                           ),
@@ -1605,54 +1535,39 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        duration: const Duration(milliseconds: 200),
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: isActive
-              ? activeColor.withOpacity(0.08)
-              : Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: isActive ? activeColor : Theme.of(context).dividerColor,
-            width: 1.4,
-          ),
+              ? activeColor.withOpacity(0.10)
+              : (Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white.withOpacity(0.06)
+                    : Colors.grey.shade100),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center, // ✅ CENTER EVERYTHING
-          mainAxisSize: MainAxisSize.min, // ✅ avoid stretching content
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isActive
-                    ? activeColor
-                    : (Theme.of(context).brightness == Brightness.dark
-                          ? Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest
-                          : Colors.grey.shade100),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                size: 18,
-                color: isActive
-                    ? Colors.white
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            Icon(
+              icon,
+              size: 16,
+              color: isActive
+                  ? activeColor
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
             ),
 
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
 
             Flexible(
-              // ✅ prevent overflow but keep centered
               child: Text(
                 label,
-                textAlign: TextAlign.center, // ✅ center text inside
+                textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
 
                 style: GoogleFonts.poppins(
-                  fontSize: 14.5,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: isActive
                       ? activeColor

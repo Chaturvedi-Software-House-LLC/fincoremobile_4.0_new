@@ -2833,16 +2833,16 @@ class _PartyClickedPageState extends State<PartyClicked>
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(50),
+        preferredSize: Size.fromHeight(44),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               AppNavigation.backOrDashboard(context);
             },
@@ -2851,7 +2851,7 @@ class _PartyClickedPageState extends State<PartyClicked>
             partyname,
             style: GoogleFonts.poppins(
               color: Colors.white,
-              fontSize: 18,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
             maxLines: 1,
@@ -2874,7 +2874,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                       PurchaseOrderVisibility),
               child: IconButton(
                 tooltip: 'Share Summary',
-                icon: const Icon(Icons.share, color: Colors.white, size: 26),
+                icon: const Icon(Icons.share, color: Colors.white, size: 22),
                 onPressed: () {
                   final RenderBox button =
                       context.findRenderObject() as RenderBox;
@@ -3076,44 +3076,50 @@ class _PartyClickedPageState extends State<PartyClicked>
             child: Column(
               children: [
                 Container(
-                  margin: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  margin: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black12.withOpacity(0.08),
-                        blurRadius: 10,
-                        spreadRadius: 2,
-                        offset: Offset(0, 4),
+                        blurRadius: 8,
+                        offset: Offset(0, 3),
                       ),
                     ],
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                    child: Column(
+                  child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         /// 🔽 Dropdown
                         Container(
+                          width: double.infinity,
+                          height: 38,
                           decoration: BoxDecoration(
+                            color: Theme.of(context).brightness ==
+                                    Brightness.dark
+                                ? Colors.white.withOpacity(0.06)
+                                : Colors.grey.shade100,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: app_color, width: 1.2),
                           ),
                           padding: EdgeInsets.symmetric(horizontal: 12),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<dynamic>(
                               value: _selecteddate,
                               isExpanded: true,
+                              isDense: true,
                               icon: Icon(
                                 Icons.expand_more,
+                                size: 18,
                                 color: Theme.of(
                                   context,
                                 ).colorScheme.onSurfaceVariant,
                               ),
                               style: GoogleFonts.poppins(
                                 color: Theme.of(context).colorScheme.onSurface,
-                                fontSize: 15,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
                               ),
                               dropdownColor: Theme.of(
                                 context,
@@ -3125,71 +3131,52 @@ class _PartyClickedPageState extends State<PartyClicked>
                               items: date_range.map((item) {
                                 return DropdownMenuItem<dynamic>(
                                   value: item,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 10,
-                                    ),
-                                    child: Text(item),
-                                  ),
+                                  child: Text(item),
                                 );
                               }).toList(),
                             ),
                           ),
                         ),
 
-                        SizedBox(height: 18),
+                        SizedBox(height: 8),
 
                         /// 📆 Date Range (Single Widget)
                         InkWell(
                           onTap: () => _selectDateRange(context),
-                          borderRadius: BorderRadius.circular(50),
+                          borderRadius: BorderRadius.circular(12),
                           child: Container(
+                            width: double.infinity,
                             padding: EdgeInsets.symmetric(
-                              horizontal: 16,
+                              horizontal: 12,
                               vertical: 10,
                             ),
                             decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                      .withOpacity(
-                                        Theme.of(context).brightness ==
-                                                Brightness.dark
-                                            ? 0.85
-                                            : 0.35,
-                                      ),
-                                  Theme.of(context).cardColor.withOpacity(
-                                    Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? 0.95
-                                        : 0.9,
-                                  ),
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              border: Border.all(color: app_color, width: 1),
-                              borderRadius: BorderRadius.circular(50),
+                              color: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white.withOpacity(0.06)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
-                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
                                   Icons.calendar_month_rounded,
-                                  size: 18,
+                                  size: 16,
                                   color: app_color,
                                 ),
-                                SizedBox(width: 10),
-                                Text(
-                                  "$startdate_text → $enddate_text",
-                                  style: GoogleFonts.poppins(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
+                                SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    "$startdate_text → $enddate_text",
+                                    style: GoogleFonts.poppins(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12.5,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurface,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ],
@@ -3198,7 +3185,6 @@ class _PartyClickedPageState extends State<PartyClicked>
                         ),
                       ],
                     ),
-                  ),
                 ),
 
                 Expanded(
@@ -4518,44 +4504,47 @@ class SummaryExpansionCard extends StatelessWidget {
         tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         childrenPadding: EdgeInsets.zero,
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              children: [
-                // 🔹 Gradient Icon Badge
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    gradient: _getGradientForTitle(title),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black12.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: Offset(0, 4),
+            Expanded(
+              child: Row(
+                children: [
+                  // 🔹 Gradient Icon Badge
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      gradient: _getGradientForTitle(title),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black12.withOpacity(0.2),
+                          blurRadius: 8,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      _getIconForTitle(title),
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+
+                  const SizedBox(width: 12),
+
+                  // 🔹 Title Text
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
-                    ],
+                    ),
                   ),
-                  child: Icon(
-                    _getIconForTitle(title),
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
-
-                const SizedBox(width: 12),
-
-                // 🔹 Title Text
-                Text(
-                  title,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16.5,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
 
             SizedBox(width: 12),
@@ -5721,38 +5710,36 @@ class _BreakdownCardBase extends StatelessWidget {
         tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         childrenPadding: EdgeInsets.zero,
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              children: [
-                // 🔹 Gradient Icon Badge (same as SummaryExpansionCard)
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    gradient: gradient,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black12.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+            // 🔹 Gradient Icon Badge (same as SummaryExpansionCard)
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                gradient: gradient,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
                   ),
-                  child: Icon(icon, color: Colors.white, size: 18),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16.5,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ],
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 18),
             ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             _amountWidget(
               total,
               GoogleFonts.poppins(
@@ -5846,30 +5833,34 @@ class _DetailRowTile extends StatelessWidget {
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: iconColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, size: 14, color: iconColor),
                 ),
-                child: Icon(icon, size: 14, color: iconColor),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
-                  color: Theme.of(context).colorScheme.onSurface,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
           Row(
             children: [
               valueWidget ??

@@ -724,33 +724,33 @@ class _PartyClickedSalePurcOrderClickedPageState
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60),
+        preferredSize: const Size.fromHeight(52),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
 
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               AppNavigation.backOrDashboard(context);
             },
           ),
-          centerTitle: true,
+          centerTitle: false,
           title: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 5.2),
+                  MediaQuery.of(context).size.width - (kToolbarHeight * 2.6),
             ),
             child: Flexible(
               child: Text(
                 ledger,
                 style: GoogleFonts.poppins(
                   color: Colors.white,
-                  fontSize: 20,
+                  fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -771,7 +771,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                   });
                 }
               },
-              icon: Icon(Icons.search, color: Colors.white, size: 30),
+              icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
             IconButton(
               onPressed: () {
@@ -868,44 +868,49 @@ class _PartyClickedSalePurcOrderClickedPageState
           Column(
             children: [
               Container(
-                margin: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                margin: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black12.withOpacity(0.08),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                      offset: Offset(0, 4),
+                      blurRadius: 8,
+                      offset: Offset(0, 3),
                     ),
                   ],
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                  child: Column(
+                child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       /// 🔽 Dropdown
                       Container(
+                        height: 38,
                         decoration: BoxDecoration(
+                          color: Theme.of(context).brightness ==
+                                  Brightness.dark
+                              ? Colors.white.withOpacity(0.06)
+                              : Colors.grey.shade100,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: app_color, width: 1.2),
                         ),
                         padding: EdgeInsets.symmetric(horizontal: 12),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<Data>(
                             value: selectedTopValue,
                             isExpanded: true,
+                            isDense: true,
                             icon: Icon(
                               Icons.expand_more,
+                              size: 18,
                               color: Theme.of(
                                 context,
                               ).colorScheme.onSurfaceVariant,
                             ),
                             style: GoogleFonts.poppins(
                               color: Theme.of(context).colorScheme.onSurface,
-                              fontSize: 15,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
                             ),
                             dropdownColor: Theme.of(
                               context,
@@ -930,7 +935,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                                   value.item,
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.poppins(
-                                    fontSize: 16,
+                                    fontSize: 14,
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurface,
@@ -943,7 +948,6 @@ class _PartyClickedSalePurcOrderClickedPageState
                       ),
                     ],
                   ),
-                ),
               ),
 
               Expanded(
@@ -983,12 +987,10 @@ class _PartyClickedSalePurcOrderClickedPageState
                                   padding: const EdgeInsets.only(
                                     left: 12,
                                     right: 12,
-                                    top: 12,
+                                    top: 10,
                                   ),
-                                  child: Material(
-                                    elevation: 2,
-                                    borderRadius: BorderRadius.circular(14),
-                                    shadowColor: Colors.black12,
+                                  child: SizedBox(
+                                    height: 46,
                                     child: TextField(
                                       controller: searchController,
                                       onChanged: (value) {
@@ -1011,50 +1013,57 @@ class _PartyClickedSalePurcOrderClickedPageState
                                         }
                                       },
                                       style: GoogleFonts.poppins(
-                                        fontSize: 15,
+                                        fontSize: 13.5,
                                         color: Theme.of(
                                           context,
                                         ).colorScheme.onSurface,
                                       ),
                                       decoration: InputDecoration(
+                                        isDense: true,
                                         hintText: 'Search...',
+                                        hintStyle: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                        ),
                                         prefixIcon: Icon(
                                           Icons.search,
+                                          size: 18,
                                           color: Theme.of(
                                             context,
                                           ).colorScheme.onSurfaceVariant,
                                         ),
                                         filled: true,
                                         fillColor:
-                                            Theme.of(
-                                              context,
-                                            ).inputDecorationTheme.fillColor ??
-                                            Theme.of(context)
-                                                .colorScheme
-                                                .surfaceContainerHighest,
+                                            Theme.of(context).brightness ==
+                                                    Brightness.dark
+                                                ? Colors.white.withOpacity(
+                                                    0.06,
+                                                  )
+                                                : Colors.grey.shade100,
                                         contentPadding:
                                             const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                              horizontal: 16,
+                                              vertical: 8,
+                                              horizontal: 12,
                                             ),
                                         enabledBorder: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(
-                                            14,
+                                            24,
                                           ),
-                                          borderSide: BorderSide(
-                                            color: Theme.of(
-                                              context,
-                                            ).dividerColor,
-                                          ),
+                                          borderSide: BorderSide.none,
                                         ),
                                         focusedBorder: OutlineInputBorder(
                                           borderRadius: BorderRadius.circular(
-                                            14,
+                                            24,
                                           ),
-                                          borderSide: const BorderSide(
-                                            color: app_color,
-                                            width: 1.5,
+                                          borderSide: BorderSide(
+                                            color: app_color.withOpacity(0.6),
+                                            width: 1.4,
                                           ),
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
+                                          borderSide: BorderSide.none,
                                         ),
                                       ),
                                     ),

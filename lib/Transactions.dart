@@ -192,6 +192,93 @@ class _TransactionsPageState extends State<Transactions>
   // only one shows at a time now, tab-style.
   bool _isTrendTabSelected = false;
 
+  // Quick filter chips - postdated/optional vouchers are exactly the
+  // transactions users specifically need to track/follow up on, so a
+  // one-tap filter is more useful day-to-day than another chart.
+  String _quickFilter = 'All';
+
+  void _applyTransactionFilters() {
+    Iterable<transactions> items = transactions_list;
+
+    if (_quickFilter == 'Postdated') {
+      items = items.where((t) => t.ispostdated == '1');
+    } else if (_quickFilter == 'Optional') {
+      items = items.where((t) => t.isoptional == '1');
+    }
+
+    final query = searchController.text.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      items = items.where((t) => t.vchno.toLowerCase().contains(query));
+    }
+
+    setState(() {
+      filteredItems_transactions = items.toList();
+      transactions_count = filteredItems_transactions.length.toString();
+    });
+  }
+
+  Widget _buildQuickFilterChips() {
+    final counts = {
+      'All': transactions_list.length,
+      'Postdated': transactions_list.where((t) => t.ispostdated == '1').length,
+      'Optional': transactions_list.where((t) => t.isoptional == '1').length,
+    };
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final label in ['All', 'Postdated', 'Optional'])
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _buildQuickFilterChip(label, counts[label] ?? 0),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickFilterChip(String label, int count) {
+    final isSelected = _quickFilter == label;
+    return GestureDetector(
+      onTap: () {
+        _quickFilter = label;
+        searchController.clear();
+        _applyTransactionFilters();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: [Colors.teal.shade400, Colors.teal.shade600],
+                )
+              : null,
+          color: isSelected
+              ? null
+              : (Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white.withOpacity(0.06)
+                    : Colors.grey.shade100),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          '$label ($count)',
+          style: GoogleFonts.poppins(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: isSelected
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+
   String? HttpURL_Parent, HttpURL_transaction;
 
   dynamic _selectedtransaction = "All Transactions";
@@ -1308,6 +1395,7 @@ class _TransactionsPageState extends State<Transactions>
     });
 
     filteredItems_transactions.clear();
+    _quickFilter = 'All';
 
     transactions_list.clear();
 
@@ -1887,6 +1975,12 @@ class _TransactionsPageState extends State<Transactions>
                     ),
                   ),
 
+                if (!_isTrendTabSelected && transactions_list.isNotEmpty)
+                  SliverToBoxAdapter(child: const SizedBox(height: 8)),
+
+                if (!_isTrendTabSelected && transactions_list.isNotEmpty)
+                  SliverToBoxAdapter(child: _buildQuickFilterChips()),
+
                 if (!_isTrendTabSelected)
                 SliverToBoxAdapter(
                   child: Column(
@@ -1901,179 +1995,92 @@ class _TransactionsPageState extends State<Transactions>
                                 right: 12,
                                 top: 5,
                               ),
-                              child: Material(
-                                elevation: 2,
-                                borderRadius: BorderRadius.circular(20),
-                                shadowColor: Colors.black12,
-
+                              child: SizedBox(
+                                height: 46,
                                 child: TextField(
                                   controller: searchController,
-                                  onChanged: (value) {
-                                    value = value.toLowerCase();
-
-                                    if (value.isEmpty || value == '') {
-                                      setState(() {
-                                        filteredItems_transactions =
-                                            transactions_list;
-                                        transactions_count =
-                                            filteredItems_transactions.length
-                                                .toString();
-                                      });
-                                    } else {
-                                      setState(() {
-                                        filteredItems_transactions =
-                                            transactions_list.where((item) {
-                                              // Filter items based on the search query and the ledgerName property
-                                              final query = value.toLowerCase();
-                                              return item.vchno
-                                                  .toLowerCase()
-                                                  .contains(query);
-                                            }).toList();
-                                        transactions_count =
-                                            filteredItems_transactions.length
-                                                .toString();
-                                      });
-                                    }
-                                  },
+                                  onChanged: (value) =>
+                                      _applyTransactionFilters(),
                                   style: GoogleFonts.poppins(
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurface,
-                                    fontSize: 13,
+                                    fontSize: 13.5,
                                   ),
                                   decoration: InputDecoration(
+                                    isDense: true,
                                     hintText: "Search by voucher no...",
                                     hintStyle: GoogleFonts.poppins(
                                       fontSize: 13,
                                     ),
                                     prefixIcon: Icon(
                                       Icons.search,
+                                      size: 18,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurfaceVariant,
                                     ),
                                     filled: true,
                                     fillColor:
-                                        Theme.of(
-                                          context,
-                                        ).inputDecorationTheme.fillColor ??
-                                        Theme.of(
-                                          context,
-                                        ).colorScheme.surfaceContainerHighest,
+                                        Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? Colors.white.withOpacity(0.06)
+                                            : Colors.grey.shade100,
                                     contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                      horizontal: 16,
+                                      vertical: 8,
+                                      horizontal: 12,
                                     ),
+                                    suffixIcon: transactions_count == "0"
+                                        ? null
+                                        : Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 12,
+                                            ),
+                                            child: Center(
+                                              widthFactor: 1,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 4,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: app_color.withOpacity(
+                                                    0.10,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(20),
+                                                ),
+                                                child: Text(
+                                                  transactions_count,
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: app_color,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                     enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                      borderSide: BorderSide(
-                                        color: Theme.of(context).dividerColor,
-                                      ),
+                                      borderRadius: BorderRadius.circular(24),
+                                      borderSide: BorderSide.none,
                                     ),
                                     focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                      borderSide: const BorderSide(
-                                        color: app_color,
-                                        width: 1.5,
+                                      borderRadius: BorderRadius.circular(24),
+                                      borderSide: BorderSide(
+                                        color: app_color.withOpacity(0.6),
+                                        width: 1.4,
                                       ),
                                     ),
-                                    border: InputBorder.none,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(24),
+                                      borderSide: BorderSide.none,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-
-                            if (transactions_count != "0")
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  left: 16,
-                                  right: 16,
-                                  top: 10,
-                                  bottom: 10,
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: BackdropFilter(
-                                    filter: ImageFilter.blur(
-                                      sigmaX: 6,
-                                      sigmaY: 6,
-                                    ),
-                                    child: Container(
-                                      width: double.infinity,
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(
-                                          context,
-                                        ).cardColor.withOpacity(0.65),
-                                        borderRadius: BorderRadius.circular(30),
-                                        border: Border.all(
-                                          color: app_color,
-                                          width: 1.4,
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(
-                                              0.04,
-                                            ),
-                                            blurRadius: 10,
-                                            offset: Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      padding: EdgeInsets.only(
-                                        left: 10,
-                                        right: 10,
-                                        top: 5,
-                                        bottom: 5,
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          // 🔵 Icon
-                                          Container(
-                                            padding: const EdgeInsets.all(6),
-                                            decoration: BoxDecoration(
-                                              color: app_color.withOpacity(0.1),
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: const Icon(
-                                              Icons.receipt_long,
-                                              size: 16,
-                                              color: app_color,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-
-                                          // 🔢 Count Text
-                                          RichText(
-                                            text: TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text:
-                                                      "${transactions_count} ", // <-- Replace dynamically with $party_count
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: app_color,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: "Transactions",
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w500,
-                                                    color: app_color,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
 
                             /*Visibility(
                                   visible: isVisibleNoDataFound,
@@ -2222,47 +2229,17 @@ class _TransactionsPageState extends State<Transactions>
                                                       width: 36,
                                                       height: 36,
                                                       decoration: BoxDecoration(
-                                                        gradient: LinearGradient(
-                                                          colors: [
-                                                            app_color
-                                                                .withOpacity(
-                                                                  0.6,
-                                                                ),
-                                                            app_color
-                                                                .withOpacity(
-                                                                  0.9,
-                                                                ),
-                                                          ],
-                                                        ),
+                                                        color: app_color
+                                                            .withOpacity(0.12),
                                                         borderRadius:
                                                             BorderRadius.circular(
                                                               12,
                                                             ),
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                            color:
-                                                                (isDebit
-                                                                        ? Colors
-                                                                              .red
-                                                                        : Colors
-                                                                              .green)
-                                                                    .withOpacity(
-                                                                      0.25,
-                                                                    ),
-                                                            blurRadius: 6,
-                                                            offset:
-                                                                const Offset(
-                                                                  0,
-                                                                  3,
-                                                                ),
-                                                          ),
-                                                        ],
                                                       ),
-
-                                                      child: const Icon(
+                                                      child: Icon(
                                                         Icons
                                                             .account_balance_wallet_rounded,
-                                                        color: Colors.white,
+                                                        color: app_color,
                                                         size: 20,
                                                       ),
                                                     ),
@@ -2286,38 +2263,15 @@ class _TransactionsPageState extends State<Transactions>
                                                             .ellipsis,
                                                       ),
                                                     ),
-
-                                                    Container(
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            6,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .surfaceContainerHighest,
-                                                        shape: BoxShape.circle,
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                            color:
-                                                                Colors.black12,
-                                                            blurRadius: 4,
-                                                            offset:
-                                                                const Offset(
-                                                                  0,
-                                                                  2,
-                                                                ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      child: Icon(
-                                                        Icons
-                                                            .chevron_right_rounded,
-                                                        size: 20,
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
-                                                      ),
+                                                    const SizedBox(width: 6),
+                                                    Icon(
+                                                      Icons
+                                                          .chevron_right_rounded,
+                                                      size: 22,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant
+                                                          .withOpacity(0.6),
                                                     ),
                                                   ],
                                                 ),
@@ -2540,17 +2494,34 @@ Widget _buildEmptyState(BuildContext context) {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.search_off_rounded,
-            size: 80,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              color: app_color.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.receipt_long_rounded,
+              size: 40,
+              color: app_color.withOpacity(0.6),
+            ),
           ),
-          SizedBox(height: 12),
+          const SizedBox(height: 18),
           Text(
-            "No Transactions found",
+            "No transactions found",
             style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Try a different date range, voucher type, or filter",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -2878,16 +2849,21 @@ class _VoucherOverviewChartState extends State<VoucherOverviewChart> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Share by Voucher Type',
-                style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
+              Expanded(
+                child: Text(
+                  'Share by Voucher Type',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
-                width: 132,
+                width: 120,
                 padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark

@@ -3712,7 +3712,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         color: Theme.of(context).cardColor,
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8)],
+        boxShadow: [BoxShadow(color: Colors.black12.withOpacity(0.08), blurRadius: 8)],
       ),
 
       child: Column(
@@ -3811,16 +3811,16 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(50),
+        preferredSize: Size.fromHeight(44),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               AppNavigation.backOrDashboard(context);
             },
@@ -3834,8 +3834,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               vchtypes == "Payable" ||
                               vchtypes == "Sales" ||
                               vchtypes == "Purchase")
-                          ? 3.6
-                          : 2.4)),
+                          ? 2.6
+                          : 1.6)),
             ),
             child: GestureDetector(
               onTap: () {
@@ -3852,7 +3852,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       company ?? '',
                       style: GoogleFonts.poppins(
                         color: Colors.white,
-                        fontSize: 20,
+                        fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -3860,14 +3860,14 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       softWrap: false,
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.arrow_drop_down, color: Colors.white),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
                 ],
               ),
             ),
           ),
 
-          centerTitle: true,
+          centerTitle: false,
           actions: [
             /*IconButton(
               onPressed: () {
@@ -4160,20 +4160,20 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                 SliverToBoxAdapter(
                   child: Container(
                     margin: EdgeInsets.only(
-                      left: 16,
-                      right: 16,
+                      left: 12,
+                      right: 12,
                       top: 10,
-                      bottom: 10,
+                      bottom: 8,
                     ),
-                    padding: EdgeInsets.all(16),
+                    padding: EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black12,
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
+                          color: Colors.black12.withOpacity(0.08),
+                          blurRadius: 8,
+                          offset: Offset(0, 3),
                         ),
                       ],
                     ),
@@ -4187,22 +4187,13 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                           ),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
-                            vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor,
-                              width: 1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
+                            color: Theme.of(context).brightness ==
+                                    Brightness.dark
+                                ? Colors.white.withOpacity(0.06)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: TypeAheadField<String>(
                             controller: _voucherController,
@@ -4217,15 +4208,19 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             },
 
                             builder: (context, controller, focusNode) {
-                              return TextField(
+                              return SizedBox(
+                                height: 40,
+                                child: TextField(
                                 controller: controller,
                                 focusNode: focusNode,
                                 style: GoogleFonts.poppins(
+                                  fontSize: 13.5,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurface,
                                 ),
                                 decoration: InputDecoration(
+                                  isDense: true,
                                   labelStyle: GoogleFonts.poppins(
                                     color: Theme.of(
                                       context,
@@ -4233,27 +4228,13 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   ),
                                   contentPadding: const EdgeInsets.symmetric(
                                     horizontal: 0,
-                                    vertical: 6,
+                                    vertical: 8,
                                   ),
-                                  hintText: 'Search',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: const BorderSide(
-                                      color: Colors.transparent,
-                                    ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(
-                                      color: Colors.transparent,
-                                    ),
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: const BorderSide(
-                                      color: Colors.transparent,
-                                    ),
-                                  ),
+                                  hintText: 'Search voucher type...',
+                                  hintStyle: GoogleFonts.poppins(fontSize: 13),
+                                  border: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
                                   suffixIcon: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -4266,53 +4247,30 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                                   spinner_list.first;
                                             });
                                           },
-                                          child: Container(
-                                            margin: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                            ),
-                                            padding: const EdgeInsets.all(6),
-                                            decoration: BoxDecoration(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .surfaceContainerHighest
-                                                  .withOpacity(
-                                                    Theme.of(
-                                                              context,
-                                                            ).brightness ==
-                                                            Brightness.dark
-                                                        ? 0.88
-                                                        : 0.58,
-                                                  ),
-                                              shape: BoxShape.circle,
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black12,
-                                                  blurRadius: 4,
-                                                  offset: const Offset(0, 1),
-                                                ),
-                                              ],
-                                            ),
-                                            child: Icon(
-                                              Icons.close_rounded,
-                                              size: 16,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
+                                          child: Icon(
+                                            Icons.close_rounded,
+                                            size: 16,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
                                           ),
                                         ),
+                                      SizedBox(width: 4),
                                       Icon(
-                                        Icons.arrow_drop_down,
+                                        Icons.expand_more_rounded,
+                                        size: 18,
                                         color: Theme.of(
                                           context,
-                                        ).colorScheme.onSurface,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                     ],
                                   ),
                                   prefixIcon: Icon(
                                     Icons.receipt_long_outlined,
+                                    size: 18,
                                     color: app_color,
                                   ),
+                                ),
                                 ),
                               );
                             },
@@ -4339,6 +4297,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               setState(() {
                                 _selectedvoucher = suggestion;
                                 _voucherController.text = suggestion;
+                                searchController.clear();
+                                _reportSearchQuery = '';
                                 fetchListData();
                               });
                             },
@@ -4356,57 +4316,42 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                           ),
                         ),
 
-                        SizedBox(height: 4),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                          margin: EdgeInsets.only(bottom: 5),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 10,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor,
+                        GestureDetector(
+                          onTap: () => _selectDateRange(context),
+                          child: Container(
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
                             ),
-                          ),
-                          child: GestureDetector(
-                            onTap: () => _selectDateRange(context),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white.withOpacity(0.06)
+                                  : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
-                                  Icons.calendar_month_outlined,
-                                  size: 18,
-                                  color: Colors.teal.shade600,
+                                  Icons.calendar_month_rounded,
+                                  size: 16,
+                                  color: app_color,
                                 ),
                                 SizedBox(width: 8),
                                 Flexible(
                                   child: Text(
-                                    '$startdate_text  ➜  $enddate_text',
+                                    '$startdate_text  →  $enddate_text',
                                     style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
                                     ),
-                                    overflow: TextOverflow.visible,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ),
-                                SizedBox(width: 8),
-
-                                Icon(
-                                  Icons.calendar_month_outlined,
-                                  size: 18,
-                                  color: Colors.teal.shade600,
                                 ),
                               ],
                             ),
@@ -4426,7 +4371,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black12,
+                          color: Colors.black12.withOpacity(0.08),
                           blurRadius: 12,
                           offset: Offset(0, 6),
                         ),
@@ -4497,31 +4442,32 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               top: 5,
                               bottom: 5,
                             ),
-                            child: Material(
-                              elevation: 2,
-                              borderRadius: BorderRadius.circular(18),
-                              shadowColor: Colors.black12,
+                            child: SizedBox(
+                              height: 46,
                               child: TextField(
                                 controller: searchController,
                                 onChanged: _onSearchChanged,
 
                                 style: GoogleFonts.poppins(
-                                  fontSize: 15,
+                                  fontSize: 13.5,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurface,
                                 ),
                                 decoration: InputDecoration(
+                                  isDense: true,
                                   hintText: 'Search...',
+                                  hintStyle: GoogleFonts.poppins(fontSize: 13),
                                   prefixIcon: Icon(
                                     Icons.search,
+                                    size: 18,
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurfaceVariant,
                                   ),
                                   suffixIcon: searchController.text.isNotEmpty
                                       ? IconButton(
-                                          icon: const Icon(Icons.close),
+                                          icon: const Icon(Icons.close, size: 18),
                                           onPressed: () {
                                             searchController.clear();
                                             _resetSearch();
@@ -4531,28 +4477,28 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                       : null,
                                   filled: true,
                                   fillColor:
-                                      Theme.of(
-                                        context,
-                                      ).inputDecorationTheme.fillColor ??
-                                      Theme.of(
-                                        context,
-                                      ).colorScheme.surfaceContainerHighest,
+                                      Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? Colors.white.withOpacity(0.06)
+                                          : Colors.grey.shade100,
                                   contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 14,
-                                    horizontal: 16,
+                                    vertical: 8,
+                                    horizontal: 12,
                                   ),
                                   enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: BorderSide(
-                                      color: Theme.of(context).dividerColor,
-                                    ),
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
                                   ),
                                   focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: const BorderSide(
-                                      color: app_color,
-                                      width: 1.5,
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide(
+                                      color: app_color.withOpacity(0.6),
+                                      width: 1.4,
                                     ),
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
                                   ),
                                 ),
                               ),
@@ -4569,25 +4515,31 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(
-                                    Icons.inbox_rounded,
-                                    size: 40,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
+                                  Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      color: app_color.withOpacity(0.10),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.inbox_rounded,
+                                      size: 26,
+                                      color: app_color,
+                                    ),
                                   ),
-                                  const SizedBox(height: 10),
+                                  const SizedBox(height: 12),
                                   Text(
                                     "No records found",
                                     style: GoogleFonts.poppins(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
                                       color: Theme.of(
                                         context,
-                                      ).colorScheme.onSurfaceVariant,
+                                      ).colorScheme.onSurface,
                                     ),
                                   ),
-                                ],
+],
                               ),
                             ),
                           ),
@@ -4644,7 +4596,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                         : null,
                                     boxShadow: [
                                       BoxShadow(
-                                        color: Colors.black12,
+                                        color: Colors.black12.withOpacity(0.08),
                                         blurRadius: 6,
                                         offset: Offset(0, 3),
                                       ),
@@ -4669,15 +4621,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                           borderRadius: BorderRadius.circular(
                                             12,
                                           ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.indigo.withOpacity(
-                                                0.25,
-                                              ),
-                                              blurRadius: 6,
-                                              offset: const Offset(0, 3),
-                                            ),
-                                          ],
                                         ),
                                         child: const Icon(
                                           Icons.account_balance_wallet_rounded,
@@ -4806,25 +4749,31 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      Icons.inbox_rounded,
-                                      size: 40,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
+                                    Container(
+                                      width: 56,
+                                      height: 56,
+                                      decoration: BoxDecoration(
+                                        color: app_color.withOpacity(0.10),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        Icons.inbox_rounded,
+                                        size: 26,
+                                        color: app_color,
+                                      ),
                                     ),
-                                    const SizedBox(height: 10),
+                                    const SizedBox(height: 12),
                                     Text(
                                       "No records found",
                                       style: GoogleFonts.poppins(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
                                         color: Theme.of(
                                           context,
-                                        ).colorScheme.onSurfaceVariant,
+                                        ).colorScheme.onSurface,
                                       ),
                                     ),
-                                  ],
+],
                                 ),
                               ),
                             )
@@ -4907,25 +4856,31 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(
-                                          Icons.inbox_rounded,
-                                          size: 40,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
+                                        Container(
+                                          width: 56,
+                                          height: 56,
+                                          decoration: BoxDecoration(
+                                            color: app_color.withOpacity(0.10),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: Icon(
+                                            Icons.inbox_rounded,
+                                            size: 26,
+                                            color: app_color,
+                                          ),
                                         ),
-                                        const SizedBox(height: 10),
+                                        const SizedBox(height: 12),
                                         Text(
                                           "No records found",
                                           style: GoogleFonts.poppins(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w500,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
                                             color: Theme.of(
                                               context,
-                                            ).colorScheme.onSurfaceVariant,
+                                            ).colorScheme.onSurface,
                                           ),
                                         ),
-                                      ],
+],
                                     ),
                                   ),
                                 ),
@@ -5174,25 +5129,31 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(
-                                        Icons.inbox_rounded,
-                                        size: 40,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
+                                      Container(
+                                        width: 56,
+                                        height: 56,
+                                        decoration: BoxDecoration(
+                                          color: app_color.withOpacity(0.10),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.inbox_rounded,
+                                          size: 26,
+                                          color: app_color,
+                                        ),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
                                       Text(
                                         "No records found",
                                         style: GoogleFonts.poppins(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w500,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
                                           color: Theme.of(
                                             context,
-                                          ).colorScheme.onSurfaceVariant,
+                                          ).colorScheme.onSurface,
                                         ),
                                       ),
-                                    ],
+],
                                   ),
                                 ),
                               )
@@ -5223,25 +5184,31 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      Icons.inbox_rounded,
-                                      size: 40,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
+                                    Container(
+                                      width: 56,
+                                      height: 56,
+                                      decoration: BoxDecoration(
+                                        color: app_color.withOpacity(0.10),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        Icons.inbox_rounded,
+                                        size: 26,
+                                        color: app_color,
+                                      ),
                                     ),
-                                    const SizedBox(height: 10),
+                                    const SizedBox(height: 12),
                                     Text(
                                       "No records found",
                                       style: GoogleFonts.poppins(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
                                         color: Theme.of(
                                           context,
-                                        ).colorScheme.onSurfaceVariant,
+                                        ).colorScheme.onSurface,
                                       ),
                                     ),
-                                  ],
+],
                                 ),
                               ),
                             ),

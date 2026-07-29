@@ -1,15 +1,23 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:FincoreGo/ItemsDrillDown.dart';
 import 'package:FincoreGo/currencyFormat.dart';
+import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SerialSelect.dart';
 import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'package:FincoreGo/widgets/entry_widgets.dart';
 
 class Sale_Purc {
   final String month, amount;
@@ -1081,6 +1089,144 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     }
   }
 
+  void showToast(String message) {
+    showAppMessage(context, message);
+  }
+
+  Future<void> generateAndShareCSV_ItemDetail() async {
+    final List<List<dynamic>> csvData = [];
+    csvData.add(['Item Name', itemname]);
+    // alias/inventory_closing can come back as the literal string "null"
+    // from the API (not Dart null) - isItemAliasVisible already guards
+    // against that for alias; inventory_closing gets the same guard here.
+    if (isItemAliasVisible) csvData.add(['Alias', alias]);
+    csvData.add([
+      'Inventory Closing',
+      inventory_closing == 'null' ? '0' : inventory_closing,
+    ]);
+    csvData.add([]);
+
+    if (salesummary_visible && list_sale.isNotEmpty) {
+      csvData.add(['Sales Summary']);
+      csvData.add(['Month', 'Amount']);
+      for (final row in list_sale) {
+        csvData.add([row.month, formatAmount(row.amount)]);
+      }
+      csvData.add([]);
+    }
+
+    if (purchasesummary_visible && list_purchase.isNotEmpty) {
+      csvData.add(['Purchase Summary']);
+      csvData.add(['Month', 'Amount']);
+      for (final row in list_purchase) {
+        csvData.add([row.month, formatAmount(row.amount)]);
+      }
+    }
+
+    final csvString = const ListToCsvConverter().convert(csvData);
+    final tempDir = await Directory.systemTemp.createTemp();
+    final tempFilePath = '${tempDir.path}/${itemname}_Detail.csv';
+    final file = File(tempFilePath);
+    await file.writeAsString(csvString);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Sharing $itemname Detail Report of ${company ?? ''}',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
+  Future<void> generateAndSharePDF_ItemDetail() async {
+    final font = pw.Font.ttf(
+      await rootBundle.load("assets/fonts/NotoSans.ttf"),
+    );
+    final pdf = pw.Document();
+    final companyName = company ?? '';
+
+    pw.Widget buildSummaryTable(String title, List<Sale_Purc> list) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(height: 14),
+          pw.Text(
+            title,
+            style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, font: font),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Table.fromTextArray(
+            border: pw.TableBorder.all(width: 1),
+            headerDecoration: pw.BoxDecoration(
+              borderRadius: pw.BorderRadius.circular(2),
+              color: PdfColors.grey300,
+            ),
+            headerHeight: 26,
+            cellAlignment: pw.Alignment.center,
+            cellPadding: const pw.EdgeInsets.all(5),
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, font: font),
+            cellStyle: pw.TextStyle(fontSize: 11, font: font),
+            headers: ['Month', 'Amount'],
+            data: list
+                .map((row) => [row.month, formatAmount(row.amount)])
+                .toList(),
+          ),
+        ],
+      );
+    }
+
+    pdf.addPage(
+      pw.Page(
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Center(
+              child: pw.Text(
+                companyName,
+                style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, font: font),
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Center(
+              child: pw.Text(
+                itemname,
+                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, font: font),
+              ),
+            ),
+            if (isItemAliasVisible)
+              pw.Center(
+                child: pw.Text(
+                  alias,
+                  style: pw.TextStyle(fontSize: 11, font: font),
+                ),
+              ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Inventory Closing: ${inventory_closing == 'null' ? '0' : inventory_closing}',
+              style: pw.TextStyle(fontSize: 11, font: font),
+            ),
+            if (salesummary_visible && list_sale.isNotEmpty)
+              buildSummaryTable('Sales Summary', list_sale),
+            if (purchasesummary_visible && list_purchase.isNotEmpty)
+              buildSummaryTable('Purchase Summary', list_purchase),
+          ],
+        ),
+      ),
+    );
+
+    final pdfData = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final tempFilePath = '${tempDir.path}/${itemname}_Detail.pdf';
+    final file = File(tempFilePath);
+    await file.writeAsBytes(pdfData);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Sharing $itemname Detail Report of ${company ?? ''}',
+        files: [XFile(tempFilePath)],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1096,16 +1242,16 @@ class _ItemsClickedPageState extends State<ItemsClicked>
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(50),
+        preferredSize: Size.fromHeight(44),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               AppNavigation.backOrDashboard(context);
             },
@@ -1125,42 +1271,126 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                     company ?? '',
                     style: GoogleFonts.poppins(
                       color: Colors.white,
-                      fontSize: 20,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                SizedBox(width: 4),
-                Icon(Icons.arrow_drop_down, color: Colors.white),
+                SizedBox(width: 2),
+                Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
               ],
             ),
           ),
           centerTitle: true,
-          actions: [],
+          actions: [
+            IconButton(
+              icon: Icon(Icons.share_outlined, color: Colors.white, size: 24),
+              onPressed: () {
+                final RenderBox button =
+                    context.findRenderObject() as RenderBox;
+                final RenderBox overlay =
+                    Overlay.of(context).context.findRenderObject()
+                        as RenderBox;
+                final Offset buttonPosition = button.localToGlobal(
+                  Offset.zero,
+                  ancestor: overlay,
+                );
+
+                showMenu(
+                  context: context,
+                  position: RelativeRect.fromLTRB(
+                    overlay.size.width - buttonPosition.dx,
+                    buttonPosition.dy - button.size.height,
+                    overlay.size.width - buttonPosition.dx,
+                    buttonPosition.dy,
+                  ),
+                  items: <PopupMenuEntry<String>>[
+                    PopupMenuItem<String>(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          if (list_sale.isNotEmpty || list_purchase.isNotEmpty) {
+                            generateAndSharePDF_ItemDetail();
+                          } else {
+                            showToast('Data Not Found');
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.picture_as_pdf,
+                              size: 16,
+                              color: Color(0xFF26ADA3),
+                            ),
+                            SizedBox(width: 5),
+                            Text(
+                              'Share as PDF',
+                              style: TextStyle(
+                                fontWeight: FontWeight.normal,
+                                color: Color(0xFF26ADA3),
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    PopupMenuItem<String>(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          if (list_sale.isNotEmpty || list_purchase.isNotEmpty) {
+                            generateAndShareCSV_ItemDetail();
+                          } else {
+                            showToast('Data Not Found');
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.add_chart_outlined,
+                              size: 16,
+                              color: Color(0xFF26ADA3),
+                            ),
+                            SizedBox(width: 5),
+                            Text(
+                              'Share as CSV',
+                              style: TextStyle(
+                                fontWeight: FontWeight.normal,
+                                color: Color(0xFF26ADA3),
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
         ),
       ),
-      body: Stack(
-        children: [
-          ListView(
-            padding: EdgeInsets.only(left: 16, right: 16, bottom: 12, top: 8),
-            children: [
-              if (isDateVisible) _buildDateSelector(context),
-              if (isDateVisible) SizedBox(height: 8),
+      body: _isLoading
+          ? Center(child: AppLogoLoader())
+          : ListView(
+              padding: EdgeInsets.only(left: 16, right: 16, bottom: 12, top: 8),
+              children: [
+                if (isDateVisible) _buildDateSelector(context),
+                if (isDateVisible) SizedBox(height: 8),
 
-              _buildItemOverviewCard(),
+                _buildItemOverviewCard(),
 
-              if (salesummary_visible || purchasesummary_visible)
-                SizedBox(height: 8),
-              if (salesummary_visible)
-                _buildSummaryCard(context, isSales: true),
-              if (purchasesummary_visible)
-                _buildSummaryCard(context, isSales: false),
-            ],
-          ),
-          if (_isLoading) Center(child: AppLogoLoader()),
-        ],
-      ),
+                if (salesummary_visible || purchasesummary_visible)
+                  SizedBox(height: 8),
+                if (salesummary_visible)
+                  _buildSummaryCard(context, isSales: true),
+                if (purchasesummary_visible)
+                  _buildSummaryCard(context, isSales: false),
+              ],
+            ),
     );
   }
 
@@ -1345,7 +1575,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
 
                   // 🔹 Value
                   Text(
-                    inventory_closing,
+                    inventory_closing == 'null' ? '0' : inventory_closing,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -1431,112 +1661,97 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   }
 
   Widget _buildDateSelector(BuildContext context) {
+    final tintColor = Theme.of(context).brightness == Brightness.dark
+        ? Colors.white.withOpacity(0.06)
+        : Colors.grey.shade100;
     return Container(
-      margin: EdgeInsets.symmetric(vertical: 0),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(14),
         border: Theme.of(context).brightness == Brightness.dark
             ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
             : null,
         boxShadow: [
           BoxShadow(
-            color: Colors.black12.withOpacity(0.08),
-            blurRadius: 10,
-            spreadRadius: 2,
-            offset: Offset(0, 4),
+            color: Colors.black12.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            /// Dropdown
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: app_color, width: 1.2),
-              ),
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: _selecteddate,
-                  icon: Icon(
-                    Icons.expand_more,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  style: GoogleFonts.poppins(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontSize: 15,
-                  ),
-                  dropdownColor: Theme.of(context).colorScheme.surface,
-                  onChanged: (String? val) {
-                    if (val != null) _handleDate(val);
-                  },
-                  items: date_range.map((e) {
-                    return DropdownMenuItem<String>(
-                      value: e,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Text(e),
-                      ),
-                    );
-                  }).toList(),
+      child: Column(
+        children: [
+          /// Dropdown
+          Container(
+            width: double.infinity,
+            height: 38,
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: tintColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                isDense: true,
+                value: _selecteddate,
+                icon: Icon(
+                  Icons.expand_more,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
+                style: GoogleFonts.poppins(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                ),
+                dropdownColor: Theme.of(context).colorScheme.surface,
+                onChanged: (String? val) {
+                  if (val != null) _handleDate(val);
+                },
+                items: date_range.map((e) {
+                  return DropdownMenuItem<String>(value: e, child: Text(e));
+                }).toList(),
               ),
             ),
+          ),
 
-            SizedBox(height: 18),
+          SizedBox(height: 8),
 
-            /// Date Range Display (Clickable)
-            InkWell(
-              onTap: () => _selectDateRange(context),
-              borderRadius: BorderRadius.circular(50),
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  gradient: Theme.of(context).brightness == Brightness.dark
-                      ? null
-                      : LinearGradient(
-                          colors: [
-                            Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest
-                                .withOpacity(0.35),
-                            Theme.of(context).cardColor.withOpacity(0.9),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                  border: Border.all(color: app_color, width: 1),
-                  borderRadius: BorderRadius.circular(50),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.calendar_month_rounded,
-                      size: 18,
-                      color: app_color,
-                    ),
-                    SizedBox(width: 10),
-                    Text(
+          /// Date Range Display (Clickable)
+          InkWell(
+            onTap: () => _selectDateRange(context),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(
+                color: tintColor,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.calendar_month_rounded, size: 15, color: app_color),
+                  SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
                       "$startdate_text → $enddate_text",
+                      textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                        fontSize: 12.5,
                         color: Theme.of(context).colorScheme.onSurface,
                       ),
+                      softWrap: true,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

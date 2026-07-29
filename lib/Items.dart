@@ -81,6 +81,15 @@ class ItemAgeingBucket {
   ItemAgeingBucket(this.label);
 }
 
+class _TabConfig {
+  final String label;
+  final IconData icon;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _TabConfig(this.label, this.icon, this.isSelected, this.onTap);
+}
+
 String formatlastsaledate(String saledate) {
   String formated_saledate = "";
 
@@ -2219,11 +2228,15 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
   String removeUnit(String value) {
     try {
-      // Sirf number aur dot rakho
+      // Preserve a leading minus (negative/oversold stock) - only strip the
+      // unit suffix and thousands separators, not the sign, otherwise
+      // negative quantities silently display as positive.
+      final isNegative = value.trim().startsWith('-');
       String numberOnly = value.replaceAll(RegExp(r'[^0-9.]'), '');
       if (numberOnly.isEmpty) return value;
 
       double parsed = double.parse(numberOnly);
+      if (isNegative) parsed = -parsed;
 
       // Agar value decimal ke bagair hai → int dikhado
       if (parsed % 1 == 0) {
@@ -2282,9 +2295,10 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           title: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth:
-                  MediaQuery.of(context).size.width - (kToolbarHeight * 5.2),
+                  MediaQuery.of(context).size.width - (kToolbarHeight * 2.6),
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   company ?? '',
@@ -2307,7 +2321,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
               ],
             ),
           ),
-          centerTitle: true,
+          centerTitle: false,
           leading: IconButton(
             icon: Icon(Icons.arrow_back_ios_new, color: Colors.white),
             onPressed: () => AppNavigation.backOrDashboard(context),
@@ -2500,17 +2514,22 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 SliverToBoxAdapter(
                   child: Container(
                     margin: EdgeInsets.only(
-                      top: 10,
-                      left: 16,
-                      right: 16,
+                      top: 8,
+                      left: 12,
+                      right: 12,
                       bottom: 8,
                     ),
-                    padding: EdgeInsets.all(16),
+                    padding: EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
-                        BoxShadow(color: Colors.black12, blurRadius: 10),
+                        BoxShadow(
+                          color: Colors.black12.withOpacity(0.08),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                          offset: const Offset(0, 4),
+                        ),
                       ],
                     ),
                     child: Column(
@@ -2518,56 +2537,17 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                         // Parent Dropdown
                         _buildParentDropdown(),
 
-                        SizedBox(height: 14),
+                        SizedBox(height: 8),
 
-                        // Tabs
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              if (allitems_visibility)
-                                _buildTab(
-                                  "All Items",
-                                  Icons.inventory_2_outlined,
-                                  isClicked_allitems,
-                                  () =>
-                                      fetchItemData('All Items', _selecteditem),
-                                ),
-                              if (fastmovingitems_visibility)
-                                _buildTab(
-                                  "Moving Summary",
-                                  Icons.compare_arrows_rounded,
-                                  isClicked_movingsummary,
-                                  () => fetchMovingSummary(_selecteditem),
-                                ),
-                              if (allitems_visibility)
-                                _buildTab(
-                                  "Stock Valuation",
-                                  Icons.bar_chart_rounded,
-                                  isClicked_stockvaluation,
-                                  () => fetchStockValuation(_selecteditem),
-                                ),
-                              if (allitems_visibility)
-                                _buildTab(
-                                  "Item Ageing",
-                                  Icons.history_rounded,
-                                  isClicked_itemageing,
-                                  () => fetchItemAgeing(_selecteditem),
-                                ),
-                              if (inactiveitems_visibility)
-                                _buildTab(
-                                  "Inactive",
-                                  Icons.block,
-                                  isClicked_inactiveitems,
-                                  () {
-                                    _showInactiveDaysDialog(
-                                      context,
-                                    ); // 👈 open modern dialog instead of direct fetch
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
+                        // View selector - a single compact pill showing
+                        // the current view, opening a full-width bottom
+                        // sheet list to switch. Replaces the earlier tab
+                        // row/grid attempts (horizontal scroll hid options,
+                        // a 2-col grid still left an awkward lone last
+                        // tile) - a sheet gives every option full width
+                        // with no wrapping/ellipsis/alignment compromises,
+                        // and scales to more report types for free.
+                        _buildViewSelector(),
 
                         if (_isSearchViewVisible &&
                             !(isClicked_movingsummary &&
@@ -2578,13 +2558,11 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                             padding: const EdgeInsets.only(
                               left: 0,
                               right: 0,
-                              top: 15,
+                              top: 8,
                               bottom: 0,
                             ),
-                            child: Material(
-                              elevation: 2,
-                              borderRadius: BorderRadius.circular(20),
-                              shadowColor: Colors.black12,
+                            child: SizedBox(
+                              height: 46,
                               child: TextField(
                                 controller: searchController,
                                 onChanged: isClicked_movingsummary
@@ -2595,16 +2573,18 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                                     ? _onItemAgeingSearchChanged
                                     : _onSearchChanged,
                                 style: GoogleFonts.poppins(
-                                  fontSize: 14,
+                                  fontSize: 13.5,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurface,
                                 ),
                                 decoration: InputDecoration(
+                                  isDense: true,
                                   hintText: "Search items...",
                                   hintStyle: GoogleFonts.poppins(fontSize: 13),
                                   prefixIcon: Icon(
                                     Icons.search,
+                                    size: 18,
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurfaceVariant,
@@ -2612,30 +2592,29 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
                                   filled: true,
                                   fillColor:
-                                      Theme.of(
-                                        context,
-                                      ).inputDecorationTheme.fillColor ??
-                                      Theme.of(
-                                        context,
-                                      ).colorScheme.surfaceContainerHighest,
+                                      Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? Colors.white.withOpacity(0.06)
+                                          : Colors.grey.shade100,
                                   contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 14,
-                                    horizontal: 16,
+                                    vertical: 8,
+                                    horizontal: 12,
                                   ),
                                   enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                    borderSide: BorderSide(
-                                      color: Theme.of(context).dividerColor,
-                                    ),
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
                                   ),
                                   focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                    borderSide: const BorderSide(
-                                      color: app_color,
-                                      width: 1.5,
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide(
+                                      color: app_color.withOpacity(0.6),
+                                      width: 1.4,
                                     ),
                                   ),
-                                  border: InputBorder.none,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
+                                  ),
                                 ),
                               ),
                             ),
@@ -2681,20 +2660,22 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   // ------------------- 🔹 Widgets 🔹 -------------------
 
   Widget _buildParentDropdown() {
+    // Compact - a light tinted fill instead of its own bordered/shadowed
+    // box (the outer header container already provides that), same
+    // pattern used to slim down the Transactions screen's header.
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Theme.of(context).dividerColor),
-        boxShadow: [
-          BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
-        ],
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: _selecteditem,
           isExpanded: true,
+          isDense: true,
           icon: Icon(
             Icons.keyboard_arrow_down_rounded,
             color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -2703,15 +2684,15 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           hint: Text(
             "Select Item",
             style: GoogleFonts.poppins(
-              fontSize: 14,
+              fontSize: 13,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
 
           style: GoogleFonts.poppins(
-            fontSize: 15,
+            fontSize: 13.5,
             color: Theme.of(context).colorScheme.onSurface,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
           ),
 
           items: spinner_list.map((value) {
@@ -2760,49 +2741,190 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildTab(
-    String label,
-    IconData icon,
-    bool isSelected,
-    VoidCallback onTap,
-  ) {
+  List<_TabConfig> _buildViewOptions() {
+    return [
+      if (allitems_visibility)
+        _TabConfig(
+          // Labeled "Item List" (not "All Items") to avoid duplicating
+          // the parent-category dropdown right above it, which also
+          // reads "All Items" when no category filter is applied - the
+          // two together looked like an unexplained repeat.
+          "Item List",
+          Icons.inventory_2_outlined,
+          isClicked_allitems,
+          () => fetchItemData('All Items', _selecteditem),
+        ),
+      if (fastmovingitems_visibility)
+        _TabConfig(
+          "Moving Summary",
+          Icons.compare_arrows_rounded,
+          isClicked_movingsummary,
+          () => fetchMovingSummary(_selecteditem),
+        ),
+      if (allitems_visibility)
+        _TabConfig(
+          "Stock Valuation",
+          Icons.bar_chart_rounded,
+          isClicked_stockvaluation,
+          () => fetchStockValuation(_selecteditem),
+        ),
+      if (allitems_visibility)
+        _TabConfig(
+          "Item Ageing",
+          Icons.history_rounded,
+          isClicked_itemageing,
+          () => fetchItemAgeing(_selecteditem),
+        ),
+      if (inactiveitems_visibility)
+        _TabConfig(
+          "Inactive",
+          Icons.block,
+          isClicked_inactiveitems,
+          () => _showInactiveDaysDialog(context),
+        ),
+    ];
+  }
+
+  // Single compact pill showing the current view - tapping it opens a
+  // full-width bottom sheet list to switch, instead of packing all 5
+  // options into the header as tabs (which forced a tradeoff between
+  // horizontal scroll, a cramped grid, or ellipsis on long labels).
+  Widget _buildViewSelector() {
+    final options = _buildViewOptions();
+    final current = options.firstWhere(
+      (o) => o.isSelected,
+      orElse: () => options.first,
+    );
+
     return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: 250),
-        margin: EdgeInsets.only(right: 8),
-        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      onTap: () => _showViewSelectorSheet(options),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          gradient: isSelected
-              ? LinearGradient(
-                  colors: [
-                    app_color.withOpacity(0.9),
-                    app_color.withOpacity(0.7),
-                  ],
-                )
-              : null,
-          color: isSelected ? null : Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: isSelected ? app_color : Theme.of(context).dividerColor,
-          ),
-          boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6)],
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.06)
+              : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: isSelected ? Colors.white : app_color),
-            SizedBox(width: 6),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : app_color,
+            Icon(current.icon, size: 16, color: app_color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                current.label,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
+            ),
+            Icon(
+              Icons.unfold_more_rounded,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ],
         ),
       ),
+    );
+  }
+
+  void _showViewSelectorSheet(List<_TabConfig> options) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).dividerColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "Switch View",
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    children: [
+                      for (final option in options)
+                        ListTile(
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            option.onTap();
+                          },
+                          leading: Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: option.isSelected
+                                  ? app_color
+                                  : app_color.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              option.icon,
+                              size: 18,
+                              color: option.isSelected
+                                  ? Colors.white
+                                  : app_color,
+                            ),
+                          ),
+                          title: Text(
+                            option.label,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          trailing: option.isSelected
+                              ? Icon(
+                                  Icons.check_circle_rounded,
+                                  color: app_color,
+                                )
+                              : null,
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -3064,16 +3186,17 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      formatAmountRich(
-                        totalValue.toString(),
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
                     ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                formatAmountRich(
+                  totalValue.toString(),
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -3188,16 +3311,14 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Flexible(
-                          child: formatAmountRich(
-                            item.c_amount,
-                            softWrap: true,
-                            textAlign: TextAlign.right,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                              color: Theme.of(context).colorScheme.onSurface,
-                            ),
+                        formatAmountRich(
+                          item.c_amount,
+                          maxLines: 1,
+                          textAlign: TextAlign.right,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       ],
@@ -3844,17 +3965,33 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.search_off_rounded,
-            size: 80,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              color: app_color.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.inventory_2_outlined,
+              size: 40,
+              color: app_color.withOpacity(0.6),
+            ),
           ),
-          SizedBox(height: 12),
+          const SizedBox(height: 18),
           Text(
             "No items found",
             style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Try a different search or filter",
+            style: GoogleFonts.poppins(
+              fontSize: 13,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),

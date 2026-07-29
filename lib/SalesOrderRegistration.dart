@@ -2439,7 +2439,12 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
 
   String getCurrencySymbol(String currencyCode) {
     NumberFormat format;
-    Locale locale = Localizations.localeOf(context);
+    // Number/currency formatting is intentionally locale-independent -
+    // amounts must show Western digits and standard symbol placement
+    // regardless of the app's display language (Arabic UI still shows
+    // '1,234.50 AED', not Arabic-Indic digits), matching how real
+    // finance apps in the region behave.
+    Locale locale = const Locale('en');
 
     try {
       if (currencyCode == 'INR' ||

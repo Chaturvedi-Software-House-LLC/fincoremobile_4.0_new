@@ -1215,18 +1215,18 @@ class _PartyTotalClickedRecPayClickedPageState
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60),
+        preferredSize: const Size.fromHeight(52),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
 
           automaticallyImplyLeading: false,
 
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               Navigator.pop(context);
             },
@@ -1239,7 +1239,7 @@ class _PartyTotalClickedRecPayClickedPageState
                 ledger,
                 style: GoogleFonts.poppins(
                   color: Colors.white,
-                  fontSize: 18,
+                  fontSize: 15,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -1247,7 +1247,7 @@ class _PartyTotalClickedRecPayClickedPageState
                 type,
                 style: GoogleFonts.poppins(
                   color: Colors.white70,
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.normal,
                 ),
                 overflow: TextOverflow.ellipsis,
@@ -1269,7 +1269,7 @@ class _PartyTotalClickedRecPayClickedPageState
                   });
                 }
               },
-              icon: Icon(Icons.search, color: Colors.white, size: 30),
+              icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
             IconButton(
               onPressed: () {
@@ -1388,22 +1388,21 @@ class _PartyTotalClickedRecPayClickedPageState
               SliverToBoxAdapter(
                 child: Container(
                   margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+                    horizontal: 12,
+                    vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                        offset: const Offset(0, 6),
+                        color: Colors.black12.withOpacity(0.08),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
                       ),
                     ],
                   ),
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
@@ -1412,42 +1411,28 @@ class _PartyTotalClickedRecPayClickedPageState
                         child: _totalAmountWidget(
                           total,
                           GoogleFonts.poppins(
-                            fontSize: 24,
+                            fontSize: 20,
                             fontWeight: FontWeight.w800,
                             color: Theme.of(context).colorScheme.onSurface,
                             letterSpacing: 0,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
 
                       // As of + Overdue + Credit Limit row (pill style)
                       Container(
+                        width: double.infinity,
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
+                          horizontal: 12,
+                          vertical: 10,
                         ),
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHighest.withOpacity(
-                                Theme.of(context).brightness == Brightness.dark
-                                    ? 0.85
-                                    : 0.35,
-                              ),
-                              Theme.of(context).cardColor.withOpacity(
-                                Theme.of(context).brightness == Brightness.dark
-                                    ? 0.95
-                                    : 0.9,
-                              ),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          border: Border.all(color: app_color, width: 1),
-                          borderRadius: BorderRadius.circular(50),
+                          color: Theme.of(context).brightness ==
+                                  Brightness.dark
+                              ? Colors.white.withOpacity(0.06)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
@@ -1461,7 +1446,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     'As of ',
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w500,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
@@ -1471,7 +1456,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     enddate_text,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
@@ -1481,7 +1466,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ' | ',
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w500,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurfaceVariant,
@@ -1491,7 +1476,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     overdue_value,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
@@ -1509,7 +1494,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     'Credit Limit: ',
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w500,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
@@ -1526,7 +1511,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ).number,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
@@ -1536,7 +1521,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ' / ',
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w500,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurfaceVariant,
@@ -1546,7 +1531,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     creditperiod,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
-                                      fontSize: 14,
+                                      fontSize: 12.5,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.onSurface,
@@ -1558,7 +1543,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                       ' Days',
                                       style: GoogleFonts.poppins(
                                         fontWeight: FontWeight.w500,
-                                        fontSize: 14,
+                                        fontSize: 12.5,
                                         color: Theme.of(
                                           context,
                                         ).colorScheme.onSurface,
@@ -1616,51 +1601,52 @@ class _PartyTotalClickedRecPayClickedPageState
                           padding: const EdgeInsets.only(
                             left: 12,
                             right: 12,
-                            top: 12,
+                            top: 10,
                           ),
-                          child: Material(
-                            elevation: 2,
-                            borderRadius: BorderRadius.circular(18),
-                            shadowColor: Colors.black12,
+                          child: SizedBox(
+                            height: 46,
                             child: TextField(
                               controller: searchController,
                               onChanged: (value) => _applyItemFilters(),
                               style: GoogleFonts.poppins(
-                                fontSize: 15,
+                                fontSize: 13.5,
                                 color: Theme.of(context).colorScheme.onSurface,
                               ),
                               decoration: InputDecoration(
+                                isDense: true,
                                 hintText: 'Search...',
+                                hintStyle: GoogleFonts.poppins(fontSize: 13),
                                 prefixIcon: Icon(
                                   Icons.search,
+                                  size: 18,
                                   color: Theme.of(
                                     context,
                                   ).colorScheme.onSurfaceVariant,
                                 ),
                                 filled: true,
                                 fillColor:
-                                    Theme.of(
-                                      context,
-                                    ).inputDecorationTheme.fillColor ??
-                                    Theme.of(
-                                      context,
-                                    ).colorScheme.surfaceContainerHighest,
+                                    Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.white.withOpacity(0.06)
+                                        : Colors.grey.shade100,
                                 contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                  horizontal: 16,
+                                  vertical: 8,
+                                  horizontal: 12,
                                 ),
                                 enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                  borderSide: BorderSide(
-                                    color: Theme.of(context).dividerColor,
-                                  ),
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
                                 ),
                                 focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                  borderSide: const BorderSide(
-                                    color: app_color,
-                                    width: 1.5,
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide(
+                                    color: app_color.withOpacity(0.6),
+                                    width: 1.4,
                                   ),
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
                                 ),
                               ),
                             ),

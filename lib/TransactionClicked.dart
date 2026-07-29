@@ -683,16 +683,16 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(50),
+        preferredSize: Size.fromHeight(44),
         child: AppBar(
           backgroundColor: app_color,
-          elevation: 6,
+          elevation: 2,
           automaticallyImplyLeading: false,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
           ),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: Colors.white),
+            icon: Icon(Icons.arrow_back, color: Colors.white, size: 20),
             onPressed: () {
               AppNavigation.backOrDashboard(context);
             },
@@ -713,18 +713,18 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
 
                     style: GoogleFonts.poppins(
                       color: Colors.white,
-                      fontSize: 20,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                SizedBox(width: 4),
-                Icon(Icons.arrow_drop_down, color: Colors.white),
+                SizedBox(width: 2),
+                Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
               ],
             ),
           ),
-          centerTitle: true,
+          centerTitle: false,
           actions: [],
         ),
       ),
@@ -1911,63 +1911,59 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // 🔍 Search Field
-                          TextField(
-                            controller: _searchController,
-                            decoration: InputDecoration(
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
-                              ),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.tealAccent.shade100
-                                    : Colors.teal.shade600,
-                              ),
-                              hintText: "Search by Bill No...",
-                              hintStyle: GoogleFonts.poppins(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                                fontSize: 14.5,
-                              ),
-                              filled: true,
-                              fillColor:
-                                  Theme.of(
+                          SizedBox(
+                            height: 46,
+                            child: TextField(
+                              controller: _searchController,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                prefixIcon: Icon(
+                                  Icons.search,
+                                  size: 18,
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.tealAccent.shade100
+                                      : Colors.teal.shade600,
+                                ),
+                                hintText: "Search by Bill No...",
+                                hintStyle: GoogleFonts.poppins(
+                                  color: Theme.of(
                                     context,
-                                  ).inputDecorationTheme.fillColor ??
-                                  Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest, // soft inner background
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: BorderSide(
-                                  color: Theme.of(context).dividerColor,
+                                  ).colorScheme.onSurfaceVariant,
+                                  fontSize: 13,
+                                ),
+                                filled: true,
+                                fillColor:
+                                    Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.white.withOpacity(0.06)
+                                        : Colors.grey.shade100,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide(
+                                    color: app_color.withOpacity(0.6),
+                                    width: 1.4,
+                                  ),
+                                ),
+                              ),
 
-                                  width: 1.4,
-                                ),
+                              style: GoogleFonts.poppins(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontSize: 13.5,
                               ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: BorderSide(
-                                  color: Theme.of(context).dividerColor,
-                                  width: 1.4,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: BorderSide(
-                                  color: Colors.teal.shade400,
-                                  width: 1.4,
-                                ),
-                              ),
-                            ),
-
-                            style: GoogleFonts.poppins(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontSize: 14.5,
                             ),
                           ),
 

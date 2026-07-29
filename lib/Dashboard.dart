@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 import 'package:FincoreGo/PendingDeliveryNoteEntry.dart';
+import 'package:FincoreGo/l10n/app_localizations.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:flutter/foundation.dart';
 import 'package:FincoreGo/DashboardClicked.dart';
@@ -150,7 +151,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
   List<double> salesDataList = [];
   List<double> recDataList = [];
-  double? _salesTrendPercent;
   late String? startdate_pref, enddate_pref;
 
   String? license_expiry;
@@ -263,7 +263,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            "Entry Type",
+                            AppLocalizations.of(context).dashEntryTypeTitle,
                             style: GoogleFonts.poppins(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
@@ -272,7 +272,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            "Choose the transaction entry you want to continue.",
+                            AppLocalizations.of(
+                              context,
+                            ).dashEntryTypeSubtitle,
                             style: GoogleFonts.poppins(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w500,
@@ -309,7 +311,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 if (isSalesEntryVisible)
                   _buildEntryOption(
                     icon: Icons.point_of_sale,
-                    label: "Sales",
+                    label: AppLocalizations.of(context).dashEntrySales,
                     gradient: [Colors.blue.shade400, Colors.blue.shade700],
                     onTap: () {
                       Navigator.pop(context);
@@ -323,7 +325,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 if (isReceiptEntryVisible)
                   _buildEntryOption(
                     icon: Icons.receipt_long,
-                    label: "Receipts",
+                    label: AppLocalizations.of(context).dashEntryReceipts,
                     gradient: [Colors.green.shade400, Colors.green.shade700],
                     onTap: () {
                       Navigator.pop(context);
@@ -339,7 +341,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 if (isSalesOrderEntryVisible)
                   _buildEntryOption(
                     icon: Icons.assignment,
-                    label: "Sales Order",
+                    label: AppLocalizations.of(context).dashEntrySalesOrder,
                     gradient: [
                       Colors.orange.shade400,
                       Colors.deepOrange.shade600,
@@ -358,7 +360,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     (isDeliveryNoteEntryVisible))
                   _buildEntryOption(
                     icon: Icons.local_shipping,
-                    label: "Delivery Note",
+                    label: AppLocalizations.of(context).dashEntryDeliveryNote,
                     gradient: [Colors.blue.shade400, Colors.indigo.shade600],
                     onTap: () {
                       Navigator.pop(context);
@@ -514,16 +516,18 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             curve: Curves.fastOutSlowIn,
           ),
           child: AlertDialog(
-            title: Text('Exit Confirmation'),
+            title: Text(AppLocalizations.of(context).dashExitTitle),
             content: SingleChildScrollView(
               child: ListBody(
-                children: <Widget>[Text('Do you really want to Exit?')],
+                children: <Widget>[
+                  Text(AppLocalizations.of(context).dashExitBody),
+                ],
               ),
             ),
             actions: <Widget>[
               TextButton(
                 child: Text(
-                  'No',
+                  AppLocalizations.of(context).commonNo,
                   style: GoogleFonts.poppins(
                     color: app_color, // Change the text color here
                   ),
@@ -534,7 +538,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               ),
               TextButton(
                 child: Text(
-                  'Yes',
+                  AppLocalizations.of(context).commonYes,
                   style: GoogleFonts.poppins(
                     color: app_color, // Change the text color here
                   ),
@@ -1211,7 +1215,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               error = data['error'];
             });
           } else {
-            error = "Error in data fetching!!!";
+            error = AppLocalizations.of(context).errorFetchingData;
           }
           showAppMessage(context, error);
         }
@@ -1223,7 +1227,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             error = dash_data['error'];
           });
         } else {
-          error = "Error in data fetching!!!";
+          error = AppLocalizations.of(context).errorFetchingData;
         }
         showAppMessage(context, error);
       }
@@ -1339,50 +1343,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               }
 
               generateMonthsList();
-
-              // Month-over-month trend: only meaningful for ranges anchored
-              // to "now" (This Month/This Year/Year To Date), where the last
-              // two months in the series really are "this month vs last
-              // month". For a fully historical range (Last Year, a past
-              // Custom Date range, etc.) the last two months are just some
-              // arbitrary past months, and a diff between them isn't what
-              // "vs last month" implies to the user - so suppress it there.
-              const trendEligibleRanges = {
-                'This Month',
-                'This Year',
-                'Year To Date',
-              };
-              if (!trendEligibleRanges.contains(_selecteddate)) {
-                setState(() {
-                  _salesTrendPercent = null;
-                });
-              } else {
-                // salesDataList is stored negated for the chart's bar
-                // direction, so undo that before comparing. The selected
-                // range can still include a trailing month with no postings
-                // yet (the current, still-in-progress month) - blindly
-                // diffing the last two array slots against that padding
-                // zero produced a bogus "100% down" badge, so skip trailing
-                // zero months to find the real latest one.
-                int latestIndex = salesDataList.length - 1;
-                while (latestIndex >= 0 &&
-                    salesDataList[latestIndex].abs() <= 0.0001) {
-                  latestIndex--;
-                }
-                if (latestIndex >= 1) {
-                  final latest = salesDataList[latestIndex].abs();
-                  final previous = salesDataList[latestIndex - 1].abs();
-                  setState(() {
-                    _salesTrendPercent = previous > 0.0001
-                        ? ((latest - previous) / previous) * 100
-                        : null;
-                  });
-                } else {
-                  setState(() {
-                    _salesTrendPercent = null;
-                  });
-                }
-              }
             } else {
               Map<String, dynamic> data = json.decode(response_charts.body);
               String error = '';
@@ -1392,7 +1352,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   error = data['error'];
                 });
               } else {
-                error = "Something went wrong!!!";
+                error = AppLocalizations.of(context).errorSomethingWentWrong;
               }
               showAppMessage(context, error);
             }
@@ -1472,7 +1432,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   error = data['error'];
                 });
               } else {
-                error = "Something went wrong!!!";
+                error = AppLocalizations.of(context).errorSomethingWentWrong;
               }
               showAppMessage(context, error);
             }
@@ -1587,7 +1547,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
         prefs.setString('enddate', endDateString);
       } else {
         if (!_isRefreshing) {
-          showAppMessage(context, "Swipe Down to Refresh Data");
+          showAppMessage(context, AppLocalizations.of(context).infoSwipeDownToRefresh);
         }
 
         /*String? sales = prefs.getString('sales');
@@ -1981,7 +1941,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           error = data['error'];
         });
       } else {
-        error = "Something went wrong!!!";
+        error = AppLocalizations.of(context).errorSomethingWentWrong;
       }
       showAppMessage(context, error);
     }
@@ -2231,7 +2191,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             color: Colors.white,
                           ),
                           label: Text(
-                            "Got it",
+                            AppLocalizations.of(context).commonGotIt,
                             style: GoogleFonts.poppins(
                               fontWeight: FontWeight.w500,
                               fontSize: 15,
@@ -2267,30 +2227,29 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   void _showLicenseExpiredDialog() {
     final String expiryDateText = license_expiry != null
         ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(license_expiry!))
-        : 'Unknown';
+        : AppLocalizations.of(context).commonUnknown;
 
     _showStyledLicenseDialog(
-      title: "License Expired",
+      title: AppLocalizations.of(context).licenseExpiredTitle,
       icon: Icons.warning_amber_rounded,
       gradientColors: const [Color(0xFFF83600), Color(0xFFFE8C00)],
       infoRows: [
         _licenseDialogInfoRow(
-          label: "Serial No:",
+          label: AppLocalizations.of(context).licenseSerialNo,
           icon: Icons.confirmation_number_outlined,
           iconColor: Colors.deepOrange,
           value: serial_no ?? '',
           valueColor: Theme.of(context).colorScheme.onSurface,
         ),
         _licenseDialogInfoRow(
-          label: "Expired on:",
+          label: AppLocalizations.of(context).licenseExpiredOn,
           icon: Icons.calendar_month,
           iconColor: Colors.redAccent,
           value: expiryDateText,
           valueColor: Colors.redAccent,
         ),
       ],
-      message:
-          "Your license has expired. To renew your access, please contact our support team below:",
+      message: AppLocalizations.of(context).licenseExpiredMessage,
       barrierDismissible: false,
       onGotIt: (dialogContext) {
         Navigator.pop(dialogContext);
@@ -2310,28 +2269,33 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   // distinct in severity.
   void _showLicenseExpiringSoonDialog(int daysRemaining) {
     final bool isToday = daysRemaining <= 0;
-    final String dayWord = daysRemaining == 1 ? 'day' : 'days';
     final String expiryDateText = license_expiry != null
         ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(license_expiry!))
-        : 'Unknown';
+        : AppLocalizations.of(context).commonUnknown;
 
     _showStyledLicenseDialog(
-      title: isToday ? "License Expires Today" : "License Expiring Soon",
+      title: isToday
+          ? AppLocalizations.of(context).licenseExpiresTodayTitle
+          : AppLocalizations.of(context).licenseExpiringSoonTitle,
       icon: Icons.hourglass_bottom_rounded,
       gradientColors: const [Colors.orangeAccent, Colors.deepOrange],
       infoRows: [
         _licenseDialogInfoRow(
-          label: "Serial No:",
+          label: AppLocalizations.of(context).licenseSerialNo,
           icon: Icons.confirmation_number_outlined,
           iconColor: Colors.deepOrange,
           value: serial_no ?? '',
           valueColor: Theme.of(context).colorScheme.onSurface,
         ),
         _licenseDialogInfoRow(
-          label: isToday ? "Expires:" : "Expires on:",
+          label: isToday
+              ? AppLocalizations.of(context).licenseExpiresLabel
+              : AppLocalizations.of(context).licenseExpiresOnLabel,
           icon: Icons.calendar_month,
           iconColor: Colors.orange,
-          value: isToday ? "Today" : expiryDateText,
+          value: isToday
+              ? AppLocalizations.of(context).dateRangeToday
+              : expiryDateText,
           valueColor: Colors.deepOrange,
         ),
         if (!isToday)
@@ -2347,7 +2311,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                '$daysRemaining $dayWord left',
+                AppLocalizations.of(context).licenseDaysLeft(daysRemaining),
                 style: GoogleFonts.poppins(
                   color: Colors.deepOrange,
                   fontWeight: FontWeight.w700,
@@ -2358,8 +2322,8 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           ),
       ],
       message: isToday
-          ? "Your license expires today. To renew your access, please contact our support team below:"
-          : "Your license will expire soon. To renew your access, please contact our support team below:",
+          ? AppLocalizations.of(context).licenseExpiresTodayMessage
+          : AppLocalizations.of(context).licenseExpiringSoonMessage,
       barrierDismissible: true,
       onGotIt: (dialogContext) => Navigator.pop(dialogContext),
     );
@@ -3136,19 +3100,16 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     children: [
                       _buildDashboardHeader(),
                       Container(
-                        margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                        margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                         padding: EdgeInsets.all(0),
                         decoration: BoxDecoration(
                           color: Theme.of(context).cardColor,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: Theme.of(context).dividerColor,
-                          ),
+                          borderRadius: BorderRadius.circular(16),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.035),
-                              blurRadius: 16,
-                              offset: const Offset(0, 8),
+                              color: Colors.black12.withOpacity(0.08),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
                             ),
                           ],
                         ),
@@ -3189,7 +3150,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             if (sales_visiblity)
                               _buildDecentCard(
                                 context,
-                                "Sales - Credit Note",
+                                AppLocalizations.of(context).tileSalesCreditNote,
                                 currencysymbol,
                                 formatNumberAbbreviation(sales_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3207,13 +3168,12 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                     ),
                                   );
                                 },
-                                trendPercent: _salesTrendPercent,
                               ),
 
                             if (purchase_visibility)
                               _buildDecentCard(
                                 context,
-                                "Purchase - Debit Note",
+                                AppLocalizations.of(context).tilePurchaseDebitNote,
                                 currencysymbol,
                                 formatNumberAbbreviation(purchase_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3236,7 +3196,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             if (receipt_visibility)
                               _buildDecentCard(
                                 context,
-                                "Receipt",
+                                AppLocalizations.of(context).tileReceipt,
                                 currencysymbol,
                                 formatNumberAbbreviation(receipt_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3259,7 +3219,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             if (payment_visibility)
                               _buildDecentCard(
                                 context,
-                                "Payment",
+                                AppLocalizations.of(context).tilePayment,
                                 currencysymbol,
                                 formatNumberAbbreviation(payment_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3282,7 +3242,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             if (receivable_visibility)
                               _buildDecentCard(
                                 context,
-                                "Outstanding Receivable",
+                                AppLocalizations.of(context).tileOutstandingReceivable,
                                 currencysymbol,
                                 formatNumberAbbreviation(outstandingreceivable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3305,7 +3265,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             if (payable_visibility)
                               _buildDecentCard(
                                 context,
-                                "Outstanding Payable",
+                                AppLocalizations.of(context).tileOutstandingPayable,
                                 currencysymbol,
                                 formatNumberAbbreviation(outstandingpayable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3328,7 +3288,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                             if (cash_visibility)
                               _buildDecentCard(
                                 context,
-                                "Cash / Bank Balance",
+                                AppLocalizations.of(context).tileCashBankBalance,
                                 currencysymbol,
                                 formatNumberAbbreviation(cash_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
                                 _currencyCode,
@@ -3437,7 +3397,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              "Analytics",
+                                              AppLocalizations.of(
+                                                context,
+                                              ).dashAnalyticsTitle,
                                               style: GoogleFonts.poppins(
                                                 fontSize: 15.5,
                                                 fontWeight: FontWeight.w700,
@@ -3448,7 +3410,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
-                                              "Open chart insights and movement trends",
+                                              AppLocalizations.of(
+                                                context,
+                                              ).dashAnalyticsSubtitle,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: GoogleFonts.poppins(
@@ -3528,7 +3492,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                       ),
                                       const SizedBox(height: 12),
                                       Text(
-                                        'No Access to Dashboard',
+                                        AppLocalizations.of(
+                                          context,
+                                        ).dashNoAccessTitle,
                                         style: GoogleFonts.poppins(
                                           fontWeight: FontWeight.w700,
                                           color: Theme.of(
@@ -3539,7 +3505,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'Please contact your administrator to enable dashboard access.',
+                                        AppLocalizations.of(
+                                          context,
+                                        ).dashNoAccessBody,
                                         textAlign: TextAlign.center,
                                         style: GoogleFonts.poppins(
                                           fontWeight: FontWeight.w500,
@@ -3615,7 +3583,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
           ),
-          tooltip: 'Number scale',
+          tooltip: AppLocalizations.of(context).numberScaleTooltip,
           child: const Icon(Icons.tune_rounded, color: Colors.white),
           onPressed: () async {
             final RenderBox button = context.findRenderObject() as RenderBox;
@@ -3650,25 +3618,25 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   value: NumberScale.full,
                   icon: Icons.pin,
                   iconColor: Colors.blue,
-                  label: "Full Value",
+                  label: AppLocalizations.of(context).numberScaleFull,
                 ),
                 _buildNumberScaleMenuItem(
                   value: NumberScale.thousand,
                   icon: Icons.format_list_numbered,
                   iconColor: Colors.blue,
-                  label: "Thousands (K)",
+                  label: AppLocalizations.of(context).numberScaleThousands,
                 ),
                 _buildNumberScaleMenuItem(
                   value: NumberScale.million,
                   icon: Icons.format_list_numbered_rtl,
                   iconColor: Colors.orange,
-                  label: "Millions (M)",
+                  label: AppLocalizations.of(context).numberScaleMillions,
                 ),
                 _buildNumberScaleMenuItem(
                   value: NumberScale.billion,
                   icon: Icons.numbers,
                   iconColor: Colors.purple,
-                  label: "Billions (B)",
+                  label: AppLocalizations.of(context).numberScaleBillions,
                 ),
               ],
             );
@@ -3751,7 +3719,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  name.trim().isEmpty ? 'Welcome' : 'Welcome, $name',
+                  name.trim().isEmpty
+                      ? AppLocalizations.of(context).dashWelcome
+                      : AppLocalizations.of(context).dashWelcomeName(name),
                   style: GoogleFonts.poppins(
                     color: Colors.white,
                     fontSize: 17,
@@ -3760,7 +3730,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Your business insights are ready for you',
+                  AppLocalizations.of(context).dashHeaderSubtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
@@ -3778,36 +3748,63 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     );
   }
 
+  String _dateRangeOptionLabel(BuildContext context, String option) {
+    final l = AppLocalizations.of(context);
+    switch (option) {
+      case 'Today':
+        return l.dateRangeToday;
+      case 'Yesterday':
+        return l.dateRangeYesterday;
+      case 'This Month':
+        return l.dateRangeThisMonth;
+      case 'Last Month':
+        return l.dateRangeLastMonth;
+      case 'This Year':
+        return l.dateRangeThisYear;
+      case 'Last Year':
+        return l.dateRangeLastYear;
+      case 'Year To Date':
+        return l.dateRangeYearToDate;
+      case 'Custom Date':
+        return l.dateRangeCustomDate;
+      default:
+        return option;
+    }
+  }
+
   Widget buildDateFilterCard(BuildContext context) {
+    final tintColor = Theme.of(context).brightness == Brightness.dark
+        ? Colors.white.withOpacity(0.06)
+        : Colors.grey.shade100;
     return Padding(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   color: app_color.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   Icons.date_range_rounded,
-                  size: 20,
+                  size: 18,
                   color: app_color,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Report Period',
+                      AppLocalizations.of(context).dashReportPeriod,
                       style: GoogleFonts.poppins(
-                        fontSize: 14.5,
+                        fontSize: 13,
                         color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.w700,
                       ),
@@ -3818,7 +3815,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w500,
                       ),
@@ -3828,37 +3825,37 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           Container(
+            height: 40,
             decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Theme.of(context).colorScheme.surfaceContainerHighest
-                  : const Color(0xFFF7F9FC),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Theme.of(context).dividerColor),
+              color: tintColor,
+              borderRadius: BorderRadius.circular(12),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<dynamic>(
                 value: _selecteddate,
+                isDense: true,
                 icon: Icon(
-                  Icons.keyboard_arrow_down_rounded,
+                  Icons.expand_more_rounded,
+                  size: 18,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 dropdownColor: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(14),
                 isExpanded: true,
                 style: GoogleFonts.poppins(
-                  fontSize: 14,
+                  fontSize: 13.5,
                   color: Theme.of(context).colorScheme.onSurface,
                 ),
                 items: date_range.map((item) {
                   return DropdownMenuItem<dynamic>(
                     value: item,
                     child: Text(
-                      item,
+                      _dateRangeOptionLabel(context, item),
                       style: GoogleFonts.poppins(
-                        fontSize: 14,
+                        fontSize: 13.5,
                         color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
@@ -3869,32 +3866,29 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           InkWell(
             onTap: () => _selectDateRange(context),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Theme.of(context).colorScheme.surfaceContainerHighest
-                    : const Color(0xFFF7F9FC),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Theme.of(context).dividerColor),
+                color: tintColor,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
                   Icon(
                     Icons.calendar_today_rounded,
-                    size: 18,
+                    size: 16,
                     color: app_color,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       "$startdate_text - $enddate_text",
                       style: GoogleFonts.poppins(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
@@ -3903,7 +3897,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   ),
                   Icon(
                     Icons.edit_calendar_rounded,
-                    size: 18,
+                    size: 16,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ],
@@ -4028,9 +4022,8 @@ Widget _buildDecentCard(
   String amountText,
   String currencyCode,
   String type,
-  VoidCallback onTap, {
-  double? trendPercent,
-}) {
+  VoidCallback onTap,
+) {
   Color _getColor(String type) {
     switch (type.toLowerCase()) {
       case "sales":
@@ -4094,7 +4087,7 @@ Widget _buildDecentCard(
             ),
           ],
         ),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         child: LayoutBuilder(
           builder: (context, constraints) {
             return Column(
@@ -4103,17 +4096,17 @@ Widget _buildDecentCard(
                 Row(
                   children: [
                     Container(
-                      width: 38,
-                      height: 38,
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
                         color: color.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Icon(_getIcon(type), size: 20, color: color),
+                      child: Icon(_getIcon(type), size: 17, color: color),
                     ),
                     const Spacer(),
                     Container(
-                      padding: const EdgeInsets.all(5),
+                      padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
                         color: Theme.of(context).brightness == Brightness.dark
                             ? Theme.of(
@@ -4124,7 +4117,7 @@ Widget _buildDecentCard(
                       ),
                       child: Icon(
                         Icons.chevron_right_rounded,
-                        size: 17,
+                        size: 15,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
@@ -4136,13 +4129,13 @@ Widget _buildDecentCard(
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
-                    fontSize: 12.2,
-                    height: 1.18,
+                    fontSize: 11.5,
+                    height: 1.15,
                     fontWeight: FontWeight.w600,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
@@ -4152,40 +4145,12 @@ Widget _buildDecentCard(
                     amountText: amountText,
                     maxLines: 1,
                     style: GoogleFonts.poppins(
-                      fontSize: 17,
+                      fontSize: 16,
                       fontWeight: FontWeight.w800,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ),
-                if (trendPercent != null) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        trendPercent >= 0
-                            ? Icons.arrow_upward_rounded
-                            : Icons.arrow_downward_rounded,
-                        size: 13,
-                        color: trendPercent >= 0
-                            ? Colors.green.shade600
-                            : Colors.red.shade600,
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        '${trendPercent.abs().toStringAsFixed(1)}% vs last month',
-                        style: GoogleFonts.poppins(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: trendPercent >= 0
-                              ? Colors.green.shade600
-                              : Colors.red.shade600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
               ],
             );
           },

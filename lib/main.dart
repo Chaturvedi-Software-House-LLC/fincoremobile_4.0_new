@@ -2,10 +2,13 @@ import 'dart:io';
 
 import 'package:FincoreGo/Constants.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SharedPreferencesService.dart';
 import 'SplashScreen.dart';
+import 'l10n/app_localizations.dart';
+import 'locale_controller.dart';
 import 'theme_controller.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -14,6 +17,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SharedPreferencesService.init();
   await themeController.loadThemeMode();
+  await localeController.loadLocale();
 
   runApp(const MyApp());
 }
@@ -147,7 +151,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: themeController,
+      animation: Listenable.merge([themeController, localeController]),
       builder: (context, _) {
         return MaterialApp(
           navigatorKey: navigatorKey,
@@ -162,6 +166,18 @@ class MyApp extends StatelessWidget {
           themeMode: themeController.themeMode,
           theme: _buildLightTheme(),
           darkTheme: _buildDarkTheme(),
+          // Arabic support reverted - English only for now. Locale is
+          // pinned regardless of localeController/device settings so the
+          // app never switches to Arabic (which had bidi/number-formatting
+          // issues still being worked out).
+          locale: const Locale('en'),
+          supportedLocales: const [Locale('en')],
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
           home: SplashScreen(),
         );
       },

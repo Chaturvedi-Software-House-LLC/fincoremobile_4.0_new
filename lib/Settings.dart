@@ -1,4 +1,5 @@
 import 'package:FincoreGo/FastMovingInactiveItemsCriteria.dart';
+import 'package:FincoreGo/l10n/app_localizations.dart';
 import 'package:FincoreGo/widgets/entry_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -164,12 +165,16 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
       if (storedUser == null || storedPass == null) {
         showAppMessage(
           context,
-          'Please log in once with "Remember me" checked before enabling $_biometricLabel login.',
+          AppLocalizations.of(
+            context,
+          ).biometricRememberMeRequired(_biometricLabel),
         );
         return;
       }
       final confirmed = await BiometricAuthService.instance.authenticate(
-        reason: 'Confirm $_biometricLabel to enable it for sign in',
+        reason: AppLocalizations.of(
+          context,
+        ).biometricConfirmToEnable(_biometricLabel),
       );
       if (!confirmed) return;
       await BiometricAuthService.instance.setEnabled(true);
@@ -200,7 +205,12 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
 
   String getCurrencySymbol(String currencyCode) {
     NumberFormat format;
-    Locale locale = Localizations.localeOf(context);
+    // Number/currency formatting is intentionally locale-independent -
+    // amounts must show Western digits and standard symbol placement
+    // regardless of the app's display language (Arabic UI still shows
+    // '1,234.50 AED', not Arabic-Indic digits), matching how real
+    // finance apps in the region behave.
+    Locale locale = const Locale('en');
 
     try {
       if (currencyCode == 'INR' ||
@@ -222,22 +232,39 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     }
   }
 
-  String _decimalLabel() {
+  String _decimalLabel([BuildContext? context]) {
     final value = decimal ?? 2;
+    if (context != null) {
+      return AppLocalizations.of(context).decimalOption(value);
+    }
     return '$value Decimal${value == 1 ? '' : 's'}';
   }
 
-  String _dateRangeLabel() {
+  String _dateRangeLabel([BuildContext? context]) {
     if (dateRangeOption == 'Custom Date' &&
         customStartDate != null &&
         customEndDate != null) {
       final formatter = DateFormat('dd MMM yyyy');
       return '${formatter.format(customStartDate!)} - ${formatter.format(customEndDate!)}';
     }
+    if (context != null) {
+      return _dateRangeOptionLabel(context, dateRangeOption);
+    }
     return dateRangeOption;
   }
 
-  String _themeModeLabel() {
+  String _themeModeLabel([BuildContext? context]) {
+    if (context != null) {
+      final l = AppLocalizations.of(context);
+      switch (themeController.themeMode) {
+        case ThemeMode.light:
+          return l.themeLightMode;
+        case ThemeMode.dark:
+          return l.themeDarkMode;
+        case ThemeMode.system:
+          return l.themeSystemDefault;
+      }
+    }
     switch (themeController.themeMode) {
       case ThemeMode.light:
         return 'Light';
@@ -282,7 +309,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               children: [
                 Flexible(
                   child: Text(
-                    "Settings" ?? '',
+                    AppLocalizations.of(context).settingsTitle,
 
                     style: GoogleFonts.poppins(
                       color: Colors.white,
@@ -306,24 +333,31 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
 
             // ── Appearance (always visible) ──────────────────────────────
             const SizedBox(height: 18),
-            _buildSectionLabel('Appearance'),
+            _buildSectionLabel(
+              AppLocalizations.of(context).settingsSectionAppearance,
+            ),
             _buildSettingsGroup(
               children: [
                 _buildTile(
                   icon: themeController.themeMode == ThemeMode.dark
                       ? Icons.dark_mode_rounded
                       : Icons.light_mode_rounded,
-                  title: 'Theme',
-                  subtitle: 'Choose system, light, or dark mode',
-                  value: _themeModeLabel(),
+                  title: AppLocalizations.of(context).settingsTheme,
+                  subtitle: AppLocalizations.of(context).settingsThemeSubtitle,
+                  value: _themeModeLabel(context),
                   onTap: () => _showThemeDialog(context),
                 ),
+                // Language switcher removed - Arabic support reverted,
+                // English only for now.
               ],
             ),
 
             // ── Security ─────────────────────────────────────────────────
             if (_biometricAvailable) const SizedBox(height: 18),
-            if (_biometricAvailable) _buildSectionLabel('Security'),
+            if (_biometricAvailable)
+              _buildSectionLabel(
+                AppLocalizations.of(context).settingsSectionSecurity,
+              ),
             if (_biometricAvailable)
               _buildSettingsGroup(
                 children: [
@@ -331,9 +365,12 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     icon: _biometricLabel == 'Face ID'
                         ? Icons.face_retouching_natural
                         : Icons.fingerprint,
-                    title: '$_biometricLabel login',
-                    subtitle:
-                        'Sign in using $_biometricLabel instead of your password',
+                    title: AppLocalizations.of(
+                      context,
+                    ).settingsBiometricLogin(_biometricLabel),
+                    subtitle: AppLocalizations.of(
+                      context,
+                    ).settingsBiometricLoginSubtitle(_biometricLabel),
                     value: _biometricEnabled,
                     onChanged: _toggleBiometric,
                   ),
@@ -344,31 +381,39 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
               const SizedBox(height: 18),
             if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
-              _buildSectionLabel('General'),
+              _buildSectionLabel(
+                AppLocalizations.of(context).settingsSectionGeneral,
+              ),
             if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
               _buildSettingsGroup(
                 children: [
                   if (_canCurrency)
                     _buildTile(
                       icon: Icons.attach_money_rounded,
-                      title: 'Currency',
-                      subtitle: 'Select currency for the app',
+                      title: AppLocalizations.of(context).settingsCurrency,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsCurrencySubtitle,
                       value: groupvalue,
                       onTap: () => _showCurrencyDialog(context),
                     ),
                   if (_canAmtDecimals)
                     _buildTile(
                       icon: Icons.numbers_rounded,
-                      title: 'Amount in Decimals',
-                      subtitle: 'Customize number of decimal points',
-                      value: _decimalLabel(),
+                      title: AppLocalizations.of(context).settingsDecimals,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsDecimalsSubtitle,
+                      value: _decimalLabel(context),
                       onTap: () => _showDecimalDialog(context),
                     ),
                   if (_canVatPerc)
                     _buildTile(
                       icon: Icons.percent_rounded,
-                      title: 'VAT Percentage',
-                      subtitle: 'Set VAT percentage for the app',
+                      title: AppLocalizations.of(context).settingsVat,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsVatSubtitle,
                       value: '${vatController.text}%',
                       onTap: () => _showVatInputDialog(context),
                     ),
@@ -387,7 +432,9 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               _canSortType,
               _canDefDateRange,
             ].any((v) => v))
-              _buildSectionLabel('Defaults'),
+              _buildSectionLabel(
+                AppLocalizations.of(context).settingsSectionDefaults,
+              ),
             if ([
               _canInactivePDays,
               _canSortType,
@@ -398,25 +445,35 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                   if (_canInactivePDays)
                     _buildTile(
                       icon: Icons.calendar_today_outlined,
-                      title: 'Inactive Parties Days',
-                      subtitle: 'Set no. of inactive party days',
+                      title: AppLocalizations.of(
+                        context,
+                      ).settingsInactiveDays,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsInactiveDaysSubtitle,
                       value: '${inactivedaysController.text} days',
                       onTap: () => _showInactivedaysInputDialog(context),
                     ),
                   if (_canSortType)
                     _buildTile(
                       icon: Icons.sort_rounded,
-                      title: 'Sort Type',
-                      subtitle: 'Default sorting selection for the app',
-                      value: sort,
+                      title: AppLocalizations.of(context).settingsSortType,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsSortTypeSubtitle,
+                      value: _sortOptionLabel(context, sort),
                       onTap: () => _showSortDialog(context),
                     ),
                   if (_canDefDateRange)
                     _buildTile(
                       icon: Icons.date_range_rounded,
-                      title: 'Default Date Range',
-                      subtitle: 'Select default report period',
-                      value: _dateRangeLabel(),
+                      title: AppLocalizations.of(
+                        context,
+                      ).settingsDefaultDateRange,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsDefaultDateRangeSubtitle,
+                      value: _dateRangeLabel(context),
                       onTap: () => _showDateRangeDialog(context),
                     ),
                 ],
@@ -426,15 +483,21 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             if ([_canAgeingConfig, _canFastSlowInactiveItem].any((v) => v))
               const SizedBox(height: 18),
             if ([_canAgeingConfig, _canFastSlowInactiveItem].any((v) => v))
-              _buildSectionLabel('Configurations'),
+              _buildSectionLabel(
+                AppLocalizations.of(context).settingsSectionConfigurations,
+              ),
             if ([_canAgeingConfig, _canFastSlowInactiveItem].any((v) => v))
               _buildSettingsGroup(
                 children: [
                   if (_canAgeingConfig)
                     _buildTile(
                       icon: Icons.access_time_rounded,
-                      title: 'Ageing Configuration',
-                      subtitle: 'Customize ageing range',
+                      title: AppLocalizations.of(
+                        context,
+                      ).settingsAgeingConfig,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsAgeingConfigSubtitle,
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => AgeingConfig()),
@@ -443,8 +506,12 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                   if (_canFastSlowInactiveItem)
                     _buildTile(
                       icon: Icons.stacked_bar_chart_rounded,
-                      title: 'Fast/Slow/Inactive Items',
-                      subtitle: 'Customize Fast/Slow/Inactive Items Criteria',
+                      title: AppLocalizations.of(
+                        context,
+                      ).settingsItemCriteria,
+                      subtitle: AppLocalizations.of(
+                        context,
+                      ).settingsItemCriteriaSubtitle,
                       onTap: () {
                         Navigator.push(
                           context,
@@ -501,7 +568,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'App Preferences',
+                  AppLocalizations.of(context).settingsHeaderTitle,
                   style: GoogleFonts.poppins(
                     color: Colors.white,
                     fontSize: 17,
@@ -510,7 +577,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Manage defaults for reports, values, and item criteria.',
+                  AppLocalizations.of(context).settingsHeaderSubtitle,
                   style: GoogleFonts.poppins(
                     color: Colors.white.withOpacity(0.82),
                     fontSize: 12.5,
@@ -868,26 +935,28 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               children: [
                 _dialogHeader(
                   icon: Icons.contrast_rounded,
-                  title: 'Theme',
-                  subtitle: 'Current theme: ${_themeModeLabel()}',
+                  title: AppLocalizations.of(context).settingsTheme,
+                  subtitle: AppLocalizations.of(
+                    context,
+                  ).dialogCurrentTheme(_themeModeLabel(context)),
                 ),
                 const SizedBox(height: 12),
                 _optionTile<ThemeMode>(
                   value: ThemeMode.system,
                   groupValue: themeController.themeMode,
-                  title: 'System default',
+                  title: AppLocalizations.of(context).themeSystemDefault,
                   onChanged: (value) => _selectThemeMode(context, value),
                 ),
                 _optionTile<ThemeMode>(
                   value: ThemeMode.light,
                   groupValue: themeController.themeMode,
-                  title: 'Light mode',
+                  title: AppLocalizations.of(context).themeLightMode,
                   onChanged: (value) => _selectThemeMode(context, value),
                 ),
                 _optionTile<ThemeMode>(
                   value: ThemeMode.dark,
                   groupValue: themeController.themeMode,
-                  title: 'Dark mode',
+                  title: AppLocalizations.of(context).themeDarkMode,
                   onChanged: (value) => _selectThemeMode(context, value),
                 ),
               ],
@@ -927,8 +996,10 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               children: [
                 _dialogHeader(
                   icon: Icons.percent_rounded,
-                  title: 'VAT Percentage',
-                  subtitle: 'Current value: ${vatController.text}%',
+                  title: AppLocalizations.of(context).settingsVat,
+                  subtitle: AppLocalizations.of(
+                    context,
+                  ).dialogCurrentValuePercent(vatController.text),
                 ),
                 const SizedBox(height: 18),
                 Form(
@@ -939,13 +1010,13 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     keyboardType: TextInputType.number,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Please enter VAT (%)';
+                        return AppLocalizations.of(context).vatValidation;
                       }
                       return null;
                     },
                     decoration: _inputDecoration(
-                      label: 'VAT (%)',
-                      hint: 'Enter VAT (%)',
+                      label: AppLocalizations.of(context).vatFieldLabel,
+                      hint: AppLocalizations.of(context).vatFieldHint,
                       icon: Icons.edit_note_outlined,
                     ),
                   ),
@@ -965,7 +1036,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     ),
                     icon: const Icon(Icons.save_alt_outlined),
                     label: Text(
-                      'Save',
+                      AppLocalizations.of(context).commonSave,
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
                     ),
                     onPressed: () {
@@ -1010,9 +1081,10 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               children: [
                 _dialogHeader(
                   icon: Icons.calendar_today_rounded,
-                  title: 'Inactive Parties Days',
-                  subtitle:
-                      'Current value: ${inactivedaysController.text} days',
+                  title: AppLocalizations.of(context).settingsInactiveDays,
+                  subtitle: AppLocalizations.of(
+                    context,
+                  ).dialogCurrentValueDays(inactivedaysController.text),
                 ),
                 const SizedBox(height: 18),
                 Form(
@@ -1023,13 +1095,17 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     keyboardType: TextInputType.number,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Please enter day(s)';
+                        return AppLocalizations.of(
+                          context,
+                        ).inactiveDaysValidation;
                       }
                       return null;
                     },
                     decoration: _inputDecoration(
-                      label: 'Day(s)',
-                      hint: 'Enter number of day(s)',
+                      label: AppLocalizations.of(
+                        context,
+                      ).inactiveDaysFieldLabel,
+                      hint: AppLocalizations.of(context).inactiveDaysFieldHint,
                       icon: Icons.timer_outlined,
                     ),
                   ),
@@ -1049,7 +1125,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     ),
                     icon: const Icon(Icons.save_alt_outlined),
                     label: Text(
-                      'Save',
+                      AppLocalizations.of(context).commonSave,
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
                     ),
                     onPressed: () {
@@ -1078,6 +1154,50 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     );
   }
 
+  String _dateRangeOptionLabel(BuildContext context, String option) {
+    final l = AppLocalizations.of(context);
+    switch (option) {
+      case 'Today':
+        return l.dateRangeToday;
+      case 'Yesterday':
+        return l.dateRangeYesterday;
+      case 'This Month':
+        return l.dateRangeThisMonth;
+      case 'Last Month':
+        return l.dateRangeLastMonth;
+      case 'This Year':
+        return l.dateRangeThisYear;
+      case 'Last Year':
+        return l.dateRangeLastYear;
+      case 'Year To Date':
+        return l.dateRangeYearToDate;
+      default:
+        return option;
+    }
+  }
+
+  String _sortOptionLabel(BuildContext context, String option) {
+    final l = AppLocalizations.of(context);
+    switch (option) {
+      case 'Default':
+        return l.sortDefault;
+      case 'Newest to Oldest':
+        return l.sortNewestToOldest;
+      case 'Oldest to Newest':
+        return l.sortOldestToNewest;
+      case 'A->Z':
+        return l.sortAToZ;
+      case 'Z->A':
+        return l.sortZToA;
+      case 'Amount High to Low':
+        return l.sortAmountHighToLow;
+      case 'Amount Low to High':
+        return l.sortAmountLowToHigh;
+      default:
+        return option;
+    }
+  }
+
   void _showDateRangeDialog(BuildContext context) {
     final options = [
       'Today',
@@ -1104,8 +1224,10 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             children: [
               _dialogHeader(
                 icon: Icons.date_range_rounded,
-                title: 'Select Date Range',
-                subtitle: 'Selected: $dateRangeOption',
+                title: AppLocalizations.of(context).dateRangeDialogTitle,
+                subtitle: AppLocalizations.of(context).dialogSelected(
+                  _dateRangeOptionLabel(context, dateRangeOption),
+                ),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1115,7 +1237,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     return _optionTile<String>(
                       value: option,
                       groupValue: dateRangeOption,
-                      title: option,
+                      title: _dateRangeOptionLabel(context, option),
                       onChanged: (val) async {
                         Navigator.pop(context);
 
@@ -1202,8 +1324,8 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             children: [
               _dialogHeader(
                 icon: Icons.attach_money_rounded,
-                title: 'Currency',
-                subtitle: 'Selected: $groupvalue',
+                title: AppLocalizations.of(context).settingsCurrency,
+                subtitle: AppLocalizations.of(context).dialogSelected(groupvalue),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1214,62 +1336,66 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                   child: ListView(
                     padding: const EdgeInsets.only(bottom: 8),
                     children: [
-                      _buildCurrencyOption(context, 'USD', 'USD (\$)'),
+                      _buildCurrencyOption(
+                        context,
+                        'USD',
+                        '${AppLocalizations.of(context).currencyUSD} (\$)',
+                      ),
                       _buildCurrencyOption(
                         context,
                         'AED',
-                        'UAE Dirhams (${getCurrencySymbol('AED')})',
-                        namePrefix: 'UAE Dirhams',
+                        '${AppLocalizations.of(context).currencyAED} (${getCurrencySymbol('AED')})',
+                        namePrefix: AppLocalizations.of(context).currencyAED,
                       ),
                       _buildCurrencyOption(
                         context,
                         'INR',
-                        'Indian Rupees (${getCurrencySymbol('INR')})',
+                        '${AppLocalizations.of(context).currencyINR} (${getCurrencySymbol('INR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'PKR',
-                        'Pakistani Rupees (${getCurrencySymbol('PKR')})',
+                        '${AppLocalizations.of(context).currencyPKR} (${getCurrencySymbol('PKR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'EUR',
-                        'Euro (${getCurrencySymbol('EUR')})',
+                        '${AppLocalizations.of(context).currencyEUR} (${getCurrencySymbol('EUR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'LKR',
-                        'SriLankan Rupees (${getCurrencySymbol('LKR')})',
+                        '${AppLocalizations.of(context).currencyLKR} (${getCurrencySymbol('LKR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'SAR',
-                        'Saudi Riyal (${getCurrencySymbol('SAR')})',
+                        '${AppLocalizations.of(context).currencySAR} (${getCurrencySymbol('SAR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'OMR',
-                        'Omani Riyal (${getCurrencySymbol('OMR')})',
+                        '${AppLocalizations.of(context).currencyOMR} (${getCurrencySymbol('OMR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'BHD',
-                        'Bahraini Dinar (${getCurrencySymbol('BHD')})',
+                        '${AppLocalizations.of(context).currencyBHD} (${getCurrencySymbol('BHD')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'QAR',
-                        'Qatari Riyal (${getCurrencySymbol('QAR')})',
+                        '${AppLocalizations.of(context).currencyQAR} (${getCurrencySymbol('QAR')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'KWD',
-                        'Kuwaiti Dinar (${getCurrencySymbol('KWD')})',
+                        '${AppLocalizations.of(context).currencyKWD} (${getCurrencySymbol('KWD')})',
                       ),
                       _buildCurrencyOption(
                         context,
                         'SLE',
-                        'Sierra Leonean Leone (${getCurrencySymbol('SLE')})',
+                        '${AppLocalizations.of(context).currencySLE} (${getCurrencySymbol('SLE')})',
                       ),
                     ],
                   ),
@@ -1346,8 +1472,10 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             children: [
               _dialogHeader(
                 icon: Icons.numbers_rounded,
-                title: 'Amount in Decimals',
-                subtitle: 'Selected: ${_decimalLabel()}',
+                title: AppLocalizations.of(context).settingsDecimals,
+                subtitle: AppLocalizations.of(
+                  context,
+                ).dialogSelected(_decimalLabel(context)),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1358,7 +1486,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     return _optionTile<int>(
                       value: value,
                       groupValue: decimal,
-                      title: '$value Decimal${value > 1 ? 's' : ''}',
+                      title: AppLocalizations.of(context).decimalOption(value),
                       onChanged: (val) {
                         setState(() {
                           decimal = val!;
@@ -1403,8 +1531,10 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             children: [
               _dialogHeader(
                 icon: Icons.sort_rounded,
-                title: 'Sort Options',
-                subtitle: 'Selected: $sort',
+                title: AppLocalizations.of(context).sortDialogTitle,
+                subtitle: AppLocalizations.of(
+                  context,
+                ).dialogSelected(_sortOptionLabel(context, sort)),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1414,7 +1544,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     return _optionTile<String>(
                       value: s,
                       groupValue: sort,
-                      title: s,
+                      title: _sortOptionLabel(context, s),
                       onChanged: (val) {
                         setState(() {
                           sort = val!;
