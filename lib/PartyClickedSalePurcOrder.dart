@@ -568,7 +568,7 @@ class _PartyClickedSalePurcOrderPageState
       if (response.statusCode == 200) {
         print('response -> ${response.body}');
 
-        final parsed = jsonDecode(response.body).cast<Map<String, dynamic>>();
+        final parsed = jsonDecode(utf8.decode(response.bodyBytes)).cast<Map<String, dynamic>>();
 
         final List<Data_Top> values_list = parsed
             .map<Data_Top>((json) => Data_Top.fromJson(json))
@@ -643,7 +643,7 @@ class _PartyClickedSalePurcOrderPageState
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
         if (values_list != null) {
           isVisibleNoDataFound = false;
 

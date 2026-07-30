@@ -166,7 +166,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       if (!mounted) return;
 
       if (data == true) {
-        final responseData = json.decode(response.body);
+        final responseData = json.decode(utf8.decode(response.bodyBytes));
 
         if (responseData is List && responseData.isNotEmpty) {
           final userName = responseData[0]['name']?.toString() ?? '';
@@ -1440,7 +1440,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 </div>''';
 
     try {
-      await send(message, smtpServer);
+      // await send(message, smtpServer);
 
       /*showAppMessage(context, 'Message sent', isError: false);*/
 

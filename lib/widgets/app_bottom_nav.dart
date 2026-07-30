@@ -13,6 +13,7 @@ import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:FincoreGo/PendingSalesOrderEntry.dart';
 import 'package:FincoreGo/RolesView.dart';
 import 'package:FincoreGo/SerialSelect.dart';
+import 'package:FincoreGo/widgets/company_switcher.dart';
 import 'package:FincoreGo/Settings.dart';
 import 'package:FincoreGo/Transactions.dart';
 import 'package:FincoreGo/UserView.dart';
@@ -591,7 +592,12 @@ class _AppBottomNavState extends State<AppBottomNav> {
           runSpacing: 8,
           children: [
             _profileChip(Icons.confirmation_number_outlined, serialNo),
-            _profileChip(Icons.business_outlined, companyName),
+            _profileChip(
+              Icons.business_outlined,
+              companyName,
+              onTap: () => showQuickCompanySwitcher(context),
+              trailingIcon: Icons.swap_horiz_rounded,
+            ),
             if (vanSalesSerialNo.contains(serialNo.trim()) &&
                 assignedGodown.isNotEmpty)
               _profileChip(Icons.local_shipping_outlined, assignedGodown),
@@ -605,10 +611,15 @@ class _AppBottomNavState extends State<AppBottomNav> {
     );
   }
 
-  Widget _profileChip(IconData icon, String text) {
+  Widget _profileChip(
+    IconData icon,
+    String text, {
+    VoidCallback? onTap,
+    IconData? trailingIcon,
+  }) {
     if (text.trim().isEmpty) return const SizedBox.shrink();
 
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: app_color.withOpacity(0.07),
@@ -633,8 +644,19 @@ class _AppBottomNavState extends State<AppBottomNav> {
               ),
             ),
           ),
+          if (trailingIcon != null) ...[
+            const SizedBox(width: 5),
+            Icon(trailingIcon, size: 14, color: app_color),
+          ],
         ],
       ),
+    );
+
+    if (onTap == null) return chip;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: chip,
     );
   }
 

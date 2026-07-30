@@ -288,7 +288,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
         });
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -355,7 +355,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
       filteredSalesEntries.clear();
 
       try {
-        final List<dynamic> jsonList = json.decode(response.body);
+        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
 
         isVisibleNoSalesEntryFound = false;
 
@@ -399,7 +399,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
       String error = 'Server Error!!!';
 
       try {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
 
         if (data.containsKey('error')) {
           error = data['error'];
@@ -441,7 +441,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
       print(response.body);
       try
       {
-        final List<dynamic> jsonList = json.decode(response.body) ;
+        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes)) ;
 
         isVisibleNoSalesEntryFound = false;
         salesentries.addAll(jsonList.map((json) => SalesModel.fromJson(json)).toList());
@@ -475,7 +475,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
     }
     else
     {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {

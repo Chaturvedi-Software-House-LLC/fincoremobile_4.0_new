@@ -9,6 +9,7 @@ import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class ModifyUser extends StatefulWidget {
   final String user_name, email_address, rolename;
@@ -238,7 +239,7 @@ class _ModifyUserPageState extends State<ModifyUser>
         MaterialPageRoute(builder: (context) => UserView()),
       );
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -274,7 +275,7 @@ class _ModifyUserPageState extends State<ModifyUser>
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final List<dynamic> responseData = jsonDecode(response.body);
+      final List<dynamic> responseData = jsonDecode(utf8.decode(response.bodyBytes));
       if (responseData != null) {
         setState(() {
           myDataCompanies = responseData.map<String>((item) {
@@ -287,7 +288,7 @@ class _ModifyUserPageState extends State<ModifyUser>
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -324,7 +325,7 @@ class _ModifyUserPageState extends State<ModifyUser>
 
     if (response.statusCode == 200) {
       print(response.body);
-      final company_data = jsonDecode(response.body);
+      final company_data = jsonDecode(utf8.decode(response.bodyBytes));
       if (company_data != null) {
         final List<String> allowedCompanies = company_data.map<String>((item) {
           return item['company_name'] as String;
@@ -357,7 +358,7 @@ class _ModifyUserPageState extends State<ModifyUser>
         _isLoading = false;
       });*/
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -570,7 +571,7 @@ class _ModifyUserPageState extends State<ModifyUser>
           modifyAllowedCompanies(email, serial_no!, _selectedCompanies);
         }
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -612,7 +613,7 @@ class _ModifyUserPageState extends State<ModifyUser>
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        myData_roles = jsonDecode(response.body);
+        myData_roles = jsonDecode(utf8.decode(response.bodyBytes));
         if (myData_roles != null) {
           setState(() {
             dropdownRoles = myData_roles.map((role) {
@@ -655,7 +656,7 @@ class _ModifyUserPageState extends State<ModifyUser>
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        List<dynamic> parsedResponse = jsonDecode(response.body);
+        List<dynamic> parsedResponse = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (!isEmail(controller_email.text)) {
           String userPassword = parsedResponse[0]['user_password'] ?? '';
@@ -868,36 +869,22 @@ class _ModifyUserPageState extends State<ModifyUser>
                               ),
                             ),
                             const SizedBox(height: 8),
-                            DropdownButtonFormField<dynamic>(
-                              value: _selectedrole,
-                              dropdownColor: Theme.of(
-                                context,
-                              ).colorScheme.surface,
-                              borderRadius: _formFieldBorderRadius,
-
-                              isExpanded: true,
-                              style: GoogleFonts.poppins(
-                                fontSize: 15,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-
-                              decoration: _modernDropdownDecoration(),
-                              items: dropdownRoles,
-
+                            SearchableSelectorField<String>(
+                              value: (_selectedrole == null ||
+                                      _selectedrole.toString().isEmpty)
+                                  ? null
+                                  : _selectedrole.toString(),
+                              items: myData_roles
+                                  .map<String>(
+                                    (role) =>
+                                        (role['role_name'] ?? '').toString(),
+                                  )
+                                  .where((name) => name.isNotEmpty)
+                                  .toList(),
+                              itemLabel: (name) => name,
+                              hintText: 'Choose a role',
                               onChanged: (value) =>
                                   setState(() => _selectedrole = value),
-                              onTap: () => _updateFocus(),
-                              hint: Text(
-                                'Choose a role',
-                                style: GoogleFonts.poppins(
-                                  // 👈 Apply Poppins style to menu items
-                                  fontSize: 15,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
                             ),
 
                             const SizedBox(height: 20),

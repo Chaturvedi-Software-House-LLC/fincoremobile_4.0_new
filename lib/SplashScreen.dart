@@ -548,7 +548,7 @@ class AppUpdateService {
       final response = await http.get(url);
 
       if (response.statusCode == 200) {
-        final jsonData = json.decode(response.body);
+        final jsonData = json.decode(utf8.decode(response.bodyBytes));
 
         if (jsonData["resultCount"] > 0) {
           final storeVersion = jsonData["results"][0]["version"];

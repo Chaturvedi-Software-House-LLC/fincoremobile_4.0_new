@@ -36,7 +36,22 @@ class SerialSelect extends StatefulWidget {
   /// When true the screen skips rendering the selection UI and navigates
   /// straight to Dashboard as soon as the auto 1-serial-1-company check passes.
   final bool autoNavigate;
-  const SerialSelect({Key? key, this.autoNavigate = false}) : super(key: key);
+
+  /// Quick-switch entry point: when set, as soon as the company list for the
+  /// current/default serial has loaded, the matching company (by name, case
+  /// -insensitive) is selected automatically via the exact same
+  /// `_continueWithCompanyDirect` flow a manual tap would use - same
+  /// license/permission/role checks, just without requiring the user to
+  /// find and tap the company in the list themselves. If no match is found
+  /// (e.g. the cached quick-switch list is stale), the normal selection UI
+  /// is shown instead.
+  final String? autoSelectCompanyName;
+
+  const SerialSelect({
+    Key? key,
+    this.autoNavigate = false,
+    this.autoSelectCompanyName,
+  }) : super(key: key);
 
   @override
   _MyHomePageState createState() => _MyHomePageState();
@@ -86,6 +101,45 @@ class _MyHomePageState extends State<SerialSelect>
       DeliveryNoteEntryHolder;
   List<dynamic> myData = [];
   List<dynamic> myData_company = [];
+  bool _autoSelectHandled = false;
+
+  /// Caches the just-loaded company list (names only) so the quick-switch
+  /// bottom sheet (widgets/company_switcher.dart) can show it instantly
+  /// without its own network round-trip.
+  Future<void> _cacheQuickSwitchCompanies() async {
+    if (myData_company.isEmpty) return;
+    final names = myData_company
+        .map((c) => (c['company_name'] ?? '').toString())
+        .where((n) => n.isNotEmpty)
+        .toList();
+    (await SharedPreferences.getInstance()).setString(
+      'quick_switch_companies',
+      jsonEncode(names),
+    );
+  }
+
+  /// Runs the quick-switch handoff: if the caller asked to jump straight to
+  /// a specific company (widget.autoSelectCompanyName) and it's present in
+  /// the just-loaded list, select it via the same flow a manual tap uses.
+  /// Returns true if it handled the switch (caller should not also run its
+  /// own auto-navigate/UI-reveal logic for this load).
+  Future<bool> _maybeAutoSelectCompany() async {
+    if (_autoSelectHandled) return true;
+    final target = widget.autoSelectCompanyName;
+    if (target == null || myData_company.isEmpty) return false;
+
+    final match = myData_company.firstWhere(
+      (c) =>
+          (c['company_name'] ?? '').toString().trim().toLowerCase() ==
+          target.trim().toLowerCase(),
+      orElse: () => null,
+    );
+    if (match == null) return false;
+
+    _autoSelectHandled = true;
+    await _continueWithCompanyDirect(match);
+    return true;
+  }
   List<dynamic> myData_admin = [];
   List<dynamic> myData_role = [];
 
@@ -98,6 +152,13 @@ class _MyHomePageState extends State<SerialSelect>
 
   bool _showAllSerials = false;
   bool _showAllCompanies = false;
+
+  final TextEditingController _serialSearchController =
+      TextEditingController();
+  final TextEditingController _companySearchController =
+      TextEditingController();
+  String _serialSearchQuery = '';
+  String _companySearchQuery = '';
 
   late IO.Socket socket;
   String? username_prefs = '', password_prefs = '';
@@ -747,7 +808,7 @@ class _MyHomePageState extends State<SerialSelect>
 
         if (response.statusCode == 200)
         {
-          Map<String, dynamic> jsonMap = jsonDecode(response.body);
+          Map<String, dynamic> jsonMap = jsonDecode(utf8.decode(response.bodyBytes));
 
           // Extract the "lastSync" value
           String lastSyncString = jsonMap['lastSync'];
@@ -826,7 +887,7 @@ class _MyHomePageState extends State<SerialSelect>
       final response = await http.get(url, headers: headers);
 
       if (response.statusCode == 200) {
-        Map<String, dynamic> jsonMap = jsonDecode(response.body);
+        Map<String, dynamic> jsonMap = jsonDecode(utf8.decode(response.bodyBytes));
 
         debugPrint('company sync -> $jsonMap');
         // Extract the "lastSync" and "trn" values
@@ -1190,6 +1251,14 @@ class _MyHomePageState extends State<SerialSelect>
   }
 
   @override
+  @override
+  void dispose() {
+    _serialSearchController.dispose();
+    _companySearchController.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -1445,11 +1514,92 @@ class _MyHomePageState extends State<SerialSelect>
     );
   }
 
+  Widget _buildSearchField({
+    required TextEditingController controller,
+    required String hintText,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: controller,
+        style: GoogleFonts.poppins(fontSize: 13.5),
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: hintText,
+          hintStyle: GoogleFonts.poppins(fontSize: 13),
+          prefixIcon: Icon(
+            Icons.search,
+            size: 18,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          filled: true,
+          fillColor: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.06)
+              : Colors.grey.shade100,
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 10,
+            horizontal: 12,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide(
+              color: app_color.withOpacity(0.6),
+              width: 1.4,
+            ),
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSerialList() {
-    final visibleSerials = _showAllSerials ? myData : myData.take(3).toList();
+    final searchedSerials = _serialSearchQuery.isEmpty
+        ? myData
+        : myData.where((item) {
+            final serialText = (item['serial_no']?.toString() ?? '')
+                .toLowerCase();
+            return serialText.contains(_serialSearchQuery);
+          }).toList();
+
+    final visibleSerials = _showAllSerials
+        ? searchedSerials
+        : searchedSerials.take(3).toList();
 
     return Column(
       children: [
+        if (myData.length > 6)
+          _buildSearchField(
+            controller: _serialSearchController,
+            hintText: 'Search serial numbers...',
+            onChanged: (value) {
+              setState(() {
+                _serialSearchQuery = value.trim().toLowerCase();
+              });
+            },
+          ),
+
+        if (searchedSerials.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'No matching serial numbers',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+
         ...visibleSerials.map((item) {
           final bool isSelected = item == _selectedserial;
           final serialText = item['serial_no']?.toString() ?? '';
@@ -1531,7 +1681,7 @@ class _MyHomePageState extends State<SerialSelect>
           );
         }).toList(),
 
-        if (myData.length > 3)
+        if (searchedSerials.length > 3)
           _buildViewMoreButton(
             expanded: _showAllSerials,
             onTap: () {
@@ -1545,12 +1695,43 @@ class _MyHomePageState extends State<SerialSelect>
   }
 
   Widget _buildCompanyList() {
-    final visibleCompanies = _showAllCompanies
+    final searchedCompanies = _companySearchQuery.isEmpty
         ? myData_company
-        : myData_company.take(3).toList();
+        : myData_company.where((item) {
+            final companyName = (item['company_name']?.toString() ?? '')
+                .toLowerCase();
+            return companyName.contains(_companySearchQuery);
+          }).toList();
+
+    final visibleCompanies = _showAllCompanies
+        ? searchedCompanies
+        : searchedCompanies.take(3).toList();
 
     return Column(
       children: [
+        if (myData_company.length > 6)
+          _buildSearchField(
+            controller: _companySearchController,
+            hintText: 'Search companies...',
+            onChanged: (value) {
+              setState(() {
+                _companySearchQuery = value.trim().toLowerCase();
+              });
+            },
+          ),
+
+        if (searchedCompanies.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'No matching companies',
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+
         ...visibleCompanies.map((item) {
           final companyName = item['company_name']?.toString() ?? '';
           final firstLetters = companyName.length >= 2
@@ -1685,7 +1866,7 @@ class _MyHomePageState extends State<SerialSelect>
           );
         }).toList(),
 
-        if (myData_company.length > 3)
+        if (searchedCompanies.length > 3)
           _buildViewMoreButton(
             expanded: _showAllCompanies,
             onTap: () {
@@ -1904,7 +2085,7 @@ class _MyHomePageState extends State<SerialSelect>
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final role_data = jsonDecode(response.body);
+      final role_data = jsonDecode(utf8.decode(response.bodyBytes));
       if (role_data != null) {
         if (mounted) {
           setState(() {
@@ -2069,7 +2250,7 @@ class _MyHomePageState extends State<SerialSelect>
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -2104,7 +2285,7 @@ class _MyHomePageState extends State<SerialSelect>
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final admin_data = jsonDecode(response.body);
+      final admin_data = jsonDecode(utf8.decode(response.bodyBytes));
       if (admin_data != null) {
         myData_admin = admin_data;
         _selectedadmin = myData_admin;
@@ -2189,7 +2370,7 @@ class _MyHomePageState extends State<SerialSelect>
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -2228,7 +2409,7 @@ class _MyHomePageState extends State<SerialSelect>
 
     myData_company.clear();
     if (response.statusCode == 200) {
-      final company_data = jsonDecode(response.body);
+      final company_data = jsonDecode(utf8.decode(response.bodyBytes));
 
       debugPrint('company_data -> $company_data');
       if (company_data != null) {
@@ -2239,6 +2420,10 @@ class _MyHomePageState extends State<SerialSelect>
           _selectcompany = myData_company.first;
         });
         // await loadCompanySyncInfo();
+        // ignore: unawaited_futures
+        _cacheQuickSwitchCompanies();
+
+        if (await _maybeAutoSelectCompany()) return;
 
         // ✅ Auto-navigate when single serial + single company
         if (myData.length == 1 && myData_company.length == 1) {
@@ -2350,7 +2535,7 @@ class _MyHomePageState extends State<SerialSelect>
 
       setState(() => _isLoading = false);
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = data['error'] ?? 'Something went wrong!!!';
       showAppMessage(context, error);
     }
@@ -2376,7 +2561,7 @@ class _MyHomePageState extends State<SerialSelect>
     final response = await http.get(url, headers: headers);
 
     if (response.statusCode == 200) {
-      final company_data = jsonDecode(response.body);
+      final company_data = jsonDecode(utf8.decode(response.bodyBytes));
 
       if (company_data != null) {
         myData_company = company_data;
@@ -2390,6 +2575,10 @@ class _MyHomePageState extends State<SerialSelect>
           });
 
           // await loadCompanySyncInfo();
+          // ignore: unawaited_futures
+          _cacheQuickSwitchCompanies();
+
+          if (await _maybeAutoSelectCompany()) return;
 
           // ✅ Auto-prompt to Dashboard if only one serial + one company
           if (myData.length == 1 && myData_company.length == 1) {
@@ -2497,7 +2686,7 @@ class _MyHomePageState extends State<SerialSelect>
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = data['error'] ?? 'Something went wrong!!!';
       showAppMessage(context, error);
     }

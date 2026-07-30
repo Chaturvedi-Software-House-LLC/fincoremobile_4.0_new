@@ -1135,7 +1135,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       print(' response time -> $apiResponseTime');
       print(' dash response -> ${response.body}');
 
-      final dash_data = jsonDecode(response.body);
+      final dash_data = jsonDecode(utf8.decode(response.bodyBytes));
 
       try {
         if (response.statusCode == 200) {
@@ -1177,7 +1177,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             throw Exception('Failed to fetch data');
           }
         } else {
-          Map<String, dynamic> data = json.decode(response.body);
+          Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
           String error = '';
 
           if (data.containsKey('error')) {
@@ -1950,7 +1950,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final user_data = jsonDecode(response.body);
+      final user_data = jsonDecode(utf8.decode(response.bodyBytes));
 
       if (user_data != null) {
         List<dynamic> myArray = user_data;
@@ -1976,7 +1976,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {

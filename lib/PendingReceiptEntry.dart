@@ -284,7 +284,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -351,7 +351,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       /*print(response.body);*/
 
       try {
-        final List<dynamic> jsonList = json.decode(response.body);
+        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
 
         if (jsonList != null) {
           isVisibleNoReceiptEntryFound = false;
@@ -390,7 +390,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
         print(e);
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {

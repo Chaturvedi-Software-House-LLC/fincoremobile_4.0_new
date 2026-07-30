@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class ModifyVanAllocationScreen extends StatefulWidget {
   final Map<String, dynamic> allocation;
@@ -324,7 +325,7 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
       debugPrint("MODIFY DROPDOWN RESPONSE: ${response.body}");
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
 
         final allocationsUrl =
             Uri.parse('$BASE_URL_config/api/spectra/Allocations').replace(
@@ -707,13 +708,14 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
 
                     const SizedBox(height: 16),
 
-                    _searchableDropdownField(
-                      title: 'Sales Ledger',
+                    SearchableSelectorField<String>(
                       value: selectedSalesLedger,
                       items: salesLedgers,
+                      itemLabel: (v) => v,
+                      label: 'Sales Ledger',
                       icon: Icons.account_balance_wallet_outlined,
-                      hint: 'Search and select sales ledger',
-                      onSelected: (val) {
+                      hintText: 'Search and select sales ledger',
+                      onChanged: (val) {
                         setState(() {
                           selectedSalesLedger = val;
                         });
@@ -722,13 +724,14 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
 
                     const SizedBox(height: 16),
 
-                    _searchableDropdownField(
-                      title: 'Cash Ledger',
+                    SearchableSelectorField<String>(
                       value: selectedCashLedger,
                       items: cashLedgers,
+                      itemLabel: (v) => v,
+                      label: 'Cash Ledger',
                       icon: Icons.payments_outlined,
-                      hint: 'Search and select cash ledger',
-                      onSelected: (val) {
+                      hintText: 'Search and select cash ledger',
+                      onChanged: (val) {
                         setState(() {
                           selectedCashLedger = val;
                         });

@@ -269,7 +269,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> raw = jsonDecode(response.body);
+        final List<dynamic> raw = jsonDecode(utf8.decode(response.bodyBytes));
         if (raw.isNotEmpty) {
           isVisibleNoDataFound = false;
           switch (group) {

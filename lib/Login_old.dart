@@ -153,7 +153,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
       socket.once('isIdSaved', (data) async {
         if (data) {
-          final responseData = json.decode(response.body);
+          final responseData = json.decode(utf8.decode(response.bodyBytes));
 
           if (responseData is List && responseData.isNotEmpty) {
             final userName = responseData[0]['name']?.toString() ?? '';

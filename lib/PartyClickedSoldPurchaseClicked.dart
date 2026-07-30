@@ -746,7 +746,7 @@ class _PartyClickedSoldPurchaseClickedPageState
 
       if (response.statusCode == 200) {
         print(type);
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
         if (values_list != null) {
           isVisibleNoDataFound = false;
 

@@ -268,7 +268,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
         fetchUsers(serial_no!);
       });
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -371,7 +371,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
     if (response.statusCode == 200) {
       users.clear();
       try {
-        final List<dynamic> jsonList = json.decode(response.body);
+        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
 
         isVisibleNoUserFound = false;
 

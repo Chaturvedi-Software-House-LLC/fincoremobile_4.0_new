@@ -271,7 +271,7 @@ class _RolesViewPageState extends State<RolesView>
         throw Exception('Failed to fetch data');
       }
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -375,7 +375,7 @@ class _RolesViewPageState extends State<RolesView>
       roles.clear();
 
       try {
-        final List<dynamic> jsonList = json.decode(response.body);
+        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
 
         if (jsonList != null) {
           isVisibleNoRoleFound = false;

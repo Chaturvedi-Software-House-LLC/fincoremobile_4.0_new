@@ -18,6 +18,7 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
+import 'widgets/searchable_selector.dart';
 import 'widgets/entry_widgets.dart';
 
 class items {
@@ -1252,7 +1253,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       if (response.statusCode == 200) {
         spinner_list.add(allitems);
 
-        List<dynamic> data = jsonDecode(response.body);
+        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         for (var item in data) {
           String itemname = item['parent'];
           spinner_list.add(itemname);
@@ -1326,7 +1327,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -1419,13 +1420,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       });
 
       final response = await http.post(url, body: body, headers: headers);
-      final decoded = jsonDecode(response.body);
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
 
       final prettyJson = const JsonEncoder.withIndent('  ').convert(decoded);
       print(prettyJson);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -1554,7 +1555,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -1666,7 +1667,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     final response = await http.post(url, body: body, headers: headers);
     if (response.statusCode != 200) return [];
 
-    final List<dynamic> valuesList = jsonDecode(response.body);
+    final List<dynamic> valuesList = jsonDecode(utf8.decode(response.bodyBytes));
     return valuesList
         .map((e) => items.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -1808,7 +1809,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final List<dynamic> valuesList = jsonDecode(response.body);
+        final List<dynamic> valuesList = jsonDecode(utf8.decode(response.bodyBytes));
         final parsed = valuesList
             .map((e) => items.fromJson(e as Map<String, dynamic>))
             .toList()
@@ -1897,7 +1898,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final List<dynamic> valuesList = jsonDecode(response.body);
+        final List<dynamic> valuesList = jsonDecode(utf8.decode(response.bodyBytes));
         final parsedItems = valuesList
             .map((e) => items.fromJson(e as Map<String, dynamic>))
             .toList();
@@ -2046,7 +2047,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -2680,72 +2681,26 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selecteditem,
-          isExpanded: true,
-          isDense: true,
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-
-          hint: Text(
-            "Select Item",
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-
-          style: GoogleFonts.poppins(
-            fontSize: 13.5,
-            color: Theme.of(context).colorScheme.onSurface,
-            fontWeight: FontWeight.w600,
-          ),
-
-          items: spinner_list.map((value) {
-            return DropdownMenuItem<String>(
-              value: value,
-              child: Container(
-                width: double.infinity, // 🔥 important
-                child: Text(
-                  value,
-                  softWrap: true, // 🔥 allow wrap
-                  maxLines: 2, // 👈 adjust (2–3 recommended)
-                  overflow: TextOverflow.visible, // 🔥 no ellipsis
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-
-          selectedItemBuilder: (context) {
-            return spinner_list.map((value) {
-              return Container(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis, // 👈 collapsed view clean
-                  maxLines: 1,
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              );
-            }).toList();
-          },
-
-          onChanged: (value) {
-            setState(() => _selecteditem = value);
-            fetchItemData('All Items', _selecteditem);
-          },
+      child: SearchableSelectorField<String>(
+        value: _selecteditem,
+        items: spinner_list,
+        itemLabel: (v) => v,
+        hintText: "Select Item",
+        decorated: false,
+        trailingIcon: Icons.keyboard_arrow_down_rounded,
+        textStyle: GoogleFonts.poppins(
+          fontSize: 13.5,
+          color: Theme.of(context).colorScheme.onSurface,
+          fontWeight: FontWeight.w600,
         ),
+        hintStyle: GoogleFonts.poppins(
+          fontSize: 13,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        onChanged: (value) {
+          setState(() => _selecteditem = value);
+          fetchItemData('All Items', _selecteditem);
+        },
       ),
     );
   }

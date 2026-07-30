@@ -13,6 +13,7 @@ import 'SerialSelect.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'widgets/searchable_selector.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
@@ -385,7 +386,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        List<dynamic> data = jsonDecode(response.body);
+        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         for (var item in data) {
           String partyname = item['parent'];
           spinner_list.add(partyname);
@@ -458,7 +459,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -534,7 +535,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -612,7 +613,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -699,7 +700,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -1047,85 +1048,32 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                 : Colors.grey.shade100,
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _selectedparty,
-                              isExpanded: true,
-                              icon: Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                              dropdownColor: Theme.of(
-                                context,
-                              ).colorScheme.surface,
-
-                              hint: Text(
-                                "Select Party",
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-
-                              style: GoogleFonts.poppins(
-                                fontSize: 15,
-                                color: Theme.of(context).colorScheme.onSurface,
-                                fontWeight: FontWeight.w500,
-                              ),
-
-                              items: spinner_list.map((String value) {
-                                return DropdownMenuItem<String>(
-                                  value: value,
-                                  child: Container(
-                                    width:
-                                        double.infinity, // 🔥 prevents overflow
-                                    child: Text(
-                                      value,
-                                      softWrap: true,
-                                      maxLines: 2, // 👈 allow wrapping
-                                      overflow: TextOverflow.visible,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurface,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-
-                              // 🔥 Clean selected view (collapsed)
-                              selectedItemBuilder: (context) {
-                                return spinner_list.map((value) {
-                                  return Container(
-                                    alignment: Alignment.centerLeft,
-                                    child: Text(
-                                      value,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  );
-                                }).toList();
-                              },
-
-                              onChanged: (String? newValue) {
-                                setState(() {
-                                  _selectedparty = newValue;
-                                  isClicked_allparties = true;
-                                  isClicked_inactiveparties = false;
-                                });
-                                fetchPartyData(_selectedparty);
-                              },
+                          child: SearchableSelectorField<String>(
+                            value: _selectedparty,
+                            items: spinner_list,
+                            itemLabel: (v) => v,
+                            hintText: "Select Party",
+                            decorated: false,
+                            trailingIcon: Icons.keyboard_arrow_down_rounded,
+                            textStyle: GoogleFonts.poppins(
+                              fontSize: 15,
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w500,
                             ),
+                            hintStyle: GoogleFonts.poppins(
+                              fontSize: 14,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
+                            onChanged: (String? newValue) {
+                              setState(() {
+                                _selectedparty = newValue;
+                                isClicked_allparties = true;
+                                isClicked_inactiveparties = false;
+                              });
+                              fetchPartyData(_selectedparty);
+                            },
                           ),
                         ),
 

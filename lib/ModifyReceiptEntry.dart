@@ -226,7 +226,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       if (response.statusCode == 200) {
         /*print(response.body);*/
         setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
           vchnos = vchnosJson.cast<String>();
@@ -239,7 +239,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         });
       } else {
         vchnos.clear();
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -1985,7 +1985,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         _isLoading = true;
       });
       jsonEntryData.clear();
-      String narrationValue = controller_narration.text;
+      String narrationValue = controller_narration.text.trim();
       String vchnoValue = _vchnoController.text;
 
       jsonEntryData["DATE"] = receiptdatestring;
@@ -2167,7 +2167,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       final response = await http.post(url, headers: headers);
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         String oldvchname = data['VOUCHERTYPENAME']?.toString() ?? '';
         String oldpartyledger = data['PARTYLEDGERNAME']?.toString() ?? '';
@@ -2376,7 +2376,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
           updateChequeAmount();
         });
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {

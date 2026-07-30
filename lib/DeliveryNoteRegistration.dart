@@ -20,6 +20,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class Deliverynoteregistration extends StatefulWidget {
   const Deliverynoteregistration({Key? key}) : super(key: key);
@@ -264,7 +265,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       );
 
       if (response.statusCode == 200) {
-        final decodedResponse = jsonDecode(response.body);
+        final decodedResponse = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (decodedResponse is List && decodedResponse.isNotEmpty) {
           final Map<String, dynamic> priceData = Map<String, dynamic>.from(
@@ -3470,7 +3471,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       setState(() {
         _isLoading = true;
       });
-      String narrationValue = controller_narration.text;
+      String narrationValue = controller_narration.text.trim();
       String vchnoValue = _vchnoController.text;
 
       String refnoValue = controller_refno.text;
@@ -4073,7 +4074,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
       if (response.statusCode == 200)
       {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         */ /*print(response.body);*/ /*
         setState(() {
@@ -4207,7 +4208,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       }
       else
       {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error'))
         {
@@ -4375,7 +4376,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         String? voucherTypeToFetch;
 
@@ -4511,7 +4512,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           await fetchvchnos(voucherTypeToFetch!);
         }
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -4550,7 +4551,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       if (response.statusCode == 200) {
         /*print(response.body);*/
 
-        List<dynamic> data = json.decode(response.body);
+        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
 
         String tinValue = data.first['tin'].toString();
         String address = data.first['address'].toString();
@@ -4566,7 +4567,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           showDeliveryNoteDialog(context, tinValue, address, emirate, country);
         });
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -4620,7 +4621,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       if (response.statusCode == 200) {
         /*print(response.body);*/
         /*  setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
           vchnos = vchnosJson.cast<String>();
@@ -4632,7 +4633,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         });*/
 
         setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
 
           print(response.body);
@@ -4653,7 +4654,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         });
       } else {
         vchnos.clear();
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -5648,7 +5649,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       );
 
       if (response.statusCode == 200) {
-        final decodedResponse = jsonDecode(response.body);
+        final decodedResponse = jsonDecode(utf8.decode(response.bodyBytes));
         if (decodedResponse is List && decodedResponse.isNotEmpty) {
           final Map<String, dynamic> priceData = Map<String, dynamic>.from(
             decodedResponse.first,
@@ -10363,28 +10364,17 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                           ? 20
                                           : 10,
                                     ),
-                                    child: DropdownButtonFormField<String>(
-                                      isExpanded: true,
-                                      decoration: _inputDecoration(
-                                        label: "VAT Ledger",
-                                        icon: Icons.receipt_long_outlined,
-                                        gradientColors: const [
-                                          Colors.indigo,
-                                          Colors.cyan,
-                                        ],
-                                      ),
+                                    child: SearchableSelectorField<String>(
+                                      label: "VAT Ledger",
+                                      hintText: "Select VAT Ledger",
+                                      icon: Icons.receipt_long_outlined,
+                                      iconGradient: const [
+                                        Colors.indigo,
+                                        Colors.cyan,
+                                      ],
                                       value: _selectedvatledger,
-                                      hint: const Text("Select VAT Ledger"),
-                                      items: vatledgerdata.map((item) {
-                                        return DropdownMenuItem<String>(
-                                          value: item,
-                                          child: Text(
-                                            item,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        );
-                                      }).toList(),
+                                      items: vatledgerdata,
+                                      itemLabel: (item) => item,
                                       onChanged: (value) {
                                         setState(() {
                                           _selectedvatledger = value!;

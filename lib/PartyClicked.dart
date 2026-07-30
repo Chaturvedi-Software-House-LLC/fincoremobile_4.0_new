@@ -1094,7 +1094,7 @@ class _PartyClickedPageState extends State<PartyClicked>
       if (response.statusCode == 200) {
         debugPrint('fetch sold response -> ${response.body}');
 
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           sold_list.addAll(
@@ -1166,7 +1166,7 @@ class _PartyClickedPageState extends State<PartyClicked>
 
       final response = await http.post(url, body: body, headers: headers);
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;

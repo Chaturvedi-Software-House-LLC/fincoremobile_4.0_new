@@ -268,7 +268,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       print('outstanding -> ${response.body}');
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
 
         final values = data["values"] ?? [];
 
@@ -2484,7 +2484,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         final body = jsonEncode({"ledger": _selectedparty});
         final response = await http.post(url, headers: headers, body: body);
         if (response.statusCode == 200) {
-          final List<dynamic> data = json.decode(response.body);
+          final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
           if (data.isNotEmpty) {
             final first = Map<String, dynamic>.from(data.first);
             customerTrn = first['tin']?.toString() ?? '';
@@ -3177,7 +3177,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         _isLoading = true;
       });
       jsonEntryData.clear();
-      String narrationValue = controller_narration.text;
+      String narrationValue = controller_narration.text.trim();
       String vchnoValue = _vchnoController.text;
 
       jsonEntryData["DATE"] = receiptdatestring;
@@ -3369,7 +3369,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
       if (response.statusCode == 200)
       {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         */ /*print(response.body);*/ /*
         setState(() {
@@ -3500,7 +3500,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       }
       else
       {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error'))
         {
@@ -3569,7 +3569,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       debugPrint('receipt load data -> ${response.body}');
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         final String currentSerialNo = serial_no?.trim() ?? '';
         final bool isUniGasSerial = vanSalesSerialNo.contains(currentSerialNo);
@@ -3707,7 +3707,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           fetchvchnos(voucherTypeToFetch!);
         }
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -6190,7 +6190,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       if (response.statusCode == 200) {
         /*print(response.body);*/
         /*setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
           vchnos = vchnosJson.cast<String>();
@@ -6203,7 +6203,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         });*/
 
         setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
 
           print(response.body);
@@ -6224,7 +6224,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         });
       } else {
         vchnos.clear();
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {

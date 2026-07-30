@@ -11,6 +11,7 @@ import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class CreateUser extends StatefulWidget {
   const CreateUser({Key? key}) : super(key: key);
@@ -269,7 +270,7 @@ class _CreateUserPageState extends State<CreateUser>
           FocusScope.of(context).unfocus();
         }
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -310,7 +311,7 @@ class _CreateUserPageState extends State<CreateUser>
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        myData_roles = jsonDecode(response.body);
+        myData_roles = jsonDecode(utf8.decode(response.bodyBytes));
         if (myData_roles != null) {
           setState(() {
             _selectedrole = myData_roles.first;
@@ -343,7 +344,7 @@ class _CreateUserPageState extends State<CreateUser>
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final List<dynamic> responseData = jsonDecode(response.body);
+      final List<dynamic> responseData = jsonDecode(utf8.decode(response.bodyBytes));
       if (responseData != null) {
         setState(() {
           myDataCompanies = responseData.map<String>((item) {
@@ -356,7 +357,7 @@ class _CreateUserPageState extends State<CreateUser>
         _isLoading = false;
       });
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -404,7 +405,7 @@ class _CreateUserPageState extends State<CreateUser>
         _selectedCompanies.clear();
       });
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -750,43 +751,14 @@ class _CreateUserPageState extends State<CreateUser>
                               ),
                             ),
                             const SizedBox(height: 8),
-                            DropdownButtonFormField<dynamic>(
+                            SearchableSelectorField<dynamic>(
                               value: _selectedrole,
-                              dropdownColor: Theme.of(
-                                context,
-                              ).colorScheme.surface,
-                              borderRadius: _formFieldBorderRadius,
-
-                              isExpanded: true,
-                              style: GoogleFonts.poppins(
-                                fontSize: 15,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-
-                              decoration: _modernDropdownDecoration(),
-                              items: myData_roles.map((item) {
-                                return DropdownMenuItem(
-                                  value: item,
-                                  child: Text(
-                                    item['role_name'],
-                                    style: GoogleFonts.poppins(
-                                      // 👈 Apply Poppins style to menu items
-                                      fontSize: 15,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurface,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
+                              items: myData_roles,
+                              itemLabel: (item) =>
+                                  (item['role_name'] ?? '').toString(),
+                              hintText: 'Choose a role',
                               onChanged: (value) =>
                                   setState(() => _selectedrole = value),
-                              onTap: () => _updateFocus(),
-                              hint: Text(
-                                'Choose a role',
-                                style: GoogleFonts.poppins(),
-                              ),
                             ),
                             const SizedBox(height: 20),
                             Text(

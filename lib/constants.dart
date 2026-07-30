@@ -65,7 +65,7 @@ Future<void> fetchvanSalesSerialNumbers() async {
     debugPrint('Serial config body -> ${response.body}');
 
     if (response.statusCode == 200) {
-      final decodedData = jsonDecode(response.body);
+      final decodedData = jsonDecode(utf8.decode(response.bodyBytes));
 
       final dynamic rawSerialList = decodedData['serial_no_van_deliverynote'];
 

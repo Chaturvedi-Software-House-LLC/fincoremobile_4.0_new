@@ -8,6 +8,7 @@ import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class Roles {
   final String serial;
@@ -895,7 +896,7 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
         _isLoading = false;
       });
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -1355,7 +1356,7 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final roles_data = jsonDecode(response.body);
+      final roles_data = jsonDecode(utf8.decode(response.bodyBytes));
       if (roles_data != null) {
         setState(() {
           saved_roles_data_list = roles_data;
@@ -1760,7 +1761,7 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final roles_data = jsonDecode(response.body);
+      final roles_data = jsonDecode(utf8.decode(response.bodyBytes));
       if (roles_data != null) {
         setState(() {
           saved_roles_list = roles_data;
@@ -2186,52 +2187,20 @@ class _AddRolePageState extends State<AddRole> with TickerProviderStateMixin {
                 ),
               ),
               const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  border: Border.all(color: Theme.of(context).dividerColor),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: selectedRole,
-                  icon: const Icon(Icons.arrow_drop_down),
-                  underline: const SizedBox(),
-                  dropdownColor: Theme.of(context)
-                      .colorScheme
-                      .surface, // 👈 Set dropdown menu background to white
-                  borderRadius: BorderRadius.circular(
-                    14,
-                  ), // 👈 Rounded corners for menu
-
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-
-                  items: saved_roles_list.map<DropdownMenuItem<String>>((role) {
-                    final roleName = role['role_name'] as String?;
-                    return DropdownMenuItem<String>(
-                      value: roleName,
-                      child: Text(
-                        roleName!,
-                        style: GoogleFonts.poppins(
-                          // 👈 Apply Poppins style to menu items
-                          fontSize: 15,
-                          color: Theme.of(context).colorScheme.onSurface,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    setState(() {
-                      selectedRole = newValue!;
-                    });
-                    fetchRolesData(selectedRole, serial_no!);
-                  },
-                ),
+              SearchableSelectorField<String>(
+                value: selectedRole.isEmpty ? null : selectedRole,
+                items: saved_roles_list
+                    .map<String>((role) => (role['role_name'] as String?) ?? '')
+                    .where((name) => name.isNotEmpty)
+                    .toList(),
+                itemLabel: (name) => name,
+                hintText: 'Select Role',
+                onChanged: (String? newValue) {
+                  setState(() {
+                    selectedRole = newValue!;
+                  });
+                  fetchRolesData(selectedRole, serial_no!);
+                },
               ),
               const SizedBox(height: 4),
               Padding(

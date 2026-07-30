@@ -675,7 +675,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       print('led group list -> ${response.body}');
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> decoded = jsonDecode(response.body);
+        final Map<String, dynamic> decoded = jsonDecode(utf8.decode(response.bodyBytes));
 
         // 🧮 Extract opening and list
         String opening = decoded['opening'].toString();
@@ -2293,7 +2293,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           spinner_list.add(allvchtypes);
           _selectedvoucher = allvchtypes;
         }
-        List<dynamic> data = jsonDecode(response.body);
+        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         for (var item in data) {
           String vchname = item['vchname'];
           spinner_list.add(vchname);
@@ -2349,7 +2349,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           _selectedvoucher = allvchtypes;
         }
 
-        List<dynamic> data = jsonDecode(response.body);
+        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         for (var item in data) {
           String ledger = item['ledger'];
           spinner_list.add(ledger);
@@ -2528,7 +2528,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       if (response.statusCode == 200)
       {
         print('$vchtypes -> ${response.body}');
-        Map<String, dynamic> data = jsonDecode(response.body);
+        Map<String, dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         String opening = data['opening'].toString();
         setState(()
         {
@@ -2752,7 +2752,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         {
           print(response.body);
 
-          Map<String, dynamic> data = jsonDecode(response.body);
+          Map<String, dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
           String opening = data['opening'].toString();
           setState(() {
             opening_value = opening;
@@ -2973,7 +2973,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       if (response.statusCode == 200)
       {
 
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
         if (values_list != null) {
           isVisibleNoDataFound = false;
 

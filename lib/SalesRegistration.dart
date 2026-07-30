@@ -18,6 +18,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class SalesRegistration extends StatefulWidget {
   const SalesRegistration({Key? key}) : super(key: key);
@@ -336,7 +337,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       );
 
       if (response.statusCode == 200) {
-        final decodedResponse = jsonDecode(response.body);
+        final decodedResponse = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (decodedResponse is List && decodedResponse.isNotEmpty) {
           final Map<String, dynamic> priceData = Map<String, dynamic>.from(
@@ -3897,7 +3898,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       setState(() {
         _isLoading = true;
       });
-      String narrationValue = controller_narration.text;
+      String narrationValue = controller_narration.text.trim();
       String vchnoValue = _vchnoController.text;
 
       String refnoValue = controller_refno.text;
@@ -4445,7 +4446,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       final response = await http.post(url, headers: headers, body: body);
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         debugPrint('sales loadData response -> $jsonResponse');
 
@@ -4574,7 +4575,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           fetchvchnos(voucherTypeToFetch!);
         }
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -4654,7 +4655,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       );
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         debugPrint('sales loadData response -> $jsonResponse');
 
@@ -4857,7 +4858,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
         });
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -4896,7 +4897,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       if (response.statusCode == 200) {
         /*print(response.body);*/
 
-        List<dynamic> data = json.decode(response.body);
+        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
 
         String tinValue = data.first['tin'].toString();
         String address = data.first['address'].toString();
@@ -4912,7 +4913,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           showSalesInvoiceDialog(context, tinValue, address, emirate, country);
         });
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -4966,7 +4967,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       if (response.statusCode == 200) {
         /*print(response.body);*/
         /*  setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
           vchnos = vchnosJson.cast<String>();
@@ -4978,7 +4979,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         });*/
 
         setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
 
           print(response.body);
@@ -5001,7 +5002,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         });
       } else {
         vchnos.clear();
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -5642,7 +5643,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       );
 
       if (response.statusCode == 200) {
-        final decodedResponse = jsonDecode(response.body);
+        final decodedResponse = jsonDecode(utf8.decode(response.bodyBytes));
         if (decodedResponse is List && decodedResponse.isNotEmpty) {
           final Map<String, dynamic> priceData = Map<String, dynamic>.from(
             decodedResponse.first,
@@ -9244,78 +9245,25 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               children: [
                                 // VAT Ledger Dropdown
                                 Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    isExpanded: true,
-                                    decoration: InputDecoration(
-                                      labelText: "VAT Ledger",
-                                      labelStyle: GoogleFonts.poppins(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 13,
-                                      ),
-                                      prefixIcon: Container(
-                                        margin: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          gradient: const LinearGradient(
-                                            colors: [
-                                              Colors.indigo,
-                                              Colors.cyan,
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            10,
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.receipt_long_outlined,
-                                          size: 20,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      filled: true,
-                                      fillColor:
-                                          Theme.of(
+                                  child: SearchableSelectorField<String>(
+                                    label: "VAT Ledger",
+                                    hintText: "Select VAT Ledger",
+                                    icon: Icons.receipt_long_outlined,
+                                    iconGradient: const [
+                                      Colors.indigo,
+                                      Colors.cyan,
+                                    ],
+                                    borderRadius: 14,
+                                    fillColor:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Theme.of(
                                             context,
-                                          ).inputDecorationTheme.fillColor ??
-                                          Theme.of(
-                                            context,
-                                          ).cardColor.withValues(alpha: 0.95),
-                                      enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                        borderSide: BorderSide(
-                                          color: Theme.of(context).dividerColor,
-                                          width: 1,
-                                        ),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                        borderSide: BorderSide(
-                                          color: app_color,
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 14,
-                                            vertical: 14,
-                                          ),
-                                    ),
+                                          ).colorScheme.surfaceContainerHighest
+                                        : Colors.grey.shade100,
                                     value: _selectedvatledger,
-                                    hint: const Text("Select VAT Ledger"),
-                                    items: vatledgerdata.map((item) {
-                                      return DropdownMenuItem<String>(
-                                        value: item,
-                                        child: Text(
-                                          item,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      );
-                                    }).toList(),
+                                    items: vatledgerdata,
+                                    itemLabel: (item) => item,
                                     onChanged: (value) {
                                       setState(() {
                                         _selectedvatledger = value!;
@@ -9417,7 +9365,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                   ),
                                 ),
 
-                                const SizedBox(width: 8),
 
                                 // VAT Amount
                                 Expanded(

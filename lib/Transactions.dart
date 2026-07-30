@@ -1025,7 +1025,7 @@ class _TransactionsPageState extends State<Transactions>
       final response = await http.post(url, headers: headers);
 
       if (response.statusCode == 200) {
-        List<dynamic> data = jsonDecode(response.body);
+        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         for (var item in data) {
           String vchname = item['vchname'];
           spinner_list.add(vchname);
@@ -1035,7 +1035,7 @@ class _TransactionsPageState extends State<Transactions>
         });
         fetchtransactionsData();
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {
@@ -1417,7 +1417,7 @@ class _TransactionsPageState extends State<Transactions>
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
 
         if (values_list != null) {
           isVisibleNoDataFound = false;
@@ -1439,7 +1439,7 @@ class _TransactionsPageState extends State<Transactions>
           throw Exception('Failed to fetch data');
         }
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
 
         if (data.containsKey('error')) {

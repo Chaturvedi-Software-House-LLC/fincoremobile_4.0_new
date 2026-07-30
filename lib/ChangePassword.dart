@@ -150,7 +150,7 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
       String message = "";
 
       try {
-        final data = jsonDecode(response.body);
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
         if (data is Map && data.containsKey("error")) {
           message = data["error"];
         } else {

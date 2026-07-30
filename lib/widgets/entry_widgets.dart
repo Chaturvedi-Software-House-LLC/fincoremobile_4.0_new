@@ -1047,8 +1047,6 @@ class PendingEntryCard extends StatelessWidget {
                                     context,
                                   ).colorScheme.onSurfaceVariant,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
                           ],
                         ),

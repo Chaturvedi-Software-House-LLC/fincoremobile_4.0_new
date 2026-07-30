@@ -17,6 +17,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/searchable_selector.dart';
 
 class SalesOrderRegistration extends StatefulWidget {
   const SalesOrderRegistration({Key? key}) : super(key: key);
@@ -2494,7 +2495,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       setState(() {
         _isLoading = true;
       });
-      String narrationValue = controller_narration.text;
+      String narrationValue = controller_narration.text.trim();
       String vchnoValue = _vchnoController.text;
 
       String refnoValue = controller_orderno.text;
@@ -3152,7 +3153,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(response.body);
+        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
         print(response.body);
         setState(() {
@@ -3194,7 +3195,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
           _updateUnitDropdown(_selecteditem);
         });
       } else {
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -3248,7 +3249,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       if (response.statusCode == 200) {
         /*print(response.body);*/
         /*setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
 
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
           vchnos = vchnosJson.cast<String>();
@@ -3260,7 +3261,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
         });*/
 
         setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(response.body);
+          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
           final List<dynamic> vchnosJson = jsonResponse['vchnos'];
 
           print(response.body);
@@ -3281,7 +3282,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
         });
       } else {
         vchnos.clear();
-        Map<String, dynamic> data = json.decode(response.body);
+        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
         String error = '';
         if (data.containsKey('error')) {
           setState(() {
@@ -4678,46 +4679,21 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                     // 🔻 Ledger Dropdown
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        value: _selectedledger,
-                        hint: const Text("Select Ledger"),
-                        items: ledgerdata.map<DropdownMenuItem<String>>((ledger) {
-                          return DropdownMenuItem<String>(
-                            value: ledger['name'],
-                            child: Text(
-                              ledger['name'],
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
+                      child: SearchableSelectorField<String>(
+                        value: _selectedledger as String?,
+                        hintText: "Select Ledger",
+                        label: "Ledger Name",
+                        icon: Icons.account_balance_wallet,
+                        iconGradient: const [Colors.blue, Colors.lightBlueAccent],
+                        items: ledgerdata
+                            .map<String>((ledger) => ledger['name'] as String)
+                            .toList(),
+                        itemLabel: (v) => v,
                         onChanged: (value) {
                           setState(() {
                             _selectedledger = value!;
                           });
                         },
-                        decoration: InputDecoration(
-                          labelText: "Ledger Name",
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.blue, Colors.lightBlueAccent],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(8)),
-                            ),
-                            child: const Icon(Icons.account_balance_wallet, color: Colors.white),
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                        ),
                       ),
                     ),
 
@@ -7798,109 +7774,20 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                 right: 20,
                                 bottom: 0,
                               ),
-                              child: DropdownButtonFormField<String>(
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  filled: true,
-                                  fillColor:
-                                      Theme.of(
-                                        context,
-                                      ).inputDecorationTheme.fillColor ??
-                                      (Theme.of(
-                                            context,
-                                          ).inputDecorationTheme.fillColor ??
-                                          Theme.of(
-                                            context,
-                                          ).cardColor.withOpacity(0.95)),
-                                  labelText: "Sales Ledger",
-                                  labelStyle: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                  // Prefix icon with gradient (blue)
-                                  prefixIcon: Container(
-                                    margin: const EdgeInsets.all(8),
-                                    decoration: const BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          Colors.blueAccent,
-                                          Colors.indigo,
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      borderRadius: BorderRadius.all(
-                                        Radius.circular(12),
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.sell_outlined,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                  ),
-
-                                  // Borders
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                    borderSide: BorderSide(
-                                      color: Theme.of(context).dividerColor,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                    borderSide: BorderSide(
-                                      color: app_color,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  errorBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                    borderSide: const BorderSide(
-                                      color: Colors.redAccent,
-                                      width: 1.5,
-                                    ),
-                                  ),
-
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 14,
-                                  ),
-                                ),
-                                hint: Text(
-                                  "Sales Ledger",
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
+                              child: SearchableSelectorField<String>(
+                                label: "Sales Ledger",
+                                hintText: "Sales Ledger",
+                                icon: Icons.sell_outlined,
+                                iconGradient: const [
+                                  Colors.blueAccent,
+                                  Colors.indigo,
+                                ],
                                 value: _selectedsalesledger,
-                                items: salesledger_data.map((item) {
-                                  return DropdownMenuItem<String>(
-                                    value: item.toString(),
-                                    child: Text(
-                                      item.toString(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurface,
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                                onChanged: (value) async {
+                                items: salesledger_data,
+                                itemLabel: (item) => item.toString(),
+                                onChanged: (value) {
                                   setState(() {
                                     _selectedsalesledger = value!;
-                                  });
-                                },
-                                onTap: () {
-                                  setState(() {
                                     _isFocused_vchno = false;
                                     _isFocused_narration = false;
                                     _isFocused_totalamt = false;
@@ -8109,85 +7996,17 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                       left: 20,
                                       right: 5,
                                     ),
-                                    child: DropdownButtonFormField<String>(
-                                      isExpanded: true,
-                                      decoration: InputDecoration(
-                                        labelText: "VAT Ledger",
-                                        labelStyle: GoogleFonts.poppins(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        // 🌈 Gradient Icon Container
-                                        prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
-                                          decoration: const BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Colors.indigo,
-                                                Colors.cyan,
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: BorderRadius.all(
-                                              Radius.circular(12),
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.receipt_long_outlined,
-                                            size: 20,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: app_color,
-                                            width: 1.5,
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 14,
-                                            ),
-                                      ),
+                                    child: SearchableSelectorField<String>(
+                                      label: "VAT Ledger",
+                                      hintText: "Select VAT Ledger",
+                                      icon: Icons.receipt_long_outlined,
+                                      iconGradient: const [
+                                        Colors.indigo,
+                                        Colors.cyan,
+                                      ],
                                       value: _selectedvatledger,
-                                      hint: const Text("Select VAT Ledger"),
-                                      items: vatledgerdata.map((item) {
-                                        return DropdownMenuItem<String>(
-                                          value: item,
-                                          child: Text(
-                                            item,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        );
-                                      }).toList(),
+                                      items: vatledgerdata,
+                                      itemLabel: (item) => item,
                                       onChanged: (value) {
                                         setState(() {
                                           _selectedvatledger = value!;

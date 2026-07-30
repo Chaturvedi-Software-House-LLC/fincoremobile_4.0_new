@@ -908,7 +908,7 @@ class _PartyTotalClickedRecPayClickedPageState
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
         if (values_list != null) {
           for (var item in values_list) {
             String creditlimitt = item['creditlimit'].toString();
@@ -988,7 +988,7 @@ class _PartyTotalClickedRecPayClickedPageState
       final response = await http.post(url, body: body, headers: headers);
 
       if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(response.body);
+        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
         if (values_list != null) {
           isVisibleNoDataFound = false;
 

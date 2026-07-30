@@ -352,7 +352,7 @@ class _ModifyRolePageState extends State<ModifyRole>
         _isLoading = false;
       });
     } else {
-      Map<String, dynamic> data = json.decode(response.body);
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
       String error = '';
 
       if (data.containsKey('error')) {
@@ -815,7 +815,7 @@ class _ModifyRolePageState extends State<ModifyRole>
     final response = await http.post(url, body: body, headers: headers);
 
     if (response.statusCode == 200) {
-      final roles_data = jsonDecode(response.body);
+      final roles_data = jsonDecode(utf8.decode(response.bodyBytes));
       if (roles_data != null) {
         setState(() {
           saved_roles_data_list = roles_data;
