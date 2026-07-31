@@ -738,11 +738,9 @@ class _ModifyUserPageState extends State<ModifyUser>
           ),
         ),
 
-        body: Stack(
-          children: [
-            if (_isLoading) const Center(child: AppLogoLoader()),
-
-            LayoutBuilder(
+        body: _isLoading
+            ? const Center(child: AppLogoLoader())
+            : LayoutBuilder(
               builder: (context, constraints) {
                 return SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(
@@ -753,8 +751,7 @@ class _ModifyUserPageState extends State<ModifyUser>
                     constraints: BoxConstraints(
                       minHeight: constraints.maxHeight - 50,
                     ),
-                    child: IntrinsicHeight(
-                      child: Container(
+                    child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 20,
@@ -778,6 +775,7 @@ class _ModifyUserPageState extends State<ModifyUser>
                           ],
                         ),
                         child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             // Header Section
@@ -924,7 +922,7 @@ class _ModifyUserPageState extends State<ModifyUser>
                               ),
                             ),
 
-                            SizedBox(height: 70),
+                            SizedBox(height: 24),
 
                             // Submit Button
                             ElevatedButton(
@@ -999,13 +997,10 @@ class _ModifyUserPageState extends State<ModifyUser>
                           ],
                         ),
                       ),
-                    ),
                   ),
                 );
               },
             ),
-          ],
-        ),
       ),
     );
     // TODO: implement build

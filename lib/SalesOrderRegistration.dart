@@ -2707,14 +2707,19 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                     children: <Widget>[
                       ElevatedButton.icon(
                         onPressed: () {
-                          Navigator.pop(context);
                           // Drop focus first - otherwise updating
                           // _partyLedgerController's text below while the
                           // Party Ledger TypeAheadField still has focus
                           // makes it re-run its suggestionsCallback (which
                           // matches everything) and pop its suggestions
-                          // overlay back open right after reset.
-                          FocusManager.instance.primaryFocus?.unfocus();
+                          // overlay back open right after reset. A bare
+                          // unfocus() leaves the scope's "last focused
+                          // descendant" pointer intact, so popping this
+                          // dialog can still silently hand focus straight
+                          // back to that field - requesting a disposable
+                          // FocusNode instead fully severs that link.
+                          FocusScope.of(context).requestFocus(FocusNode());
+                          Navigator.pop(context);
                           setState(() {
                             controller_narration.clear();
                             controller_orderno.clear();
@@ -2913,6 +2918,11 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
 
                       ElevatedButton.icon(
                         onPressed: () async {
+                          // Same reasoning as "No, Thanks" - this path also
+                          // stays on this screen (no navigation away), so
+                          // sever focus from the Party Ledger field before
+                          // the dialog closes.
+                          FocusScope.of(context).requestFocus(FocusNode());
                           Navigator.pop(context);
                           await generateSalesOrderPDF();
                         },

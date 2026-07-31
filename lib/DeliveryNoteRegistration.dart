@@ -2380,8 +2380,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     // Drop focus first - otherwise clearing a party/ledger TypeAheadField's
     // text below while it still has focus makes it re-run its
     // suggestionsCallback('') (which matches everything) and pop its
-    // suggestions overlay back open right after reset.
-    FocusManager.instance.primaryFocus?.unfocus();
+    // suggestions overlay back open right after reset. A bare unfocus()
+    // leaves the scope's "last focused descendant" pointer intact, so a
+    // dialog pop just before this can still silently hand focus straight
+    // back to that field - requesting a disposable FocusNode instead fully
+    // severs that link.
+    FocusScope.of(context).requestFocus(FocusNode());
 
     setState(() {
       controller_narration.clear();
@@ -3721,6 +3725,19 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                     children: <Widget>[
                       ElevatedButton.icon(
                         onPressed: () {
+                          // Drop focus first - otherwise clearing
+                          // _partyLedgerController's text below while the
+                          // Party Ledger TypeAheadField still has focus
+                          // makes it re-run its suggestionsCallback('')
+                          // (which matches everything) and pop its
+                          // suggestions overlay back open right after
+                          // reset. A bare unfocus() leaves the scope's
+                          // "last focused descendant" pointer intact, so
+                          // popping this dialog can still silently hand
+                          // focus straight back to that field - requesting
+                          // a disposable FocusNode instead fully severs
+                          // that link.
+                          FocusScope.of(context).requestFocus(FocusNode());
                           Navigator.pop(context);
                           setState(() {
                             controller_narration.clear();

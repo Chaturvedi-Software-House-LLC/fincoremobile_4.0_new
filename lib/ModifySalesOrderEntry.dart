@@ -2639,6 +2639,13 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
 
                       ElevatedButton.icon(
                         onPressed: () async {
+                          // Unlike "No, Thanks" (which navigates away via
+                          // pushReplacement), this path stays on this same
+                          // Modify screen, so the Party Ledger TypeAheadField
+                          // can regain focus when the dialog closes and pop
+                          // its suggestions overlay back open. Sever focus
+                          // with a disposable FocusNode before popping.
+                          FocusScope.of(context).requestFocus(FocusNode());
                           Navigator.pop(context);
                           await generateSalesOrderPDF();
                         },
@@ -8059,7 +8066,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                   child: Padding(
                                     padding: const EdgeInsets.only(
                                       top: 20,
-                                      left: 20,
+                                      left: 10,
                                       right: 5,
                                     ),
                                     child: SearchableSelectorField<String>(
@@ -8191,7 +8198,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                     padding: const EdgeInsets.only(
                                       top: 20,
                                       left: 5,
-                                      right: 20,
+                                      right: 10,
                                     ),
                                     child: TextFormField(
                                       enabled: false,

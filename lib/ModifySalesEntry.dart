@@ -8808,7 +8808,7 @@ _itemController.text = _selecteditem;
                                     padding: const EdgeInsets.only(
                                       top: 20,
                                       left: 5,
-                                      right: 20,
+                                      right: 10,
                                     ),
                                     child: TextFormField(
                                       enabled: false,

@@ -3547,10 +3547,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   // the field and reopening its suggestions overlay. Unfocusing again in a
   // post-frame callback wins that race.
   void _dropFocusBeforeReset() {
-    FocusManager.instance.primaryFocus?.unfocus();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      FocusManager.instance.primaryFocus?.unfocus();
-    });
+    FocusScope.of(context).requestFocus(FocusNode());
   }
 
   // Mirrors showSalesInvoiceDialog's "No, Thanks" reset - used after the

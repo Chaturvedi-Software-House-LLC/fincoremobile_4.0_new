@@ -33,7 +33,7 @@ class _CreateUserPageState extends State<CreateUser>
 
   List<dynamic> myData_roles = [];
 
-  dynamic _selectedrole = "";
+  dynamic _selectedrole;
   List<String> _selectedCompanies = [];
   List<String> myDataCompanies = [];
 
@@ -631,11 +631,7 @@ class _CreateUserPageState extends State<CreateUser>
             actions: [],
           ),
         ),
-        body: Stack(
-          children: [
-            /* if (_isLoading)
-              const Center(child: CircularProgressIndicator.adaptive()),*/
-            LayoutBuilder(
+        body: LayoutBuilder(
               builder: (context, constraints) {
                 return SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(
@@ -646,8 +642,7 @@ class _CreateUserPageState extends State<CreateUser>
                     constraints: BoxConstraints(
                       minHeight: constraints.maxHeight - 50,
                     ),
-                    child: IntrinsicHeight(
-                      child: Container(
+                    child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 20,
@@ -671,6 +666,7 @@ class _CreateUserPageState extends State<CreateUser>
                           ],
                         ),
                         child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             ListTile(
@@ -794,7 +790,7 @@ class _CreateUserPageState extends State<CreateUser>
                                 ),
                               ),
                             ),
-                            SizedBox(height: 70),
+                            SizedBox(height: 24),
                             ElevatedButton(
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: app_color,
@@ -861,13 +857,10 @@ class _CreateUserPageState extends State<CreateUser>
                           ],
                         ),
                       ),
-                    ),
                   ),
                 );
               },
             ),
-          ],
-        ),
       ),
     );
     // TODO: implement build

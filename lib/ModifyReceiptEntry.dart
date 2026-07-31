@@ -979,6 +979,13 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
                       ElevatedButton.icon(
                         onPressed: () async {
+                          // This path stays on the same Modify screen (no
+                          // navigation away like "No, Thanks" does), so
+                          // popping the dialog without dropping focus first
+                          // hands focus straight back to whichever
+                          // party/ledger TypeAheadField had it before save,
+                          // reopening its suggestions overlay.
+                          FocusScope.of(context).requestFocus(FocusNode());
                           Navigator.pop(context);
                           await generateVoucherPDF();
                         },

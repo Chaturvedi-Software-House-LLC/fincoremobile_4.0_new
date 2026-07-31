@@ -1057,8 +1057,13 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                           // TypeAheadField still has focus makes it re-run
                           // its suggestionsCallback('') (which matches
                           // everything) and pop its suggestions overlay
-                          // back open right after reset.
-                          FocusManager.instance.primaryFocus?.unfocus();
+                          // back open right after reset. A bare unfocus()
+                          // leaves the scope's "last focused descendant"
+                          // pointer intact, so popping this dialog can still
+                          // silently hand focus straight back to that field
+                          // - requesting a disposable FocusNode instead
+                          // fully severs that link.
+                          FocusScope.of(context).requestFocus(FocusNode());
                           setState(() {
                             _selectedparty = null;
                             _partyController.clear();
@@ -2375,8 +2380,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     // Drop focus first - otherwise clearing a party/ledger TypeAheadField's
     // text below while it still has focus makes it re-run its
     // suggestionsCallback('') (which matches everything) and pop its
-    // suggestions overlay back open right after reset.
-    FocusManager.instance.primaryFocus?.unfocus();
+    // suggestions overlay back open right after reset. Request a disposable
+    // FocusNode rather than a bare unfocus() so the scope's "last focused
+    // descendant" pointer can't hand focus straight back to that field.
+    FocusScope.of(context).requestFocus(FocusNode());
 
     setState(() {
       _selectedparty = null;
