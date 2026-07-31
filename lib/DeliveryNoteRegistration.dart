@@ -10359,7 +10359,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                   child: Padding(
                                     padding: EdgeInsets.only(
                                       top: 20,
-                                      left: 20,
+                                      left: 10,
                                       right: isUniGasMeterReadingSerial
                                           ? 20
                                           : 10,
@@ -10498,7 +10498,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                     padding: const EdgeInsets.only(
                                       top: 20,
                                       left: 0,
-                                      right: 20,
+                                      right: 10,
                                     ),
                                     child: TextFormField(
                                       enabled: false,

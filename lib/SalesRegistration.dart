@@ -9238,7 +9238,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         children: [
                           Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
+                              horizontal: 8,
                               vertical: 6,
                             ),
                             child: Row(

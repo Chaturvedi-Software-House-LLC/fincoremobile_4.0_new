@@ -7993,7 +7993,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                   child: Padding(
                                     padding: const EdgeInsets.only(
                                       top: 20,
-                                      left: 20,
+                                      left: 10,
                                       right: 5,
                                     ),
                                     child: SearchableSelectorField<String>(
@@ -8125,7 +8125,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                     padding: const EdgeInsets.only(
                                       top: 20,
                                       left: 5,
-                                      right: 20,
+                                      right: 10,
                                     ),
                                     child: TextFormField(
                                       enabled: false,

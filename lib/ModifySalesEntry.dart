@@ -8671,7 +8671,7 @@ _itemController.text = _selecteditem;
                                   child: Padding(
                                     padding: const EdgeInsets.only(
                                       top: 20,
-                                      left: 20,
+                                      left: 10,
                                       right: 5,
                                     ),
                                     child: SearchableSelectorField<String>(
