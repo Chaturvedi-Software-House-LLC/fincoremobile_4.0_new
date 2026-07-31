@@ -5053,7 +5053,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
                           Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
+                              horizontal: 8,
                               vertical: 6,
                             ),
                             child: SizedBox(
@@ -5106,7 +5106,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                             context,
                                           ).cardColor.withValues(alpha: 0.95),
                                       prefixIcon: Container(
-                                        margin: const EdgeInsets.all(8),
+                                        margin: const EdgeInsets.all(6),
                                         decoration: const BoxDecoration(
                                           gradient: LinearGradient(
                                             colors: [
@@ -5224,7 +5224,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
                           Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
+                              horizontal: 8,
                               vertical: 6,
                             ),
                             child: SizedBox(
@@ -5289,7 +5289,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                             context,
                                           ).cardColor.withValues(alpha: 0.95),
                                       prefixIcon: Container(
-                                        margin: const EdgeInsets.all(8),
+                                        margin: const EdgeInsets.all(6),
                                         decoration: const BoxDecoration(
                                           gradient: LinearGradient(
                                             colors: [

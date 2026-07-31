@@ -31,7 +31,7 @@ class EntrySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      margin: margin ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: margin ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),
@@ -52,7 +52,7 @@ class EntrySection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
             child: Row(
               children: [
                 Container(
@@ -140,7 +140,7 @@ class EntryFormField extends StatelessWidget {
         ? Theme.of(context).colorScheme.surfaceContainerHighest
         : Colors.grey.shade100;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: TextFormField(
         controller: controller,
         readOnly: readOnly,
@@ -172,7 +172,7 @@ class EntryFormField extends StatelessWidget {
                     Theme.of(context).cardColor.withValues(alpha: 0.95))
               : disabledFill,
           prefixIcon: Container(
-            margin: const EdgeInsets.all(8),
+            margin: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: enabled
@@ -249,7 +249,7 @@ class EntryDropdownField<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: IgnorePointer(
         ignoring: locked,
         child: Opacity(
@@ -274,7 +274,7 @@ class EntryDropdownField<T> extends StatelessWidget {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
               prefixIcon: Container(
-                margin: const EdgeInsets.all(8),
+                margin: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: locked

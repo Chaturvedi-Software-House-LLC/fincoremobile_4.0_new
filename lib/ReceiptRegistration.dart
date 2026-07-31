@@ -6075,8 +6075,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       HttpURL_fetchvchnos =
           '$hostname/api/entry/nos/$company_lowercase/$serial_no';
 
-      HttpURL_fetchoutstanding =
-          '$hostname/api/ledger/getOutstandingOpening/$company_lowercase/$serial_no';
+      HttpURL_fetchoutstanding = '$hostname/api/ledger/getOutstandingOpening/$company_lowercase/$serial_no';
 
       /*HttpURL_fetchvchnos = 'http://192.168.2.110:4999/api/entry/nos/$company_lowercase/$serial_no';*/
 
@@ -6472,7 +6471,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                             // Party TypeAheadField
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
+                                horizontal: 8,
                                 vertical: 6,
                               ),
                               child: SizedBox(
@@ -6525,7 +6524,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                               context,
                                             ).cardColor.withValues(alpha: 0.95),
                                         prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
+                                          margin: const EdgeInsets.all(6),
                                           decoration: const BoxDecoration(
                                             gradient: LinearGradient(
                                               colors: [
@@ -6668,7 +6667,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                             // Bank / Cash Ledger TypeAheadField
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
+                                horizontal: 8,
                                 vertical: 6,
                               ),
                               child: SizedBox(
@@ -6795,7 +6794,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                                   Theme.of(context).cardColor
                                                       .withValues(alpha: 0.95)),
                                         prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
+                                          margin: const EdgeInsets.all(6),
                                           decoration: BoxDecoration(
                                             gradient: LinearGradient(
                                               colors: isBankCashLedgerLocked

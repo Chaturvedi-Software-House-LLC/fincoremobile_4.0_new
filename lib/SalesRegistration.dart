@@ -8796,7 +8796,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                           // Party Ledger TypeAheadField
                           Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
+                              horizontal: 8,
                               vertical: 6,
                             ),
                             child: SizedBox(
@@ -8852,7 +8852,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                             context,
                                           ).cardColor.withValues(alpha: 0.95),
                                       prefixIcon: Container(
-                                        margin: const EdgeInsets.all(8),
+                                        margin: const EdgeInsets.all(6),
                                         decoration: BoxDecoration(
                                           gradient: const LinearGradient(
                                             colors: [

@@ -7177,7 +7177,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
 
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
+                                horizontal: 10,
                                 vertical: 6,
                               ),
                               child: TextFormField(
@@ -7229,7 +7229,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                           ).cardColor.withOpacity(0.95)),
 
                                   prefixIcon: Container(
-                                    margin: const EdgeInsets.all(8),
+                                    margin: const EdgeInsets.all(6),
                                     decoration: BoxDecoration(
                                       gradient: const LinearGradient(
                                         colors: [
@@ -7308,8 +7308,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                             Padding(
                               padding: EdgeInsets.only(
                                 top: 0,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: Container(
@@ -7347,8 +7347,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: DropdownButtonFormField<String>(
@@ -7467,8 +7467,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: Container(
@@ -7528,7 +7528,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
 
                                         // 🌈 Gradient prefix icon
                                         prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
+                                          margin: const EdgeInsets.all(6),
                                           decoration: const BoxDecoration(
                                             gradient: LinearGradient(
                                               colors: [
@@ -7653,8 +7653,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                             Container(
                               padding: EdgeInsets.only(
                                 top: 15,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: TextFormField(
@@ -7689,7 +7689,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                           ).cardColor.withOpacity(0.95)),
                                   prefixIcon: GestureDetector(
                                     child: Container(
-                                      margin: const EdgeInsets.all(8),
+                                      margin: const EdgeInsets.all(6),
                                       decoration: BoxDecoration(
                                         gradient: LinearGradient(
                                           colors: [
@@ -7770,8 +7770,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: SearchableSelectorField<String>(
@@ -8004,6 +8004,12 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                         Colors.indigo,
                                         Colors.cyan,
                                       ],
+                                      filled: false,
+                                      borderRadius: 16,
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 12,
+                                      ),
                                       value: _selectedvatledger,
                                       items: vatledgerdata,
                                       itemLabel: (item) => item,

@@ -9618,7 +9618,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
+                                    horizontal: 8,
                                     vertical: 6,
                                   ),
                                   child: SizedBox(
@@ -9675,7 +9675,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                 Theme.of(context).cardColor
                                                     .withValues(alpha: 0.95),
                                             prefixIcon: Container(
-                                              margin: const EdgeInsets.all(8),
+                                              margin: const EdgeInsets.all(6),
                                               decoration: BoxDecoration(
                                                 gradient: const LinearGradient(
                                                   colors: [
@@ -10372,6 +10372,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                         Colors.indigo,
                                         Colors.cyan,
                                       ],
+                                      filled: false,
+                                      borderRadius: 16,
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 12,
+                                      ),
                                       value: _selectedvatledger,
                                       items: vatledgerdata,
                                       itemLabel: (item) => item,

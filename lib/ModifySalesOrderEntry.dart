@@ -7357,7 +7357,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
 
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
+                                horizontal: 10,
                                 vertical: 6,
                               ),
                               child: TextFormField(
@@ -7409,7 +7409,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                           ).cardColor.withOpacity(0.95)),
 
                                   prefixIcon: Container(
-                                    margin: const EdgeInsets.all(8),
+                                    margin: const EdgeInsets.all(6),
                                     decoration: BoxDecoration(
                                       gradient: const LinearGradient(
                                         colors: [
@@ -7482,8 +7482,8 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                             Padding(
                               padding: EdgeInsets.only(
                                 top: 0,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: Container(
@@ -7521,8 +7521,8 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: DropdownButtonFormField<String>(
@@ -7641,8 +7641,8 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: Container(
@@ -7690,7 +7690,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
 
                                         // 🌈 Gradient prefix icon
                                         prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
+                                          margin: const EdgeInsets.all(6),
                                           decoration: const BoxDecoration(
                                             gradient: LinearGradient(
                                               colors: [
@@ -7836,8 +7836,8 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: SearchableSelectorField<String>(
@@ -8070,6 +8070,12 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
                                         Colors.indigo,
                                         Colors.cyan,
                                       ],
+                                      filled: false,
+                                      borderRadius: 16,
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 12,
+                                      ),
                                       value: _selectedvatledger,
                                       items: vatledgerdata,
                                       itemLabel: (item) => item,

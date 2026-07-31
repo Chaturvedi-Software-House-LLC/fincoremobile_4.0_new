@@ -350,14 +350,14 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
           jsonList.map((json) => SalesModel.fromJson(json)).toList(),
         );
         deliverynoteentries.sort((a, b) {
+          DateTime dateA = DateTime.parse(a.data['DATE']);
+          DateTime dateB = DateTime.parse(b.data['DATE']);
+          if (dateA != dateB) return dateB.compareTo(dateA);
           final vchA =
               int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
           final vchB =
               int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          if (vchA != vchB) return vchB.compareTo(vchA);
-          DateTime dateA = DateTime.parse(a.data['DATE']);
-          DateTime dateB = DateTime.parse(b.data['DATE']);
-          return dateB.compareTo(dateA);
+          return vchB.compareTo(vchA);
         });
 
         filteredDeliveryNoteEntries = List.from(deliverynoteentries);

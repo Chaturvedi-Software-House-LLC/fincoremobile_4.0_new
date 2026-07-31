@@ -371,6 +371,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                                     const SizedBox(height: 14),
                                 itemBuilder: (context, index) {
                                   final allocation = filteredAllocations[index];
+                                  print(allocation);
                                   return _allocationCard(allocation, index);
                                 },
                               ),
@@ -605,7 +606,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      allocation['user_name'] ?? '',
+                      allocation['name'] ?? '',
                       style: GoogleFonts.poppins(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -613,7 +614,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                       ),
                     ),
 
-                    /*const SizedBox(height: 4),
+                    const SizedBox(height: 4),
 
                     Text(
                       allocation['user_name'] ?? '',
@@ -621,7 +622,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                         fontSize: 11.5,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
-                    ),*/
+                    ),
                   ],
                 ),
               ),

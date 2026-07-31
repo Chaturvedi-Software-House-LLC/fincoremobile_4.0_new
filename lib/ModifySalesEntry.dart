@@ -7859,7 +7859,7 @@ _itemController.text = _selecteditem;
 
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
+                                horizontal: 10,
                                 vertical: 6,
                               ),
                               child: TextFormField(
@@ -7911,7 +7911,7 @@ _itemController.text = _selecteditem;
                                           ).cardColor.withOpacity(0.95)),
 
                                   prefixIcon: Container(
-                                    margin: const EdgeInsets.all(8),
+                                    margin: const EdgeInsets.all(6),
                                     decoration: BoxDecoration(
                                       gradient: const LinearGradient(
                                         colors: [
@@ -7984,8 +7984,8 @@ _itemController.text = _selecteditem;
                             Padding(
                               padding: EdgeInsets.only(
                                 top: 0,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: Container(
@@ -8023,8 +8023,8 @@ _itemController.text = _selecteditem;
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: DropdownButtonFormField<String>(
@@ -8142,8 +8142,8 @@ _itemController.text = _selecteditem;
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: SizedBox(
@@ -8207,7 +8207,7 @@ _itemController.text = _selecteditem;
                                                     )),
 
                                             prefixIcon: Container(
-                                              margin: const EdgeInsets.all(8),
+                                              margin: const EdgeInsets.all(6),
                                               decoration: const BoxDecoration(
                                                 gradient: LinearGradient(
                                                   colors: [
@@ -8357,8 +8357,8 @@ _itemController.text = _selecteditem;
                             Padding(
                               padding: const EdgeInsets.only(
                                 top: 12,
-                                left: 20,
-                                right: 20,
+                                left: 10,
+                                right: 10,
                                 bottom: 0,
                               ),
                               child: SearchableSelectorField<String>(
@@ -8682,6 +8682,12 @@ _itemController.text = _selecteditem;
                                         Colors.indigo,
                                         Colors.cyan,
                                       ],
+                                      filled: false,
+                                      borderRadius: 16,
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 12,
+                                      ),
                                       value: _selectedvatledger,
                                       items: vatledgerdata,
                                       itemLabel: (item) => item,
