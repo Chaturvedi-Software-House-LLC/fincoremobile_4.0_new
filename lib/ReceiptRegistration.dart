@@ -262,6 +262,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         "orderby": "billdate",
         "isDebit": true,
         "ledger": ledgerName,
+        "showPending" : true
       });
 
       final response = await http.post(url, headers: headers, body: body);
@@ -3420,7 +3421,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
           fetchvchnos(_selectedvchtypename);
 
-          partydata = List<String>.from(jsonResponse['partyLedgers']);
+          partydata = List<String>.from(jsonResponse['partyLedgers'])
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           partydata.sort();
 
           bankcashname_data = List<Map<String, String>>.from(
@@ -3633,7 +3635,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           isVoucherTypeLocked = hasValidSavedVoucherType;
           voucherTypeToFetch = _selectedvchtypename;
 
-          partydata = List<String>.from(jsonResponse['partyLedgers']);
+          partydata = List<String>.from(jsonResponse['partyLedgers'])
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           partydata.sort();
 
           bankcashname_data = List<Map<String, String>>.from(

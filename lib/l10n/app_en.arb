@@ -1,0 +1,183 @@
+{
+  "@@locale": "en",
+
+  "navDashboard": "Dashboard",
+  "navItems": "Items",
+  "navParties": "Parties",
+  "navTransactions": "Transactions",
+  "navEntries": "Entries",
+  "navMore": "More...",
+
+  "settingsTitle": "Settings",
+  "settingsHeaderTitle": "App Preferences",
+  "settingsHeaderSubtitle": "Manage defaults for reports, values, and item criteria.",
+  "settingsSectionAppearance": "Appearance",
+  "settingsSectionSecurity": "Security",
+  "settingsSectionGeneral": "General",
+  "settingsSectionDefaults": "Defaults",
+  "settingsSectionConfigurations": "Configurations",
+  "settingsTheme": "Theme",
+  "settingsThemeSubtitle": "Choose system, light, or dark mode",
+  "settingsLanguage": "Language",
+  "settingsLanguageSubtitle": "Choose app language",
+  "settingsLanguageEnglish": "English",
+  "settingsLanguageArabic": "العربية",
+  "settingsBiometricLogin": "{label} login",
+  "@settingsBiometricLogin": {
+    "placeholders": { "label": { "type": "String" } }
+  },
+  "settingsBiometricLoginSubtitle": "Sign in using {label} instead of your password",
+  "@settingsBiometricLoginSubtitle": {
+    "placeholders": { "label": { "type": "String" } }
+  },
+  "biometricRememberMeRequired": "Please log in once with \"Remember me\" checked before enabling {label} login.",
+  "@biometricRememberMeRequired": {
+    "placeholders": { "label": { "type": "String" } }
+  },
+  "biometricConfirmToEnable": "Confirm {label} to enable it for sign in",
+  "@biometricConfirmToEnable": {
+    "placeholders": { "label": { "type": "String" } }
+  },
+  "settingsCurrency": "Currency",
+  "settingsCurrencySubtitle": "Select currency for the app",
+  "settingsDecimals": "Amount in Decimals",
+  "settingsDecimalsSubtitle": "Customize number of decimal points",
+  "settingsVat": "VAT Percentage",
+  "settingsVatSubtitle": "Set VAT percentage for the app",
+  "settingsInactiveDays": "Inactive Parties Days",
+  "settingsInactiveDaysSubtitle": "Set no. of inactive party days",
+  "settingsSortType": "Sort Type",
+  "settingsSortTypeSubtitle": "Default sorting selection for the app",
+  "settingsDefaultDateRange": "Default Date Range",
+  "settingsDefaultDateRangeSubtitle": "Select default report period",
+  "settingsAgeingConfig": "Ageing Configuration",
+  "settingsAgeingConfigSubtitle": "Customize ageing range",
+  "settingsItemCriteria": "Fast/Slow/Inactive Items",
+  "settingsItemCriteriaSubtitle": "Customize Fast/Slow/Inactive Items Criteria",
+
+  "commonSearch": "Search",
+  "commonCancel": "Cancel",
+  "commonSave": "Save",
+  "commonOk": "OK",
+  "commonNoRecordsFound": "No records found",
+
+  "dialogCurrentTheme": "Current theme: {value}",
+  "@dialogCurrentTheme": { "placeholders": { "value": { "type": "String" } } },
+  "dialogCurrentLanguage": "Current language: {value}",
+  "@dialogCurrentLanguage": { "placeholders": { "value": { "type": "String" } } },
+  "dialogCurrentValuePercent": "Current value: {value}%",
+  "@dialogCurrentValuePercent": { "placeholders": { "value": { "type": "String" } } },
+  "dialogCurrentValueDays": "Current value: {value} days",
+  "@dialogCurrentValueDays": { "placeholders": { "value": { "type": "String" } } },
+  "dialogSelected": "Selected: {value}",
+  "@dialogSelected": { "placeholders": { "value": { "type": "String" } } },
+
+  "themeSystemDefault": "System default",
+  "themeLightMode": "Light mode",
+  "themeDarkMode": "Dark mode",
+
+  "vatFieldLabel": "VAT (%)",
+  "vatFieldHint": "Enter VAT (%)",
+  "vatValidation": "Please enter VAT (%)",
+
+  "inactiveDaysFieldLabel": "Day(s)",
+  "inactiveDaysFieldHint": "Enter number of day(s)",
+  "inactiveDaysValidation": "Please enter day(s)",
+
+  "dateRangeDialogTitle": "Select Date Range",
+  "dateRangeToday": "Today",
+  "dateRangeYesterday": "Yesterday",
+  "dateRangeThisMonth": "This Month",
+  "dateRangeLastMonth": "Last Month",
+  "dateRangeThisYear": "This Year",
+  "dateRangeLastYear": "Last Year",
+  "dateRangeYearToDate": "Year To Date",
+
+  "decimalOption": "{value} {value, plural, one{Decimal} other{Decimals}}",
+  "@decimalOption": {
+    "placeholders": { "value": { "type": "int" } }
+  },
+
+  "sortDialogTitle": "Sort Options",
+  "sortDefault": "Default",
+  "sortNewestToOldest": "Newest to Oldest",
+  "sortOldestToNewest": "Oldest to Newest",
+  "sortAToZ": "A->Z",
+  "sortZToA": "Z->A",
+  "sortAmountHighToLow": "Amount High to Low",
+  "sortAmountLowToHigh": "Amount Low to High",
+
+  "currencyUSD": "US Dollar",
+  "currencyAED": "UAE Dirhams",
+  "currencyINR": "Indian Rupees",
+  "currencyPKR": "Pakistani Rupees",
+  "currencyEUR": "Euro",
+  "currencyLKR": "SriLankan Rupees",
+  "currencySAR": "Saudi Riyal",
+  "currencyOMR": "Omani Riyal",
+  "currencyBHD": "Bahraini Dinar",
+  "currencyQAR": "Qatari Riyal",
+  "currencyKWD": "Kuwaiti Dinar",
+  "currencySLE": "Sierra Leonean Leone",
+
+  "commonNo": "No",
+  "commonYes": "Yes",
+  "commonUnknown": "Unknown",
+  "commonGotIt": "Got it",
+
+  "dateRangeCustomDate": "Custom Date",
+
+  "dashEntryTypeTitle": "Entry Type",
+  "dashEntryTypeSubtitle": "Choose the transaction entry you want to continue.",
+  "dashEntrySales": "Sales",
+  "dashEntryReceipts": "Receipts",
+  "dashEntrySalesOrder": "Sales Order",
+  "dashEntryDeliveryNote": "Delivery Note",
+
+  "dashExitTitle": "Exit Confirmation",
+  "dashExitBody": "Do you really want to Exit?",
+
+  "errorFetchingData": "Error in data fetching!!!",
+  "errorSomethingWentWrong": "Something went wrong!!!",
+  "infoSwipeDownToRefresh": "Swipe Down to Refresh Data",
+
+  "licenseExpiredTitle": "License Expired",
+  "licenseSerialNo": "Serial No:",
+  "licenseExpiredOn": "Expired on:",
+  "licenseExpiredMessage": "Your license has expired. To renew your access, please contact our support team below:",
+  "licenseDaysLeft": "{count} {count, plural, one{day} other{days}} left",
+  "@licenseDaysLeft": { "placeholders": { "count": { "type": "int" } } },
+  "licenseExpiresTodayTitle": "License Expires Today",
+  "licenseExpiringSoonTitle": "License Expiring Soon",
+  "licenseExpiresLabel": "Expires:",
+  "licenseExpiresOnLabel": "Expires on:",
+  "licenseExpiresTodayMessage": "Your license expires today. To renew your access, please contact our support team below:",
+  "licenseExpiringSoonMessage": "Your license will expire soon. To renew your access, please contact our support team below:",
+
+  "tileSalesCreditNote": "Sales - Credit Note",
+  "tilePurchaseDebitNote": "Purchase - Debit Note",
+  "tileReceipt": "Receipt",
+  "tilePayment": "Payment",
+  "tileOutstandingReceivable": "Outstanding Receivable",
+  "tileOutstandingPayable": "Outstanding Payable",
+  "tileCashBankBalance": "Cash / Bank Balance",
+
+  "dashAnalyticsTitle": "Analytics",
+  "dashAnalyticsSubtitle": "Open chart insights and movement trends",
+
+  "dashNoAccessTitle": "No Access to Dashboard",
+  "dashNoAccessBody": "Please contact your administrator to enable dashboard access.",
+
+  "numberScaleTooltip": "Number scale",
+  "numberScaleFull": "Full Value",
+  "numberScaleThousands": "Thousands (K)",
+  "numberScaleMillions": "Millions (M)",
+  "numberScaleBillions": "Billions (B)",
+
+  "dashWelcome": "Welcome",
+  "dashWelcomeName": "Welcome, {name}",
+  "@dashWelcomeName": { "placeholders": { "name": { "type": "String" } } },
+  "dashHeaderSubtitle": "Your business insights are ready for you",
+
+  "dashReportPeriod": "Report Period"
+}

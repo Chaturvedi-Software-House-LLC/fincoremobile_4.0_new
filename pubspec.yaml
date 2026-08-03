@@ -53,6 +53,7 @@ dependencies:
   path_provider:
   share_plus:
   printing:
+  image:
   google_fonts: ^6.3.2
   open_file:
   fl_chart: ^1.1.1

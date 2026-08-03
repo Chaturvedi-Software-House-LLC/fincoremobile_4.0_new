@@ -49,6 +49,12 @@ class SaleItem {
   final String itemUnit;
   late Map<String, dynamic> accountingAllocationList;
   late Map<String, dynamic> batchAllocationList;
+  // UniGas-only, user-typed free-text description lines for this item
+  // (Tally's "Basic User Description" on a stock item) - each entry here
+  // becomes its own BASICUSERDESCRIPTION.LIST object, one item can have
+  // several (matching the multiple separate single-line boxes in the UI).
+  // Empty list when none entered - no BASICUSERDESCRIPTION.LIST is sent.
+  final List<String> basicUserDescriptions;
 
   SaleItem({
     required this.itemName,
@@ -59,6 +65,7 @@ class SaleItem {
     required this.itemUnit,
     required this.accountingAllocationList,
     required this.batchAllocationList,
+    this.basicUserDescriptions = const [],
   });
 
   SaleItem updateQuantity(String newQuantity) {
@@ -71,6 +78,7 @@ class SaleItem {
       itemUnit: this.itemUnit,
       accountingAllocationList: this.accountingAllocationList,
       batchAllocationList: this.batchAllocationList,
+      basicUserDescriptions: this.basicUserDescriptions,
     );
   }
 
@@ -84,6 +92,7 @@ class SaleItem {
       itemUnit: this.itemUnit,
       accountingAllocationList: this.accountingAllocationList,
       batchAllocationList: this.batchAllocationList,
+      basicUserDescriptions: this.basicUserDescriptions,
     );
   }
 }
@@ -158,6 +167,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   String startfrom = '';
 
   Map<String, String?> partyLedgerPriceLevelMap = {};
+  // Party ledger name -> raw "credit_period" text from the backend (e.g.
+  // "30 Days", or null when the ledger has none) - used to compute
+  // BILLCREDITPERIOD for UniGas's New Ref bill allocation.
+  Map<String, String?> partyLedgerCreditPeriodMap = {};
 
   double ledgerVatAmount = 0,
       itemsVatAmount = 0,
@@ -822,6 +835,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   final TextEditingController itemQuantityController = TextEditingController();
   final TextEditingController itemRateController = TextEditingController();
   final TextEditingController itemAmountController = TextEditingController();
+  // UniGas-only free-text "Basic User Description" boxes for the
+  // single-item add flow (see SaleItem.basicUserDescriptions) - one
+  // single-line controller per box, "+" adds another.
+  List<TextEditingController> itemDescriptionControllers = [
+    TextEditingController(),
+  ];
   final TextEditingController ledgerAmountController = TextEditingController();
   final TextEditingController _dateController = TextEditingController();
   final TextEditingController controller_refno = TextEditingController();
@@ -3548,6 +3567,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   // post-frame callback wins that race.
   void _dropFocusBeforeReset() {
     FocusScope.of(context).requestFocus(FocusNode());
+    // Whatever closes after this (a dialog's Navigator.pop, or the native
+    // print sheet from printUniGasPdf) can hand focus back to the
+    // previously-focused field on the NEXT frame, after this synchronous
+    // call already ran - so it has to be unfocused again once that frame
+    // lands to actually win the race.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).requestFocus(FocusNode());
+      }
+    });
   }
 
   // Mirrors showSalesInvoiceDialog's "No, Thanks" reset - used after the
@@ -3565,10 +3594,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       saledatetxt = formatlastsaledate(saledatestring);
       _dateController.text = saledatetxt;
 
-      refdate = DateTime.now();
-      refdatestring = _dateFormat.format(refdate);
-      refdatetxt = formatlastsaledate(refdatestring);
-      _refdateController.text = refdatetxt;
+      // Reference Date resets to the voucher date itself, same as the
+      // screen-open default.
+      refdate = saledate;
+      refdatestring = saledatestring;
+      refdatetxt = saledatetxt;
+      _refdateController.text = saledatetxt;
 
       fetchvchnos(_selectedvchtypename);
 
@@ -3877,6 +3908,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       symbol: getCurrencySymbol(currencycode),
       amountText: numberText,
       style: style,
+      textAlign: TextAlign.right,
+      maxLines: 2,
+      overflow: TextOverflow.visible,
     );
   }
 
@@ -3885,6 +3919,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     if (_selectedpartyledger == null ||
         _selectedpartyledger.toString().trim().isEmpty) {
       showAppMessage(context, "Please select Party Ledger");
+
+      return;
+    }
+
+    // ❌ Prevent save if Reference Date is somehow empty (it always
+    // defaults to the voucher date, but this guards against that state
+    // ever slipping through).
+    if (refdatestring.trim().isEmpty) {
+      showAppMessage(context, "Please select Reference Date");
 
       return;
     }
@@ -3900,6 +3943,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       String refnoValue = controller_refno.text;
       roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
+
+      // UniGas posts BILLALLOCATIONS.LIST on the party ledger entry
+      // (matching their reference JSON format); every other serial keeps
+      // the existing format unchanged (no bill-wise tracking).
+      final String currentSerialNo = serial_no?.trim() ?? '';
+      final bool isUniGasSerial = vanSalesSerialNo.contains(currentSerialNo);
 
       jsonEntryData["DATE"] = saledatestring;
       jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
@@ -3943,6 +3992,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           "BILLEDQTY": "${item.itemQuantity} ${item.itemUnit}",
           "BATCHALLOCATIONS.LIST": item.batchAllocationList,
           "ACCOUNTINGALLOCATIONS.LIST": item.accountingAllocationList,
+          if (item.basicUserDescriptions.isNotEmpty)
+            "BASICUSERDESCRIPTION.LIST": item.basicUserDescriptions
+                .map((desc) => {"BASICUSERDESCRIPTION": desc})
+                .toList(),
         };
       }).toList();
 
@@ -3966,6 +4019,43 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       List<Map<String, Object>> ledgerList = [];
 
+      Map<String, Object>? newRefBillAllocation;
+      if (isUniGasSerial) {
+        // Party's "credit_period" (e.g. "30 Days") -> due date = voucher
+        // date + that many days, formatted the same way as every other
+        // date field ("yyyyMMdd"). Falls back to just the voucher date
+        // itself when the party has no credit period set.
+        final String? creditPeriodText =
+            partyLedgerCreditPeriodMap[_selectedpartyledger];
+        final int? creditDays = creditPeriodText == null
+            ? null
+            : int.tryParse(
+                RegExp(r'\d+').firstMatch(creditPeriodText)?.group(0) ?? '',
+              );
+        final String billCreditPeriod = _dateFormat.format(
+          creditDays != null
+              ? saledate.add(Duration(days: creditDays))
+              : saledate,
+        );
+
+        // Use the Reference No./Date as the bill name/date when the user
+        // entered a reference (that's what the customer will quote back
+        // when settling this invoice) - falls back to the voucher
+        // number/date otherwise.
+        final bool hasRefNo = refnoValue.trim().isNotEmpty;
+        final String billName = hasRefNo ? refnoValue.trim() : vchnoValue;
+        final String billDate = hasRefNo ? refdatestring : saledatestring;
+
+        newRefBillAllocation = {
+          "BILLTYPE": "New Ref",
+          "AMOUNT": roundedtotalAmount.toStringAsFixed(decimal!),
+          "NAME": billName,
+          "BILLDATE": billDate,
+          "BILLCREDITPERIOD": billCreditPeriod,
+        };
+        debugPrint('Sales New Ref bill allocation -> $newRefBillAllocation');
+      }
+
       Map<String, Object> partyLedgerData = {
         // making party ledger
         "LEDGERNAME": _selectedpartyledger,
@@ -3973,6 +4063,11 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         "ISPARTYLEDGER": "Yes",
         "ISDEEMEDPOSITIVE": "Yes",
         "ledgerType": "Party",
+        // UniGas's reference JSON expects a bill-wise allocation on the
+        // party ledger entry - always "New Ref" (no "On Account"), using
+        // the voucher number itself as the bill reference name.
+        if (newRefBillAllocation != null)
+          "BILLALLOCATIONS.LIST": [newRefBillAllocation],
       };
       ledgerList.add(partyLedgerData);
 
@@ -4008,7 +4103,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       String jsonDataString = jsonEncode(jsonData);
 
-      print(jsonDataString);
+      // Plain print() doesn't chunk long strings - Android/iOS truncate
+      // each log line at a fixed byte length, clipping this JSON mid-way
+      // for any entry with more than a couple items. debugPrint's
+      // wrapWidth splits it into multiple lines first, so the full
+      // payload actually shows up in the console.
+      debugPrint(jsonDataString, wrapWidth: 1024);
 
       try {
         final url_salesentry = Uri.parse(HttpURL_salesEntry!);
@@ -4472,6 +4572,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           if (isUniGasSerial) {
             partyledgerdata.clear();
             partyLedgerPriceLevelMap.clear();
+            partyLedgerCreditPeriodMap.clear();
 
             for (var ledger in (jsonResponse["partyLedgers"] ?? [])) {
               if (ledger == null) continue;
@@ -4487,6 +4588,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   ? null
                   : rawPriceLevel.toString().trim();
 
+              final dynamic rawCreditPeriod = ledger['credit_period'];
+              final String? creditPeriod =
+                  rawCreditPeriod == null ||
+                      rawCreditPeriod.toString().trim().isEmpty ||
+                      rawCreditPeriod.toString().trim().toLowerCase() == 'null'
+                  ? null
+                  : rawCreditPeriod.toString().trim();
+
               if (ledgerName.isEmpty) continue;
 
               if (!partyledgerdata.contains(ledgerName)) {
@@ -4494,6 +4603,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               }
 
               partyLedgerPriceLevelMap[ledgerName] = priceLevel;
+              partyLedgerCreditPeriodMap[ledgerName] = creditPeriod;
             }
           } else {
             partyledgerdata = List<String>.from(
@@ -4502,6 +4612,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   .map((e) => e.toString()),
             );
           }
+          partyledgerdata.sort(
+            (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+          );
 
           salesledger_data = List<String>.from(
             (jsonResponse["salesLedgers"] ?? [])
@@ -4673,6 +4786,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           if (vanSalesSerialNo.contains(currentSerialNo)) {
             partyledgerdata.clear();
             partyLedgerPriceLevelMap.clear();
+            partyLedgerCreditPeriodMap.clear();
 
             for (var ledger in (jsonResponse["partyLedgers"] ?? [])) {
               if (ledger == null) continue;
@@ -4688,6 +4802,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   ? null
                   : rawPriceLevel.toString().trim();
 
+              final dynamic rawCreditPeriod = ledger['credit_period'];
+              final String? creditPeriod = rawCreditPeriod == null ||
+                  rawCreditPeriod.toString().trim().isEmpty ||
+                  rawCreditPeriod.toString().trim().toLowerCase() == 'null'
+                  ? null
+                  : rawCreditPeriod.toString().trim();
+
               if (ledgerName.isEmpty) continue;
 
               if (!partyledgerdata.contains(ledgerName)) {
@@ -4695,6 +4816,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               }
 
               partyLedgerPriceLevelMap[ledgerName] = priceLevel;
+              partyLedgerCreditPeriodMap[ledgerName] = creditPeriod;
             }
           }
           else {
@@ -4704,6 +4826,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                   .map((e) => e.toString()),
             );
           }
+          partyledgerdata.sort(
+            (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+          );
 
           // _selectedpartyledger = partyledgerdata.isNotEmpty ? partyledgerdata[0] : null;
 
@@ -5448,6 +5573,108 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
                         const SizedBox(height: 14),
 
+                        // 📝 Basic User Description (UniGas only) - one or
+                        // more separate single-line boxes, "+" adds another.
+                        // Sent as Tally's BASICUSERDESCRIPTION.LIST on this
+                        // item's inventory entry (one object per box).
+                        if (isUniGasSerial && isVisibleUnit) ...[
+                          Row(
+                            children: [
+                              Text(
+                                "Description (optional)",
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const Spacer(),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () {
+                                  setStateDialog(() {
+                                    itemDescriptionControllers.add(
+                                      TextEditingController(),
+                                    );
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: app_color.withOpacity(0.12),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.add,
+                                    size: 18,
+                                    color: app_color,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          for (
+                            int i = 0;
+                            i < itemDescriptionControllers.length;
+                            i++
+                          ) ...[
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: itemDescriptionControllers[i],
+                                    maxLines: 1,
+                                    maxLength: 75,
+                                    decoration: InputDecoration(
+                                      hintText: "Enter description",
+                                      isDense: true,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 12,
+                                          ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(
+                                          14,
+                                        ),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(
+                                          14,
+                                        ),
+                                        borderSide: BorderSide(
+                                          color: app_color,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (itemDescriptionControllers.length > 1)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.close,
+                                      size: 18,
+                                      color: Colors.redAccent,
+                                    ),
+                                    onPressed: () {
+                                      setStateDialog(() {
+                                        itemDescriptionControllers
+                                            .removeAt(i)
+                                            .dispose();
+                                      });
+                                    },
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          const SizedBox(height: 6),
+                        ],
+
                         // 🔢 Quantity
                         TextFormField(
                           controller: itemQuantityController,
@@ -5771,23 +5998,33 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               ),
             ),
           ),
-          SizedBox(
-            width: 40,
-            child: TextField(
-              controller: controller,
-              enabled: enabled,
-              textAlign: TextAlign.center,
-              textAlignVertical: TextAlignVertical.center,
-              keyboardType: TextInputType.number,
-              onChanged: onChanged,
-              style: GoogleFonts.poppins(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-                border: InputBorder.none,
+          // Users can manually type large quantities here too - caps the
+          // BOX at a reasonable width and lets the number scroll
+          // horizontally within it (rather than clipping), same fix as
+          // Delivery Note's meter-reading-derived quantities.
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 40, maxWidth: 110),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: IntrinsicWidth(
+                child: TextField(
+                  controller: controller,
+                  enabled: enabled,
+                  textAlign: TextAlign.center,
+                  textAlignVertical: TextAlignVertical.center,
+                  keyboardType: TextInputType.number,
+                  onChanged: onChanged,
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 4),
+                    border: InputBorder.none,
+                  ),
+                ),
               ),
             ),
           ),
@@ -5826,6 +6063,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     // is intentionally NOT recomputed on unit change, mirroring the
     // single-item flow exactly).
     final Map<String, String> selectedUnitPerItem = {};
+    // Selected location per item - only surfaced (non-UniGas) when there's
+    // more than one location to choose from; defaults to the first one.
+    final Map<String, String> selectedLocationPerItem = {};
+    // UniGas-only free-text "Basic User Description" boxes per item (see
+    // SaleItem.basicUserDescriptions) - one controller per box, "+" adds
+    // another for that item.
+    final Map<String, List<TextEditingController>> descriptionControllers =
+        {};
     final TextEditingController searchController = TextEditingController();
     String searchQuery = '';
 
@@ -5911,21 +6156,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                       )
                       .toList();
 
-            // Selected items bubble to the top (in their original relative
-            // order among themselves); unselected items stay below (also
-            // in original order). Since this recomputes on every toggle,
-            // checking an item moves it up immediately, and unchecking it
-            // drops it right back into its natural position among the
-            // other unselected items - not to some arbitrary spot.
-            final List<dynamic> filteredItems = [
-              ...searchedItems.where(
-                (i) => selectedItemNames.contains(i['name']?.toString() ?? ''),
-              ),
-              ...searchedItems.where(
-                (i) =>
-                    !selectedItemNames.contains(i['name']?.toString() ?? ''),
-              ),
-            ];
+            // Deliberately NOT reordering selected items to the top - that
+            // used to re-sort the whole list on every checkbox toggle,
+            // which made rows jump around under the user's finger while
+            // they were still picking items. The list now stays in one
+            // fixed, natural order; the pinned chip row above the list
+            // (see selectedItemNames.isNotEmpty below) gives at-a-glance
+            // confirmation of what's selected instead.
+            final List<dynamic> filteredItems = searchedItems;
 
             return DraggableScrollableSheet(
               expand: false,
@@ -6046,6 +6284,59 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         },
                       ),
                     ),
+                    // Pinned summary of what's selected so far - stays put
+                    // while the list below scrolls, instead of the old
+                    // behavior of reordering the list itself to show
+                    // selected items at the top.
+                    if (selectedItemNames.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              for (final selectedName in selectedItemNames)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: Chip(
+                                    label: Text(
+                                      selectedName,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: app_color,
+                                      ),
+                                    ),
+                                    backgroundColor: app_color.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    deleteIcon: Icon(
+                                      Icons.close,
+                                      size: 16,
+                                      color: app_color,
+                                    ),
+                                    onDeleted: () {
+                                      setStateDialog(() {
+                                        selectedItemNames.remove(
+                                          selectedName,
+                                        );
+                                      });
+                                    },
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: VisualDensity.compact,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      side: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: filteredItems.isEmpty
                           ? Center(
@@ -6092,6 +6383,18 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                         selectedUnitPerItem.putIfAbsent(
                                           name,
                                           () => itemUnits.first.name,
+                                        );
+                                      }
+                                      if (locationsdata.isNotEmpty) {
+                                        selectedLocationPerItem.putIfAbsent(
+                                          name,
+                                          () => locationsdata.first,
+                                        );
+                                      }
+                                      if (isUniGasSerial) {
+                                        descriptionControllers.putIfAbsent(
+                                          name,
+                                          () => [TextEditingController()],
                                         );
                                       }
                                     } else {
@@ -6236,8 +6539,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
                                                   children: [
-                                                    if (itemUnits.length >
-                                                        1) ...[
+                                                    if (itemUnits
+                                                            .isNotEmpty &&
+                                                        !isUniGasSerial) ...[
                                                       DropdownButtonFormField<
                                                         String
                                                       >(
@@ -6295,6 +6599,192 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                       ),
                                                       const SizedBox(
                                                         height: 10,
+                                                      ),
+                                                    ],
+                                                    if (locationsdata
+                                                            .isNotEmpty &&
+                                                        !isUniGasSerial) ...[
+                                                      DropdownButtonFormField<
+                                                        String
+                                                      >(
+                                                        value:
+                                                            selectedLocationPerItem[name] ??
+                                                            locationsdata
+                                                                .first,
+                                                        isExpanded: true,
+                                                        items: locationsdata.map((
+                                                          loc,
+                                                        ) {
+                                                          return DropdownMenuItem(
+                                                            value: loc,
+                                                            child: Text(
+                                                              loc,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                              style: GoogleFonts.poppins(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                          );
+                                                        }).toList(),
+                                                        onChanged: (val) {
+                                                          setStateDialog(() {
+                                                            selectedLocationPerItem[name] =
+                                                                val!;
+                                                          });
+                                                        },
+                                                        decoration: _inputDecoration(
+                                                          label: "Location",
+                                                          icon: Icons
+                                                              .location_on_outlined,
+                                                          gradientColors: const [
+                                                            Colors.teal,
+                                                            Colors
+                                                                .tealAccent,
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 10,
+                                                      ),
+                                                    ],
+                                                    if (isUniGasSerial) ...[
+                                                      Row(
+                                                        children: [
+                                                          Text(
+                                                            "Description (optional)",
+                                                            style: GoogleFonts.poppins(
+                                                              fontSize: 12,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
+                                                              color: Theme.of(
+                                                                context,
+                                                              ).colorScheme.onSurfaceVariant,
+                                                            ),
+                                                          ),
+                                                          const Spacer(),
+                                                          InkWell(
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  18,
+                                                                ),
+                                                            onTap: () {
+                                                              setStateDialog(() {
+                                                                descriptionControllers[name]!
+                                                                    .add(
+                                                                      TextEditingController(),
+                                                                    );
+                                                              });
+                                                            },
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets.all(
+                                                                    3,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: app_color
+                                                                    .withOpacity(
+                                                                      0.12,
+                                                                    ),
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                              ),
+                                                              child: Icon(
+                                                                Icons.add,
+                                                                size: 16,
+                                                                color:
+                                                                    app_color,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 6,
+                                                      ),
+                                                      for (
+                                                        int di = 0;
+                                                        di <
+                                                            descriptionControllers[name]!
+                                                                .length;
+                                                        di++
+                                                      ) ...[
+                                                        Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child: TextField(
+                                                                controller:
+                                                                    descriptionControllers[name]![di],
+                                                                maxLines: 1,
+                                                                maxLength: 75,
+                                                                style: GoogleFonts.poppins(
+                                                                  fontSize: 13,
+                                                                ),
+                                                                decoration: InputDecoration(
+                                                                  hintText:
+                                                                      "Enter description",
+                                                                  isDense: true,
+                                                                  contentPadding:
+                                                                      const EdgeInsets.symmetric(
+                                                                        horizontal:
+                                                                            12,
+                                                                        vertical:
+                                                                            10,
+                                                                      ),
+                                                                  border: OutlineInputBorder(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          12,
+                                                                        ),
+                                                                  ),
+                                                                  focusedBorder: OutlineInputBorder(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          12,
+                                                                        ),
+                                                                    borderSide: BorderSide(
+                                                                      color:
+                                                                          app_color,
+                                                                      width:
+                                                                          1.5,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            if (descriptionControllers[name]!
+                                                                    .length >
+                                                                1)
+                                                              IconButton(
+                                                                icon: const Icon(
+                                                                  Icons.close,
+                                                                  size: 16,
+                                                                  color: Colors
+                                                                      .redAccent,
+                                                                ),
+                                                                onPressed: () {
+                                                                  setStateDialog(() {
+                                                                    descriptionControllers[name]!
+                                                                        .removeAt(
+                                                                          di,
+                                                                        )
+                                                                        .dispose();
+                                                                  });
+                                                                },
+                                                              ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 6,
+                                                        ),
+                                                      ],
+                                                      const SizedBox(
+                                                        height: 4,
                                                       ),
                                                     ],
                                                     Row(
@@ -6475,61 +6965,60 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                                   '#,##0.${'0' * (decimal ?? 2)}',
                                                                   'en_US',
                                                                 );
-                                                            return Container(
-                                                              padding:
-                                                                  const EdgeInsets.symmetric(
-                                                                    horizontal:
-                                                                        12,
-                                                                    vertical: 7,
+                                                            return Flexible(
+                                                              child: Container(
+                                                                padding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          12,
+                                                                      vertical:
+                                                                          7,
+                                                                    ),
+                                                                decoration: BoxDecoration(
+                                                                  color: app_color.withValues(
+                                                                    alpha: 0.1,
                                                                   ),
-                                                              decoration: BoxDecoration(
-                                                                color: app_color
-                                                                    .withValues(
-                                                                      alpha:
-                                                                          0.1,
-                                                                    ),
-                                                                borderRadius:
-                                                                    BorderRadius.circular(
-                                                                      12,
-                                                                    ),
-                                                              ),
-                                                              child: Column(
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .end,
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .min,
-                                                                children: [
-                                                                  Text(
-                                                                    'Amount',
-                                                                    style: GoogleFonts.poppins(
-                                                                      fontSize:
-                                                                          9,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                      color: app_color.withValues(
-                                                                        alpha:
-                                                                            0.8,
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        12,
+                                                                      ),
+                                                                ),
+                                                                child: Column(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .end,
+                                                                  mainAxisSize:
+                                                                      MainAxisSize
+                                                                          .min,
+                                                                  children: [
+                                                                    Text(
+                                                                      'Amount',
+                                                                      style: GoogleFonts.poppins(
+                                                                        fontSize:
+                                                                            9,
+                                                                        fontWeight:
+                                                                            FontWeight.w600,
+                                                                        color: app_color.withValues(
+                                                                          alpha:
+                                                                              0.8,
+                                                                        ),
                                                                       ),
                                                                     ),
-                                                                  ),
-                                                                  _currencyValueWidget(
-                                                                    currencyFormatter.format(
-                                                                      amount,
+                                                                    _currencyValueWidget(
+                                                                      currencyFormatter.format(
+                                                                        amount,
+                                                                      ),
+                                                                      GoogleFonts.poppins(
+                                                                        fontSize:
+                                                                            15,
+                                                                        fontWeight:
+                                                                            FontWeight.w700,
+                                                                        color:
+                                                                            app_color,
+                                                                      ),
                                                                     ),
-                                                                    GoogleFonts.poppins(
-                                                                      fontSize:
-                                                                          15,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w700,
-                                                                      color:
-                                                                          app_color,
-                                                                    ),
-                                                                  ),
-                                                                ],
+                                                                  ],
+                                                                ),
                                                               ),
                                                             );
                                                           },
@@ -6620,6 +7109,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                     rateEditControllers,
                                     qtyEditControllers,
                                     selectedUnitPerItem,
+                                    selectedLocationPerItem,
+                                    descriptionControllers,
                                   );
                                   if (context.mounted) {
                                     Navigator.of(context).pop();
@@ -6643,6 +7134,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     Map<String, TextEditingController> rateEditControllers,
     Map<String, TextEditingController> qtyEditControllers,
     Map<String, String> selectedUnitPerItem,
+    Map<String, String> selectedLocationPerItem,
+    Map<String, List<TextEditingController>> descriptionControllers,
   ) async {
     for (final name in selectedItemNames) {
       final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
@@ -6656,6 +7149,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       final String unitName =
           selectedUnitPerItem[name] ??
           (units.isNotEmpty ? units.first.name : '');
+      final String itemLocationName =
+          selectedLocationPerItem[name] ?? selectedLocation;
+      final List<String> itemDescriptions =
+          descriptionControllers[name]
+              ?.map((c) => c.text.trim())
+              .where((t) => t.isNotEmpty)
+              .toList() ??
+          const [];
 
       // Use whatever rate is currently in the editable field — lets the
       // user type a rate when it came back Empty, or override an Item
@@ -6693,15 +7194,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
             itemQuantity: qty,
             itemPrice: resolvedRate,
             itemAmount: amount,
-            itemLocation: selectedLocation,
+            itemLocation: itemLocationName,
             itemUnit: unitName,
             accountingAllocationList: {},
             batchAllocationList: {
-              'GODOWNNAME': selectedLocation,
+              'GODOWNNAME': itemLocationName,
               'AMOUNT': amount,
               'ACTUALQTY': '$qty $unitName',
               'BILLEDQTY': '$qty $unitName',
             },
+            basicUserDescriptions: itemDescriptions,
           ),
         );
       }
@@ -8229,6 +8731,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           itemUnit: itemUnit,
           accountingAllocationList: {},
           batchAllocationList: batchAllocation,
+          basicUserDescriptions: isUniGasSerial
+              ? itemDescriptionControllers
+                    .map((c) => c.text.trim())
+                    .where((t) => t.isNotEmpty)
+                    .toList()
+              : const [],
         );
 
         setState(() {
@@ -8236,6 +8744,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           // Rest of your code...
         });
       }
+      for (final c in itemDescriptionControllers) {
+        c.dispose();
+      }
+      itemDescriptionControllers = [TextEditingController()];
 
       setState(() {
         if (saleItems.isEmpty) {
@@ -8486,10 +8998,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       saledatetxt = formatlastsaledate(saledatestring);
       _dateController.text = saledatetxt;
 
-      refdate = DateTime.now();
-      refdatestring = _dateFormat.format(refdate);
-      refdatetxt = formatlastsaledate(refdatestring);
-      _refdateController.text = refdatetxt;
+      // Reference Date defaults to the voucher date itself (not a
+      // separately-computed "now") - kept in sync so BILLDATE's
+      // ref-no-empty fallback (saledatestring) and this default always
+      // agree until the user actually picks a different reference date.
+      refdate = saledate;
+      refdatestring = saledatestring;
+      refdatetxt = saledatetxt;
+      _refdateController.text = saledatetxt;
 
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -8577,6 +9093,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     _textFieldFocusNodeNarration
         .dispose(); // Dispose of the focus node when it's no longer needed.
     _animationController.dispose();
+    for (final c in itemDescriptionControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -9362,6 +9881,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                   ),
                                 ),
 
+                                const SizedBox(width: 10),
 
                                 // VAT Amount
                                 Expanded(

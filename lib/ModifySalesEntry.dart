@@ -3813,7 +3813,8 @@ _itemController.text = _selecteditem;
           vchtypenamedata = jsonResponse["vchTypes"].cast<String>();
           _selectedvchtypename = oldvchname;
           fetchvchnos(_selectedvchtypename);
-          partyledgerdata = jsonResponse["partyLedgers"].cast<String>();
+          partyledgerdata = jsonResponse["partyLedgers"].cast<String>()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           _partyLedgerController.text = oldpartyledger;
           _selectedpartyledger = oldpartyledger;
 

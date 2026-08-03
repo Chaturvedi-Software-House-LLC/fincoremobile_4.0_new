@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:printing/printing.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:sunmi_printer_plus/sunmi_printer_plus.dart';
+import 'package:image/image.dart' as img;
 import '../constants.dart';
 import '../currencyFormat.dart';
 
@@ -451,79 +452,90 @@ class EntryItemCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        rateWidget != null
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Rate: ',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: rateWidget != null
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Rate: ',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
                                   ),
-                                  rateWidget!,
-                                ],
-                              )
-                            : Text(
-                                'Rate: $rate',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
                                 ),
-                                textAlign: TextAlign.right,
-                              ),
-                        const SizedBox(height: 2),
-                        amountWidget ??
-                            Text(
-                              amount,
+                                rateWidget!,
+                              ],
+                            )
+                          : Text(
+                              'Rate: $rate',
                               style: GoogleFonts.poppins(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: app_color,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
                               ),
                               textAlign: TextAlign.right,
                             ),
-                      ],
                     ),
                   ),
                 ],
               ),
               if (unit != null && unit!.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      unit!,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.orange.shade700,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          unit!,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange.shade700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
+                  ],
                 ),
               ],
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child:
+                        amountWidget ??
+                        Text(
+                          amount,
+                          style: GoogleFonts.poppins(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: app_color,
+                          ),
+                          textAlign: TextAlign.right,
+                          maxLines: 2,
+                        ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -763,52 +775,59 @@ class EntryTotalBar extends StatelessWidget {
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: app_color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  Icons.account_balance_wallet_outlined,
-                  color: app_color,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: app_color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.account_balance_wallet_outlined,
+              color: app_color,
+              size: 22,
+            ),
           ),
-          currencySymbol != null
-              ? currencyAmountText(
-                  currencyCode: currencyCode ?? 'AED',
-                  symbol: currencySymbol!,
-                  amountText: value,
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: app_color,
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Expanded + right-aligned so an unusually long amount (e.g. a
+          // huge bulk-delivery quantity) wraps onto a second line instead
+          // of overflowing off the right edge of the card.
+          Expanded(
+            child: currencySymbol != null
+                ? currencyAmountText(
+                    currencyCode: currencyCode ?? 'AED',
+                    symbol: currencySymbol!,
+                    amountText: value,
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    overflow: TextOverflow.visible,
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: app_color,
+                    ),
+                  )
+                : Text(
+                    value,
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: app_color,
+                    ),
                   ),
-                )
-              : Text(
-                  value,
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: app_color,
-                  ),
-                ),
+          ),
         ],
       ),
     );
@@ -1621,12 +1640,17 @@ Future<bool> _tryPrintOnSunmiPrinter(Uint8List pdfBytes) async {
     final status = await SunmiConfig.getStatus();
     if (status == null) return false;
 
+    final int printerWidthPx = await detectThermalPrinterWidthPx();
+
     // 203 DPI matches standard thermal receipt printer resolution
     // (including the Sunmi V2 Plus's built-in printer).
     final pages = Printing.raster(pdfBytes, dpi: 203);
     await for (final page in pages) {
       final png = await page.toPng();
-      await SunmiPrinter.printImage(png, align: SunmiPrintAlign.CENTER);
+      await SunmiPrinter.printImage(
+        fitToThermalPaperWidth(png, printerWidthPx),
+        align: SunmiPrintAlign.CENTER,
+      );
     }
     await SunmiPrinter.lineWrap(3);
     await SunmiPrinter.cutPaper();
@@ -1637,6 +1661,40 @@ Future<bool> _tryPrintOnSunmiPrinter(Uint8List pdfBytes) async {
     );
     return false;
   }
+}
+
+// Sunmi's native SDK reports paper width via PrinterInfo.PAPER: "1" means
+// 58mm paper (384 dots print head at 203 DPI), "0" means 80mm (576 dots).
+// Falls back to 576 (80mm - confirmed against an actual deployed Sunmi V2
+// Plus, measured with a ruler) if the query fails or returns something
+// unexpected, since that's what the real hardware in the field has.
+// Not underscore-prefixed (unlike its neighbors) so tests in test/ can
+// call it directly to verify the branching without a real Sunmi device.
+@visibleForTesting
+Future<int> detectThermalPrinterWidthPx() async {
+  try {
+    final String? paper = await SunmiConfig.getPaper();
+    if (paper?.trim() == '1') return 384;
+    return 576;
+  } catch (e) {
+    debugPrint('SUNMI PAPER WIDTH QUERY ERROR - defaulting to 80mm: $e');
+    return 576;
+  }
+}
+
+// The receipt PDFs are laid out at 76mm (wider than a 58mm thermal paper,
+// needed so the item table stays legible in the shared/exported PDF).
+// Rasterizing that straight to the printer without resizing overflows its
+// print head, silently clipping every row on the right instead of scaling
+// to fit - this brings each page down to the printer's actual detected
+// pixel width first, preserving aspect ratio.
+@visibleForTesting
+Uint8List fitToThermalPaperWidth(Uint8List png, int printerWidthPx) {
+  final decoded = img.decodePng(png);
+  if (decoded == null || decoded.width <= printerWidthPx) return png;
+
+  final resized = img.copyResize(decoded, width: printerWidthPx);
+  return Uint8List.fromList(img.encodePng(resized));
 }
 
 // ─── App-wide message banner ──────────────────────────────────────

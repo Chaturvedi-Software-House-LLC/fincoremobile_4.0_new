@@ -2200,7 +2200,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                 .where((item) => item != null)
                 .map((item) => item.toString()),
           );
-          partydata.sort();
+          partydata.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           _selectedparty = oldpartyledger;
           _partyController.text = _selectedparty;
 

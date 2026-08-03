@@ -3170,7 +3170,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
           vchtypenamedata = jsonResponse["vchTypes"].cast<String>();
           _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
           fetchvchnos(_selectedvchtypename);
-          partyledgerdata = jsonResponse["partyLedgers"].cast<String>();
+          partyledgerdata = jsonResponse["partyLedgers"].cast<String>()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
           _partyLedgerController.text = _selectedpartyledger;
           salesledger_data = jsonResponse["salesLedgers"].cast<String>();
@@ -5500,6 +5501,9 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     // is intentionally NOT recomputed on unit change, mirroring the
     // single-item flow exactly).
     final Map<String, String> selectedUnitPerItem = {};
+    // Selected location per item - only surfaced (non-UniGas) when there's
+    // more than one location to choose from; defaults to the first one.
+    final Map<String, String> selectedLocationPerItem = {};
     final TextEditingController searchController = TextEditingController();
     String searchQuery = '';
 
@@ -5787,6 +5791,12 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                           () => itemUnits.first.name,
                                         );
                                       }
+                                      if (locationsdata.isNotEmpty) {
+                                        selectedLocationPerItem.putIfAbsent(
+                                          name,
+                                          () => locationsdata.first,
+                                        );
+                                      }
                                       if (isUniGasSerial) {
                                         startReadingControllers.putIfAbsent(
                                           name,
@@ -5939,8 +5949,9 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
                                                   children: [
-                                                    if (itemUnits.length >
-                                                        1) ...[
+                                                    if (itemUnits
+                                                            .isNotEmpty &&
+                                                        !isUniGasSerial) ...[
                                                       DropdownButtonFormField<
                                                         String
                                                       >(
@@ -5993,6 +6004,57 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                                             Colors.purple,
                                                             Colors
                                                                 .deepPurpleAccent,
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 10,
+                                                      ),
+                                                    ],
+                                                    if (locationsdata
+                                                            .isNotEmpty &&
+                                                        !isUniGasSerial) ...[
+                                                      DropdownButtonFormField<
+                                                        String
+                                                      >(
+                                                        value:
+                                                            selectedLocationPerItem[name] ??
+                                                            locationsdata
+                                                                .first,
+                                                        isExpanded: true,
+                                                        items: locationsdata.map((
+                                                          loc,
+                                                        ) {
+                                                          return DropdownMenuItem(
+                                                            value: loc,
+                                                            child: Text(
+                                                              loc,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                              style: GoogleFonts.poppins(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w500,
+                                                              ),
+                                                            ),
+                                                          );
+                                                        }).toList(),
+                                                        onChanged: (val) {
+                                                          setStateDialog(() {
+                                                            selectedLocationPerItem[name] =
+                                                                val!;
+                                                          });
+                                                        },
+                                                        decoration: _inputDecoration(
+                                                          label: "Location",
+                                                          icon: Icons
+                                                              .location_on_outlined,
+                                                          gradientColors: const [
+                                                            Colors.teal,
+                                                            Colors
+                                                                .tealAccent,
                                                           ],
                                                         ),
                                                       ),
@@ -6449,6 +6511,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                     startReadingControllers,
                                     endReadingControllers,
                                     selectedUnitPerItem,
+                                    selectedLocationPerItem,
                                   );
                                   if (context.mounted) {
                                     Navigator.of(context).pop();
@@ -6474,6 +6537,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     Map<String, TextEditingController> startReadingControllers,
     Map<String, TextEditingController> endReadingControllers,
     Map<String, String> selectedUnitPerItem,
+    Map<String, String> selectedLocationPerItem,
   ) async {
     for (final name in selectedItemNames) {
       final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
@@ -6487,6 +6551,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       final String unitName =
           selectedUnitPerItem[name] ??
           (units.isNotEmpty ? units.first.name : '');
+      final String itemLocationName =
+          selectedLocationPerItem[name] ?? selectedLocation;
 
       // Use whatever rate is currently in the editable field — lets the
       // user type a rate when it came back Empty, or override an Item
@@ -6531,11 +6597,11 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
             itemQuantity: qty,
             itemPrice: resolvedRate,
             itemAmount: amount,
-            itemLocation: selectedLocation,
+            itemLocation: itemLocationName,
             itemUnit: unitName,
             accountingAllocationList: {},
             batchAllocationList: {
-              'GODOWNNAME': selectedLocation,
+              'GODOWNNAME': itemLocationName,
               'AMOUNT': amount,
               'ACTUALQTY': '$qty $unitName',
               'BILLEDQTY': '$qty $unitName',

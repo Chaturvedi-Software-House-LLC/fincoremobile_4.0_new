@@ -54,6 +54,12 @@ class SaleItem {
   late Map<String, dynamic> batchAllocationList;
   final String meterFrom;
   final String meterTo;
+  // UniGas-only, user-typed free-text description lines for this item
+  // (Tally's "Basic User Description" on a stock item) - each entry here
+  // becomes its own BASICUSERDESCRIPTION.LIST object, one item can have
+  // several (matching the multiple separate single-line boxes in the UI).
+  // Empty list when none entered - no BASICUSERDESCRIPTION.LIST is sent.
+  final List<String> basicUserDescriptions;
 
   SaleItem({
     required this.itemName,
@@ -67,6 +73,7 @@ class SaleItem {
     required this.batchAllocationList,
     required this.meterFrom,
     required this.meterTo,
+    this.basicUserDescriptions = const [],
   });
 
   SaleItem updateQuantity(String newQuantity) {
@@ -81,6 +88,7 @@ class SaleItem {
       batchAllocationList: this.batchAllocationList,
       meterFrom: this.meterFrom,
       meterTo: this.meterTo,
+      basicUserDescriptions: this.basicUserDescriptions,
     );
   }
 
@@ -96,6 +104,7 @@ class SaleItem {
       batchAllocationList: this.batchAllocationList,
       meterFrom: this.meterFrom,
       meterTo: this.meterTo,
+      basicUserDescriptions: this.basicUserDescriptions,
     );
   }
 }
@@ -748,6 +757,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   final TextEditingController itemQuantityController = TextEditingController();
   final TextEditingController itemRateController = TextEditingController();
   final TextEditingController itemAmountController = TextEditingController();
+  // UniGas-only free-text "Basic User Description" boxes for the
+  // single-item add flow (see SaleItem.basicUserDescriptions) - one
+  // single-line controller per box, "+" adds another.
+  List<TextEditingController> itemDescriptionControllers = [
+    TextEditingController(),
+  ];
   final TextEditingController ledgerAmountController = TextEditingController();
   final TextEditingController _dateController = TextEditingController();
   final TextEditingController controller_refno = TextEditingController();
@@ -3043,10 +3058,22 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     // Bulk deliveries are single-item only (enforced at selection time),
     // so the first sale item is the metered product.
     final SaleItem? bulkItem = saleItems.isNotEmpty ? saleItems.first : null;
-    final double meterFrom = double.tryParse(bulkItem?.meterFrom ?? '') ?? 0;
-    final double meterTo = double.tryParse(bulkItem?.meterTo ?? '') ?? 0;
-    final double totalQuantity = meterTo - meterFrom;
-    final NumberFormat qtyFormatter = NumberFormat('#,##0.##');
+    // BigInt, not double - readings can run to many digits and double
+    // both loses precision past ~15-17 digits and clamps via .toInt() on
+    // overflow (see _syncQtyWithMeterReading). NumberFormat can't take a
+    // BigInt directly, so the comma-grouping is inserted manually.
+    final BigInt meterFromBig = BigInt.tryParse(bulkItem?.meterFrom ?? '') ?? BigInt.zero;
+    final BigInt meterToBig = BigInt.tryParse(bulkItem?.meterTo ?? '') ?? BigInt.zero;
+    final BigInt totalQuantityBig = meterToBig - meterFromBig;
+    String formatBigIntWithCommas(BigInt value) {
+      final String digits = value.abs().toString();
+      final StringBuffer buffer = StringBuffer();
+      for (int i = 0; i < digits.length; i++) {
+        if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
+        buffer.write(digits[i]);
+      }
+      return (value.isNegative ? '-' : '') + buffer.toString();
+    }
 
     final now = DateTime.now();
     final dateTimeText = DateFormat('dd-MMM-yyyy HH:mm:ss').format(now);
@@ -3236,7 +3263,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
               bulkBox([
                 kv('Start Reading:', bulkItem?.meterFrom ?? 'Not Available'),
                 kv('End Reading:', bulkItem?.meterTo ?? 'Not Available'),
-                kv('Total Quantity:', qtyFormatter.format(totalQuantity)),
+                kv('Total Quantity:', formatBigIntWithCommas(totalQuantityBig)),
                 kv('Unit:', cleanOrNotAvailable(bulkItem?.itemUnit)),
                 kv('Product:', cleanOrNotAvailable(bulkItem?.itemName)),
               ]),
@@ -3533,6 +3560,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           "BILLEDQTY": "${item.itemQuantity} ${item.itemUnit}",
           "BATCHALLOCATIONS.LIST": item.batchAllocationList,
           "ACCOUNTINGALLOCATIONS.LIST": item.accountingAllocationList,
+          if (item.basicUserDescriptions.isNotEmpty)
+            "BASICUSERDESCRIPTION.LIST": item.basicUserDescriptions
+                .map((desc) => {"BASICUSERDESCRIPTION": desc})
+                .toList(),
         };
       }).toList();
 
@@ -3601,7 +3632,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
       String jsonDataString = jsonEncode(jsonData);
 
-      print(jsonDataString);
+      // plain print() truncates long lines on Android/iOS; debugPrint with
+      // wrapWidth avoids that.
+      debugPrint(jsonDataString, wrapWidth: 1024);
 
       try {
         final url_salesentry = Uri.parse(HttpURL_deliveryNoteEntry!);
@@ -4158,6 +4191,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                   .map((e) => e.toString()),
             );
           }
+          partyledgerdata.sort(
+            (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+          );
 
           // _selectedpartyledger = partyledgerdata.isNotEmpty ? partyledgerdata[0] : null;
           // _partyLedgerController.text = _selectedpartyledger ?? '';
@@ -4460,6 +4496,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                   .map((e) => e.toString()),
             );
           }
+          partyledgerdata.sort(
+            (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+          );
 
           salesledger_data = List<String>.from(
             (jsonResponse["salesLedgers"] ?? [])
@@ -4788,8 +4827,8 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   // drifting out of sync with the readings. If both readings are cleared,
   // quantity goes back to being user-editable and resets to '1'.
   bool _isQtyLockedByMeterReading(String startText, String endText) {
-    final start = double.tryParse(startText.trim());
-    final end = double.tryParse(endText.trim());
+    final start = BigInt.tryParse(startText.trim());
+    final end = BigInt.tryParse(endText.trim());
     return start != null && end != null && end > start;
   }
 
@@ -4800,14 +4839,18 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   }) {
     final startText = startController.text.trim();
     final endText = endController.text.trim();
-    final start = double.tryParse(startText);
-    final end = double.tryParse(endText);
+
+    // Meter readings are whole numbers that can run to many digits - a
+    // real van meter has no fixed max length. BigInt parses/subtracts
+    // them exactly; double loses precision past ~15-17 digits and its
+    // .toInt() silently clamps to 9223372036854775807 (int64 max) when
+    // the value is too large to represent, instead of erroring - which is
+    // exactly what was showing up as a "stuck" quantity for long readings.
+    final start = BigInt.tryParse(startText);
+    final end = BigInt.tryParse(endText);
 
     if (start != null && end != null && end > start) {
-      final qty = end - start;
-      qtyController.text = qty == qty.roundToDouble()
-          ? qty.toInt().toString()
-          : qty.toString();
+      qtyController.text = (end - start).toString();
     } else if (startText.isEmpty && endText.isEmpty) {
       qtyController.text = '1';
     }
@@ -5797,23 +5840,35 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
               ),
             ),
           ),
-          SizedBox(
-            width: 40,
-            child: TextField(
-              controller: controller,
-              enabled: enabled,
-              textAlign: TextAlign.center,
-              textAlignVertical: TextAlignVertical.center,
-              keyboardType: TextInputType.number,
-              onChanged: onChanged,
-              style: GoogleFonts.poppins(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-                border: InputBorder.none,
+          // Bulk (meter-reading) quantities come from a real van meter and
+          // can run to a lot of digits - there's no safe upper bound to
+          // cap them at. Rather than clip or force-shrink the text, this
+          // caps the BOX at a reasonable width and lets the number scroll
+          // horizontally within it, so every digit stays reachable no
+          // matter how long the reading is.
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 40, maxWidth: 110),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: IntrinsicWidth(
+                child: TextField(
+                  controller: controller,
+                  enabled: enabled,
+                  textAlign: TextAlign.center,
+                  textAlignVertical: TextAlignVertical.center,
+                  keyboardType: TextInputType.number,
+                  onChanged: onChanged,
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 4),
+                    border: InputBorder.none,
+                  ),
+                ),
               ),
             ),
           ),
@@ -5962,6 +6017,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     // is intentionally NOT recomputed on unit change, mirroring the
     // single-item flow exactly).
     final Map<String, String> selectedUnitPerItem = {};
+    // UniGas-only free-text "Basic User Description" boxes per item (see
+    // SaleItem.basicUserDescriptions) - one controller per box, "+" adds
+    // another for that item.
+    final Map<String, List<TextEditingController>> descriptionControllers =
+        {};
     final TextEditingController searchController = TextEditingController();
     String searchQuery = '';
 
@@ -6037,8 +6097,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           (meterFrom.isEmpty && meterTo.isNotEmpty)) {
         error = "Please enter both start and end readings";
       } else if (meterFrom.isNotEmpty && meterTo.isNotEmpty) {
-        final start = double.tryParse(meterFrom);
-        final end = double.tryParse(meterTo);
+        // BigInt, not double - see _syncQtyWithMeterReading for why.
+        final start = BigInt.tryParse(meterFrom);
+        final end = BigInt.tryParse(meterTo);
         if (start == null || end == null || end <= start) {
           error = "End reading must be greater than start reading";
         }
@@ -6078,21 +6139,14 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                       )
                       .toList();
 
-            // Selected items bubble to the top (in their original relative
-            // order among themselves); unselected items stay below (also
-            // in original order). Since this recomputes on every toggle,
-            // checking an item moves it up immediately, and unchecking it
-            // drops it right back into its natural position among the
-            // other unselected items - not to some arbitrary spot.
-            final List<dynamic> filteredItems = [
-              ...searchedItems.where(
-                (i) => selectedItemNames.contains(i['name']?.toString() ?? ''),
-              ),
-              ...searchedItems.where(
-                (i) =>
-                    !selectedItemNames.contains(i['name']?.toString() ?? ''),
-              ),
-            ];
+            // Deliberately NOT reordering selected items to the top - that
+            // used to re-sort the whole list on every checkbox toggle,
+            // which made rows jump around under the user's finger while
+            // they were still picking items. The list now stays in one
+            // fixed, natural order; the pinned chip row above the list
+            // (see selectedItemNames.isNotEmpty below) gives at-a-glance
+            // confirmation of what's selected instead.
+            final List<dynamic> filteredItems = searchedItems;
 
             return DraggableScrollableSheet(
               expand: false,
@@ -6216,6 +6270,59 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                         },
                       ),
                     ),
+                    // Pinned summary of what's selected so far - stays put
+                    // while the list below scrolls, instead of the old
+                    // behavior of reordering the list itself to show
+                    // selected items at the top.
+                    if (selectedItemNames.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              for (final selectedName in selectedItemNames)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: Chip(
+                                    label: Text(
+                                      selectedName,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: app_color,
+                                      ),
+                                    ),
+                                    backgroundColor: app_color.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    deleteIcon: Icon(
+                                      Icons.close,
+                                      size: 16,
+                                      color: app_color,
+                                    ),
+                                    onDeleted: () {
+                                      setStateDialog(() {
+                                        selectedItemNames.remove(
+                                          selectedName,
+                                        );
+                                      });
+                                    },
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: VisualDensity.compact,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      side: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: filteredItems.isEmpty
                           ? Center(
@@ -6282,6 +6389,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                         endReadingControllers.putIfAbsent(
                                           name,
                                           () => TextEditingController(),
+                                        );
+                                      }
+                                      if (isUniGasSerial(serial_no)) {
+                                        descriptionControllers.putIfAbsent(
+                                          name,
+                                          () => [TextEditingController()],
                                         );
                                       }
                                     } else {
@@ -6487,6 +6600,143 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         height: 10,
                                                       ),
                                                     ],
+                                                    if (isUniGasSerial(
+                                                      serial_no,
+                                                    )) ...[
+                                                      Row(
+                                                        children: [
+                                                          Text(
+                                                            "Description (optional)",
+                                                            style: GoogleFonts.poppins(
+                                                              fontSize: 12,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
+                                                              color: Theme.of(
+                                                                context,
+                                                              ).colorScheme.onSurfaceVariant,
+                                                            ),
+                                                          ),
+                                                          const Spacer(),
+                                                          InkWell(
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  18,
+                                                                ),
+                                                            onTap: () {
+                                                              setStateDialog(() {
+                                                                descriptionControllers[name]!
+                                                                    .add(
+                                                                      TextEditingController(),
+                                                                    );
+                                                              });
+                                                            },
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets.all(
+                                                                    3,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: app_color
+                                                                    .withOpacity(
+                                                                      0.12,
+                                                                    ),
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                              ),
+                                                              child: Icon(
+                                                                Icons.add,
+                                                                size: 16,
+                                                                color:
+                                                                    app_color,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 6,
+                                                      ),
+                                                      for (
+                                                        int di = 0;
+                                                        di <
+                                                            descriptionControllers[name]!
+                                                                .length;
+                                                        di++
+                                                      ) ...[
+                                                        Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child: TextField(
+                                                                controller:
+                                                                    descriptionControllers[name]![di],
+                                                                maxLines: 1,
+                                                                maxLength: 75,
+                                                                style: GoogleFonts.poppins(
+                                                                  fontSize: 13,
+                                                                ),
+                                                                decoration: InputDecoration(
+                                                                  hintText:
+                                                                      "Enter description",
+                                                                  isDense: true,
+                                                                  contentPadding:
+                                                                      const EdgeInsets.symmetric(
+                                                                        horizontal:
+                                                                            12,
+                                                                        vertical:
+                                                                            10,
+                                                                      ),
+                                                                  border: OutlineInputBorder(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          12,
+                                                                        ),
+                                                                  ),
+                                                                  focusedBorder: OutlineInputBorder(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          12,
+                                                                        ),
+                                                                    borderSide: BorderSide(
+                                                                      color:
+                                                                          app_color,
+                                                                      width:
+                                                                          1.5,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            if (descriptionControllers[name]!
+                                                                    .length >
+                                                                1)
+                                                              IconButton(
+                                                                icon: const Icon(
+                                                                  Icons.close,
+                                                                  size: 16,
+                                                                  color: Colors
+                                                                      .redAccent,
+                                                                ),
+                                                                onPressed: () {
+                                                                  setStateDialog(() {
+                                                                    descriptionControllers[name]!
+                                                                        .removeAt(
+                                                                          di,
+                                                                        )
+                                                                        .dispose();
+                                                                  });
+                                                                },
+                                                              ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 6,
+                                                        ),
+                                                      ],
+                                                      const SizedBox(
+                                                        height: 4,
+                                                      ),
+                                                    ],
                                                     Row(
                                                       children: [
                                                         _bulkQtyStepper(
@@ -6644,6 +6894,17 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                               keyboardType:
                                                                   TextInputType
                                                                       .number,
+                                                              // Digits only -
+                                                              // no length cap,
+                                                              // since real van
+                                                              // meters can
+                                                              // legitimately
+                                                              // have long
+                                                              // readings.
+                                                              inputFormatters: [
+                                                                FilteringTextInputFormatter
+                                                                    .digitsOnly,
+                                                              ],
                                                               style:
                                                                   GoogleFonts.poppins(
                                                                     fontSize:
@@ -6666,7 +6927,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                                       Colors
                                                                           .deepOrangeAccent,
                                                                     ],
-                                                              ),
+                                                              ).copyWith(counterText: ''),
                                                             ),
                                                           ),
                                                           const SizedBox(
@@ -6679,6 +6940,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                               keyboardType:
                                                                   TextInputType
                                                                       .number,
+                                                              inputFormatters: [
+                                                                FilteringTextInputFormatter
+                                                                    .digitsOnly,
+                                                              ],
                                                               style:
                                                                   GoogleFonts.poppins(
                                                                     fontSize:
@@ -6701,7 +6966,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                                       Colors
                                                                           .deepOrange,
                                                                     ],
-                                                              ),
+                                                              ).copyWith(counterText: ''),
                                                             ),
                                                           ),
                                                         ],
@@ -6963,6 +7228,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                     startReadingControllers,
                                     endReadingControllers,
                                     selectedUnitPerItem,
+                                    descriptionControllers,
                                   );
                                   if (context.mounted) {
                                     Navigator.of(context).pop();
@@ -6988,6 +7254,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     Map<String, TextEditingController> startReadingControllers,
     Map<String, TextEditingController> endReadingControllers,
     Map<String, String> selectedUnitPerItem,
+    Map<String, List<TextEditingController>> descriptionControllers,
   ) async {
     for (final name in selectedItemNames) {
       final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
@@ -7001,6 +7268,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       final String unitName =
           selectedUnitPerItem[name] ??
           (units.isNotEmpty ? units.first.name : '');
+      final List<String> itemDescriptions =
+          descriptionControllers[name]
+              ?.map((c) => c.text.trim())
+              .where((t) => t.isNotEmpty)
+              .toList() ??
+          const [];
 
       // Use whatever rate is currently in the editable field — lets the
       // user type a rate when it came back Empty, or override an Item
@@ -7057,6 +7330,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
             },
             meterFrom: meterFrom,
             meterTo: meterTo,
+            basicUserDescriptions: itemDescriptions,
           ),
         );
       }
@@ -7520,6 +7794,121 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
                                     const SizedBox(height: 14),
 
+                                    // 📝 Basic User Description (UniGas only) - one or
+                                    // more separate single-line boxes, "+" adds another.
+                                    // Sent as Tally's BASICUSERDESCRIPTION.LIST on this
+                                    // item's inventory entry (one object per box).
+                                    if (isUniGasSerial(serial_no) &&
+                                        isVisibleUnit) ...[
+                                      Row(
+                                        children: [
+                                          Text(
+                                            "Description (optional)",
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                          const Spacer(),
+                                          InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                            onTap: () {
+                                              setStateDialog(() {
+                                                itemDescriptionControllers.add(
+                                                  TextEditingController(),
+                                                );
+                                              });
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.all(
+                                                4,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: app_color.withOpacity(
+                                                  0.12,
+                                                ),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Icon(
+                                                Icons.add,
+                                                size: 18,
+                                                color: app_color,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      for (
+                                        int i = 0;
+                                        i < itemDescriptionControllers.length;
+                                        i++
+                                      ) ...[
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: TextField(
+                                                controller:
+                                                    itemDescriptionControllers[i],
+                                                maxLines: 1,
+                                                maxLength: 75,
+                                                decoration: InputDecoration(
+                                                  hintText:
+                                                      "Enter description",
+                                                  isDense: true,
+                                                  contentPadding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 12,
+                                                      ),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          14,
+                                                        ),
+                                                  ),
+                                                  focusedBorder:
+                                                      OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              14,
+                                                            ),
+                                                        borderSide: BorderSide(
+                                                          color: app_color,
+                                                          width: 1.5,
+                                                        ),
+                                                      ),
+                                                ),
+                                              ),
+                                            ),
+                                            if (itemDescriptionControllers
+                                                    .length >
+                                                1)
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.close,
+                                                  size: 18,
+                                                  color: Colors.redAccent,
+                                                ),
+                                                onPressed: () {
+                                                  setStateDialog(() {
+                                                    itemDescriptionControllers
+                                                        .removeAt(i)
+                                                        .dispose();
+                                                  });
+                                                },
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                      ],
+                                      const SizedBox(height: 6),
+                                    ],
+
                                     TextFormField(
                                       controller: itemQuantityController,
                                       keyboardType: TextInputType.number,
@@ -7603,6 +7992,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         );
                                                       });
                                                     },
+                                                    inputFormatters: [
+                                                      FilteringTextInputFormatter
+                                                          .digitsOnly,
+                                                    ],
                                                     decoration: _inputDecoration(
                                                       label: "Start Reading",
                                                       icon: Icons.speed,
@@ -7610,7 +8003,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         Colors.orange,
                                                         Colors.deepOrangeAccent,
                                                       ],
-                                                    ),
+                                                    ).copyWith(counterText: ''),
                                                   ),
                                                 ),
 
@@ -7655,6 +8048,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                         );
                                                       });
                                                     },
+                                                    inputFormatters: [
+                                                      FilteringTextInputFormatter
+                                                          .digitsOnly,
+                                                    ],
                                                     decoration: _inputDecoration(
                                                       label: "End Reading",
                                                       icon:
@@ -7670,7 +8067,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                               Colors.red,
                                                               Colors.deepOrange,
                                                             ],
-                                                    ),
+                                                    ).copyWith(counterText: ''),
                                                   ),
                                                 ),
                                               ],
@@ -8961,8 +9358,8 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
       // ✅ If both fields have value, validate end > start
       if (meterFrom.isNotEmpty && meterTo.isNotEmpty) {
-        final start = double.tryParse(meterFrom);
-        final end = double.tryParse(meterTo);
+        final start = BigInt.tryParse(meterFrom);
+        final end = BigInt.tryParse(meterTo);
 
         if (start == null || end == null || end <= start) {
           showAppMessage(
@@ -9021,12 +9418,22 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           batchAllocationList: batchAllocation,
           meterFrom: meterFrom,
           meterTo: meterTo,
+          basicUserDescriptions: isUniGasSerial(serial_no)
+              ? itemDescriptionControllers
+                    .map((c) => c.text.trim())
+                    .where((t) => t.isNotEmpty)
+                    .toList()
+              : const [],
         );
 
         setState(() {
           saleItems.add(newItem);
         });
       }
+      for (final c in itemDescriptionControllers) {
+        c.dispose();
+      }
+      itemDescriptionControllers = [TextEditingController()];
 
       setState(() {
         if (saleItems.isEmpty) {
@@ -9348,6 +9755,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     _textFieldFocusNodeNarration
         .dispose(); // Dispose of the focus node when it's no longer needed.
     _animationController.dispose();
+    for (final c in itemDescriptionControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 

@@ -3082,7 +3082,8 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
           vchtypenamedata = jsonResponse["vchTypes"].cast<String>();
           _selectedvchtypename = oldvchname;
           fetchvchnos(_selectedvchtypename);
-          partyledgerdata = jsonResponse["partyLedgers"].cast<String>();
+          partyledgerdata = jsonResponse["partyLedgers"].cast<String>()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
           _selectedpartyledger = oldpartyledger;
           _partyLedgerController.text = _selectedpartyledger;
           salesledger_data = jsonResponse["salesLedgers"].cast<String>();
