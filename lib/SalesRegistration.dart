@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:flutter/cupertino.dart';
@@ -19,6 +20,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
+import 'widgets/signature_capture.dart';
 
 class SalesRegistration extends StatefulWidget {
   const SalesRegistration({Key? key}) : super(key: key);
@@ -147,6 +149,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
   TextEditingController _itemController = TextEditingController();
   TextEditingController _partyLedgerController = TextEditingController();
+
+  // UniGas only - Receiver Information shown on the printed Tax Invoice.
+  // Same fields as the Delivery Note's Receiver Information (minus EID#) -
+  // Name is mandatory before saving, Mobile/Signature are optional.
+  final TextEditingController receiverNameController = TextEditingController();
+  final TextEditingController receiverMobileController = TextEditingController();
+  Uint8List? receiverSignatureBytes;
 
   String? selectedPartyLedgerPriceLevel;
   String? selectedItemMasterId;
@@ -1045,11 +1054,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
     final pdf = pw.Document();
 
-    int totalQuantity = 0;
+    // BigInt, not int - a manually-typed quantity can run past int64 range
+    // and int.parse() throws FormatException on that instead of silently
+    // erroring, crashing PDF generation outright.
+    BigInt totalQuantity = BigInt.zero;
     double totalitemAmount = 0;
     for (var item in saleItems) {
       String qty = item.itemQuantity;
-      int qty_int = int.parse(qty);
+      BigInt qty_int = BigInt.parse(qty);
       totalQuantity += qty_int;
 
       totalitemAmount += double.parse(
@@ -3468,22 +3480,35 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                     pw.Row(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        // Blank box for the customer's physical
-                        // signature/stamp.
-                        pw.Container(
-                          width: 60,
-                          height: 60,
-                          decoration: pw.BoxDecoration(
-                            border: pw.Border.all(width: 1),
-                          ),
-                        ),
+                        // Shows the receiver's captured on-screen signature
+                        // when available, otherwise a blank box for the
+                        // customer's physical signature/stamp.
+                        receiverSignatureBytes != null
+                            ? pw.Container(
+                                width: 60,
+                                height: 60,
+                                decoration: pw.BoxDecoration(
+                                  border: pw.Border.all(width: 1),
+                                ),
+                                child: pw.Image(
+                                  pw.MemoryImage(receiverSignatureBytes!),
+                                  fit: pw.BoxFit.contain,
+                                ),
+                              )
+                            : pw.Container(
+                                width: 60,
+                                height: 60,
+                                decoration: pw.BoxDecoration(
+                                  border: pw.Border.all(width: 1),
+                                ),
+                              ),
                         pw.SizedBox(width: 8),
                         pw.Expanded(
                           child: pw.Column(
                             crossAxisAlignment: pw.CrossAxisAlignment.start,
                             children: [
                               pw.Text(
-                                'Name:',
+                                'Name: ${receiverNameController.text.trim()}',
                                 style: pw.TextStyle(
                                   fontSize: 8,
                                   fontWeight: pw.FontWeight.bold,
@@ -3491,7 +3516,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               ),
                               pw.SizedBox(height: 20),
                               pw.Text(
-                                'Phone:',
+                                'Phone: ${receiverMobileController.text.trim()}',
                                 style: pw.TextStyle(
                                   fontSize: 8,
                                   fontWeight: pw.FontWeight.bold,
@@ -3605,6 +3630,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       _selectedpartyledger = null;
       _partyLedgerController.clear();
+
+      receiverNameController.clear();
+      receiverMobileController.clear();
+      receiverSignatureBytes = null;
 
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
       _selectedvatledger = _defaultVatLedger();
@@ -3932,6 +3961,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       return;
     }
 
+    // UniGas only: Receiver Name is mandatory before saving.
+    if (isUniGasSerial && receiverNameController.text.trim().isEmpty) {
+      showAppMessage(context, "Please enter the Receiver's Name before saving");
+
+      return;
+    }
+
     if (saleItems.isEmpty) {
       showAppMessage(context, 'Atleast add 1 item');
     } else {
@@ -4048,7 +4084,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
         newRefBillAllocation = {
           "BILLTYPE": "New Ref",
-          "AMOUNT": roundedtotalAmount.toStringAsFixed(decimal!),
+          // Same sign as the party ledger entry it belongs to (negative
+          // for a Sales invoice) - was previously sent as the always-
+          // positive display total, which didn't match partyLedgerAmount.
+          "AMOUNT": partyLedgerAmount.toStringAsFixed(decimal!),
           "NAME": billName,
           "BILLDATE": billDate,
           "BILLCREDITPERIOD": billCreditPeriod,
@@ -7182,11 +7221,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       if (existingIndex != -1) {
         final existing = saleItems[existingIndex];
-        final String newQty = (int.parse(existing.itemQuantity) + parsedQty)
-            .toString();
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
+        final String newQty =
+            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
+                .toString();
         saleItems[existingIndex] = existing
             .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * int.parse(newQty));
+            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
       } else {
         saleItems.add(
           SaleItem(
@@ -8713,10 +8756,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       if (existingIndex != -1) {
         // Item already exists with the same name, price, and unit, update its quantity and amount
         SaleItem existingItem = saleItems[existingIndex];
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
         String newQuantity =
-            (int.parse(existingItem.itemQuantity) + int.parse(parsedQuantity))
+            (BigInt.parse(existingItem.itemQuantity) +
+                    BigInt.parse(parsedQuantity))
                 .toString();
-        double newAmount = parsedPrice * int.parse(newQuantity);
+        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
         saleItems[existingIndex] = existingItem
             .updateQuantity(newQuantity)
             .updateItemAmount(newAmount);
@@ -9745,6 +9792,36 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                           ),
                         ],
                       ),
+
+                      // ── Receiver Information Section (UniGas only) ──
+                      if (isUniGasSerial)
+                        EntrySection(
+                          icon: Icons.assignment_ind_outlined,
+                          title: "Receiver Information",
+                          iconGradient: [Colors.teal, Colors.tealAccent],
+                          children: [
+                            EntryFormField(
+                              label: "Receiver Name *",
+                              icon: Icons.person_outline,
+                              iconGradient: [Colors.teal, Colors.tealAccent],
+                              controller: receiverNameController,
+                            ),
+                            EntryFormField(
+                              label: "Receiver Mobile",
+                              icon: Icons.phone_outlined,
+                              iconGradient: [Colors.blue, Colors.blueAccent],
+                              controller: receiverMobileController,
+                              keyboardType: TextInputType.phone,
+                              validator: (value) => null,
+                            ),
+                            ReceiverSignatureTile(
+                              signatureBytes: receiverSignatureBytes,
+                              onCaptured: (bytes) => setState(() {
+                                receiverSignatureBytes = bytes;
+                              }),
+                            ),
+                          ],
+                        ),
 
                       // ── VAT Section ──
                       EntrySection(

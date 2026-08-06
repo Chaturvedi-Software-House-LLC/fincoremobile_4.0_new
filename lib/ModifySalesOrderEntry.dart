@@ -3527,8 +3527,8 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
   // drifting out of sync with the readings. If both readings are cleared,
   // quantity goes back to being user-editable and resets to '1'.
   bool _isQtyLockedByMeterReading(String startText, String endText) {
-    final start = double.tryParse(startText.trim());
-    final end = double.tryParse(endText.trim());
+    final start = BigInt.tryParse(startText.trim());
+    final end = BigInt.tryParse(endText.trim());
     return start != null && end != null && end > start;
   }
 
@@ -3539,14 +3539,16 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
   }) {
     final startText = startController.text.trim();
     final endText = endController.text.trim();
-    final start = double.tryParse(startText);
-    final end = double.tryParse(endText);
+    // Meter readings are whole numbers that can run to many digits - a
+    // real van meter has no fixed max length. BigInt parses/subtracts them
+    // exactly; double loses precision past ~15-17 digits and its .toInt()
+    // silently clamps to 9223372036854775807 (int64 max) when the value is
+    // too large to represent, instead of erroring.
+    final start = BigInt.tryParse(startText);
+    final end = BigInt.tryParse(endText);
 
     if (start != null && end != null && end > start) {
-      final qty = end - start;
-      qtyController.text = qty == qty.roundToDouble()
-          ? qty.toInt().toString()
-          : qty.toString();
+      qtyController.text = (end - start).toString();
     } else if (startText.isEmpty && endText.isEmpty) {
       qtyController.text = '1';
     }
@@ -6652,11 +6654,15 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
 
       if (existingIndex != -1) {
         final existing = saleItems[existingIndex];
-        final String newQty = (int.parse(existing.itemQuantity) + parsedQty)
-            .toString();
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
+        final String newQty =
+            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
+                .toString();
         saleItems[existingIndex] = existing
             .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * int.parse(newQty));
+            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
       } else {
         saleItems.add(
           SaleItem(
@@ -6723,10 +6729,14 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
       if (existingIndex != -1) {
         // Item already exists with the same name, price, and unit, update its quantity and amount
         SaleItem existingItem = saleItems[existingIndex];
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
         String newQuantity =
-            (int.parse(existingItem.itemQuantity) + int.parse(parsedQuantity))
+            (BigInt.parse(existingItem.itemQuantity) +
+                    BigInt.parse(parsedQuantity))
                 .toString();
-        double newAmount = parsedPrice * int.parse(newQuantity);
+        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
         saleItems[existingIndex] = existingItem
             .updateQuantity(newQuantity)
             .updateItemAmount(newAmount);

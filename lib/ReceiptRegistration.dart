@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/PendingReceiptEntry.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/signature_capture.dart';
 
 class ReceiptRegistration extends StatefulWidget {
   const ReceiptRegistration({Key? key}) : super(key: key);
@@ -80,6 +82,13 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   late DateTime yearEndDate = DateTime(now.year, 12, 31);
 
   TextEditingController _partyController = TextEditingController();
+
+  // UniGas only - Receiver Information shown on the printed Receipt.
+  // Same fields as the Delivery Note's Receiver Information (minus EID#) -
+  // Name is mandatory before saving, Mobile/Signature are optional.
+  final TextEditingController receiverNameController = TextEditingController();
+  final TextEditingController receiverMobileController = TextEditingController();
+  Uint8List? receiverSignatureBytes;
 
   TextEditingController _bankcashnameController = TextEditingController();
 
@@ -161,24 +170,38 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     // showAppMessage(context, "Bill removed from receipt");
   }
 
-  String getBillDueDays(dynamic bill) {
-    final String billDateStr = bill["billdate"]?.toString() ?? "";
-    final String dueDateStr = bill["duedate"]?.toString() ?? "";
-
-    if (billDateStr.length != 8 || dueDateStr.length != 8) {
-      return "";
-    }
-
+  // The backend has sent duedate in two different shapes seen in the
+  // wild - "yyyyMMdd" (matching billdate) and "d-MMM-yy" (e.g. "1-Feb-22")
+  // - so both are tried instead of assuming one fixed format.
+  DateTime? _parseBillDate(String value) {
+    if (value.isEmpty) return null;
     try {
-      final DateTime billDate = DateTime.parse(billDateStr);
-      final DateTime dueDate = DateTime.parse(dueDateStr);
-
-      final int days = dueDate.difference(billDate).inDays;
-
-      return days < 0 ? "" : days.toString();
-    } catch (e) {
-      return "";
+      return DateTime.parse(value);
+    } catch (_) {
+      try {
+        return DateFormat('d-MMM-yy').parse(value);
+      } catch (_) {
+        return null;
+      }
     }
+  }
+
+  // BILLCREDITPERIOD on an "Agst Ref" bill allocation must be an actual
+  // due-date (yyyyMMdd), matching the convention used everywhere else in
+  // the app (e.g. Sales's "New Ref" allocation, and this screen's own
+  // manual "Add Bill" flow) - not a bare day-count, and never an empty
+  // string (seen going out to the Tally sync for Opening Balance bills
+  // with no normal duedate - a blank date field is a plausible reason
+  // that service's bill matching fails and falls back to New Ref).
+  // Falls back to the bill's own billdate when duedate can't be parsed,
+  // so a value is always sent.
+  String getBillDueDate(dynamic bill) {
+    final String dueDateStr = bill["duedate"]?.toString() ?? "";
+    final DateTime? dueDate =
+        _parseBillDate(dueDateStr) ??
+        _parseBillDate(bill["billdate"]?.toString() ?? "");
+    if (dueDate == null) return "";
+    return DateFormat('yyyyMMdd').format(dueDate);
   }
 
   void addOutstandingBillToReceipt(Map<String, dynamic> bill) {
@@ -203,7 +226,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           billName: "Agst Ref",
           billAmount: amount,
           billNo: billNo,
-          billDueDate: getBillDueDays(bill),
+          billDueDate: getBillDueDate(bill),
         ),
       );
 
@@ -249,6 +272,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     try {
       final url = Uri.parse(HttpURL_fetchoutstanding!);
 
+      debugPrint('url oustanding -> $HttpURL_fetchoutstanding');
       final headers = {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
@@ -264,6 +288,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         "ledger": ledgerName,
         "showPending" : true
       });
+      debugPrint('outstanding body -> ${body}');
+
 
       final response = await http.post(url, headers: headers, body: body);
       print('outstanding -> ${response.body}');
@@ -278,6 +304,16 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         for (var item in values) {
           billsOutstanding +=
               double.tryParse(item["outstanding"].toString()) ?? 0.0;
+        }
+
+        // UniGas only: show the latest bills first - other serials keep
+        // whatever order the backend's "billdate" orderby already returns.
+        if (isUniGasSerial) {
+          values.sort((a, b) {
+            final int dateA = int.tryParse(a["billdate"].toString()) ?? 0;
+            final int dateB = int.tryParse(b["billdate"].toString()) ?? 0;
+            return dateB.compareTo(dateA);
+          });
         }
 
         setState(() {
@@ -823,7 +859,6 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     "VOUCHERTYPENAME": "",
     "PARTYLEDGERNAME": "",
     "VOUCHERNUMBER": "",
-    "ENTEREDBY": "",
     "NARRATION": "",
     "ALLLEDGERENTRIES.LIST": [],
   };
@@ -2386,6 +2421,20 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     // descendant" pointer can't hand focus straight back to that field.
     FocusScope.of(context).requestFocus(FocusNode());
 
+    // UniGas only: this reset runs right after printUniGasPdf's full-screen
+    // printing animation dialog pops itself (Navigator.pop() inside a
+    // delayed callback in _PrintingAnimationOverlay, not synchronously with
+    // this function). Navigator's own focus-restoration-to-previous-route
+    // can land on the NEXT frame, after the drop above already ran -
+    // reclaiming focus for the Party field and popping its suggestions
+    // list back open. A second drop scheduled for the next frame beats
+    // that race instead of just the first one.
+    if (isUniGasSerial) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) FocusScope.of(context).requestFocus(FocusNode());
+      });
+    }
+
     setState(() {
       _selectedparty = null;
       showOutstandingCard = false;
@@ -2393,6 +2442,10 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       outstandingError = "";
       _selectedparty = null;
       _partyController.clear();
+
+      receiverNameController.clear();
+      receiverMobileController.clear();
+      receiverSignatureBytes = null;
 
       isChequeVisible = false;
 
@@ -2898,25 +2951,40 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                     pw.Row(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        pw.Container(
-                          width: 60,
-                          height: 60,
-                          decoration: pw.BoxDecoration(
-                            border: pw.Border.all(width: 1),
-                          ),
-                        ),
+                        // Shows the receiver's captured on-screen signature
+                        // when available, otherwise a blank box for the
+                        // payer's physical signature/stamp.
+                        receiverSignatureBytes != null
+                            ? pw.Container(
+                                width: 60,
+                                height: 60,
+                                decoration: pw.BoxDecoration(
+                                  border: pw.Border.all(width: 1),
+                                ),
+                                child: pw.Image(
+                                  pw.MemoryImage(receiverSignatureBytes!),
+                                  fit: pw.BoxFit.contain,
+                                ),
+                              )
+                            : pw.Container(
+                                width: 60,
+                                height: 60,
+                                decoration: pw.BoxDecoration(
+                                  border: pw.Border.all(width: 1),
+                                ),
+                              ),
                         pw.SizedBox(width: 10),
                         pw.Expanded(
                           child: pw.Column(
                             crossAxisAlignment: pw.CrossAxisAlignment.start,
                             children: [
                               pw.Text(
-                                'Name:',
+                                'Name: ${receiverNameController.text.trim()}',
                                 style: pw.TextStyle(fontSize: 9),
                               ),
                               pw.SizedBox(height: 20),
                               pw.Text(
-                                'Phone:',
+                                'Phone: ${receiverMobileController.text.trim()}',
                                 style: pw.TextStyle(fontSize: 9),
                               ),
                             ],
@@ -3178,6 +3246,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       return;
     }
 
+    // UniGas only: Receiver Name is mandatory before saving.
+    if (isUniGasSerial && receiverNameController.text.trim().isEmpty) {
+      showAppMessage(context, "Please enter the Receiver's Name before saving");
+      return;
+    }
+
     if (bills.isEmpty) {
       showAppMessage(context, 'Atleast add 1 bill');
     } else {
@@ -3191,7 +3265,6 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       jsonEntryData["DATE"] = receiptdatestring;
       jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
       jsonEntryData["PARTYLEDGERNAME"] = _selectedparty;
-      jsonEntryData["ENTEREDBY"] = name;
       jsonEntryData["VOUCHERNUMBER"] = vchnoValue;
       jsonEntryData["NARRATION"] = narrationValue;
 
@@ -3203,15 +3276,28 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           .map((bill) {
             final Map<String, dynamic> billData = {
               "BILLTYPE": bill.billName,
-              "AMOUNT": bill.billAmount,
+              // Fixed-decimal string, not a raw double - an "Agst Ref"
+              // amount that doesn't exactly match the outstanding bill's
+              // stored amount (floating-point serialization artifacts
+              // like 746.9000000000001) fails Tally's exact-match bill
+              // netting, silently falling back to creating a new "New
+              // Ref" reference instead of clearing the original bill.
+              "AMOUNT": bill.billAmount.toStringAsFixed(decimal!),
             };
 
             // Conditionally add BILLNO and BILL CREDIT PERIOD if BILLTYPE is not "On Account"
             if (bill.billName != "On Account") {
               billData["NAME"] = bill.billNo;
-              billData["BILLCREDITPERIOD"] =
-                  bill.billDueDate ??
-                  ""; // Assuming billDueDate is part of the bill object
+              // Omit entirely rather than send an empty string when the
+              // backend's outstanding-bill duedate couldn't be parsed
+              // (e.g. Opening Balance bills, which may have no normal
+              // duedate at all) - an empty BILLCREDITPERIOD tag has been
+              // seen going out to the Tally sync, and a malformed/blank
+              // date field is a plausible reason that service's bill
+              // matching fails and falls back to creating a New Ref.
+              if (bill.billDueDate != null && bill.billDueDate!.isNotEmpty) {
+                billData["BILLCREDITPERIOD"] = bill.billDueDate;
+              }
             }
 
             return billData;
@@ -3224,7 +3310,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           .map((bill) {
             final Map<String, dynamic> billData = {
               "BILLTYPE": bill.billName,
-              "AMOUNT": bill.billAmount,
+              "AMOUNT": bill.billAmount.toStringAsFixed(decimal!),
             };
             return billData;
           })
@@ -3285,7 +3371,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
       final jsonString = json.encode(jsonData);
 
-      print(jsonString);
+      debugPrint(jsonString);
       try {
         final url_receiptentry = Uri.parse(HttpURL_receiptEntry!);
         Map<String, String> headers_receiptentry = {
@@ -7399,6 +7485,36 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                             ],
                           ),
                         ),
+
+                        // ── Receiver Information Section (UniGas only) ──
+                        if (isUniGasSerial)
+                          EntrySection(
+                            icon: Icons.assignment_ind_outlined,
+                            title: "Receiver Information",
+                            iconGradient: [Colors.teal, Colors.tealAccent],
+                            children: [
+                              EntryFormField(
+                                label: "Receiver Name *",
+                                icon: Icons.person_outline,
+                                iconGradient: [Colors.teal, Colors.tealAccent],
+                                controller: receiverNameController,
+                              ),
+                              EntryFormField(
+                                label: "Receiver Mobile",
+                                icon: Icons.phone_outlined,
+                                iconGradient: [Colors.blue, Colors.blueAccent],
+                                controller: receiverMobileController,
+                                keyboardType: TextInputType.phone,
+                                validator: (value) => null,
+                              ),
+                              ReceiverSignatureTile(
+                                signatureBytes: receiverSignatureBytes,
+                                onCaptured: (bytes) => setState(() {
+                                  receiverSignatureBytes = bytes;
+                                }),
+                              ),
+                            ],
+                          ),
 
                         // ── Narration Section ──
                         EntrySection(

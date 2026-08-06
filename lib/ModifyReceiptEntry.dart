@@ -329,7 +329,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     "VOUCHERTYPENAME": "",
     "PARTYLEDGERNAME": "",
     "VOUCHERNUMBER": "",
-    "ENTEREDBY": "",
     "NARRATION": "",
     "ALLLEDGERENTRIES.LIST": [],
   };
@@ -1999,7 +1998,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
       jsonEntryData["PARTYLEDGERNAME"] = _selectedparty;
       jsonEntryData["VOUCHERNUMBER"] = vchnoValue;
-      jsonEntryData["ENTEREDBY"] = name;
       jsonEntryData["NARRATION"] = narrationValue;
 
       final List<Map<String, dynamic>> allLedgerEntriesList = [];
@@ -2016,9 +2014,13 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             // Conditionally add BILLNO and BILL CREDIT PERIOD if BILLTYPE is not "On Account"
             if (bill.billName != "On Account") {
               billData["NAME"] = bill.billNo;
-              billData["BILLCREDITPERIOD"] =
-                  bill.billDueDate ??
-                  ""; // Assuming billDueDate is part of the bill object
+              // Omit entirely rather than send an empty string when there's
+              // no valid due date - see ReceiptRegistration.dart for why an
+              // empty BILLCREDITPERIOD is a plausible cause of the Tally
+              // sync's bill matching failing and falling back to New Ref.
+              if (bill.billDueDate != null && bill.billDueDate!.isNotEmpty) {
+                billData["BILLCREDITPERIOD"] = bill.billDueDate;
+              }
             }
 
             return billData;
@@ -2031,7 +2033,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
           .map((bill) {
             final Map<String, dynamic> billData = {
               "BILLTYPE": bill.billName,
-              "AMOUNT": bill.billAmount,
+              "AMOUNT": bill.billAmount.toStringAsFixed(decimal),
             };
             return billData;
           })

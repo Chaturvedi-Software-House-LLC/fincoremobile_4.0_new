@@ -1379,7 +1379,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       value = fastmovingvalue;
     }
 
-    int fastdays = int.parse(fastmovingdays);
+    int fastdays = int.tryParse(fastmovingdays) ?? 0;
     DateTime currentDate = DateTime.now();
     DateTime newDate = currentDate.subtract(Duration(days: fastdays));
     String formattedDate = DateFormat('yyyyMMdd').format(newDate);
@@ -1512,7 +1512,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       value = slowmovingvalue;
     }
 
-    int slowdays = int.parse(slowmovingdays);
+    int slowdays = int.tryParse(slowmovingdays) ?? 0;
     DateTime currentDate = DateTime.now();
     DateTime newDate = currentDate.subtract(Duration(days: slowdays));
     String formattedDate = DateFormat('yyyyMMdd').format(newDate);
@@ -2025,7 +2025,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     filteredItems_inactive_items.clear();
     inactive_items_list.clear();
 
-    int inactivedayss = int.parse(inactivedays);
+    int inactivedayss = int.tryParse(inactivedays) ?? 0;
     DateTime currentDate = DateTime.now();
     DateTime newDate = currentDate.subtract(Duration(days: inactivedayss));
     String formattedDate = DateFormat('yyyyMMdd').format(newDate);

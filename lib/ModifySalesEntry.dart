@@ -5792,11 +5792,15 @@ _itemController.text = _selecteditem;
 
       if (existingIndex != -1) {
         final existing = saleItems[existingIndex];
-        final String newQty = (int.parse(existing.itemQuantity) + parsedQty)
-            .toString();
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
+        final String newQty =
+            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
+                .toString();
         saleItems[existingIndex] = existing
             .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * int.parse(newQty));
+            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
       } else {
         saleItems.add(
           SaleItem(
@@ -7260,10 +7264,14 @@ _itemController.text = _selecteditem;
       if (existingIndex != -1) {
         // Item already exists with the same name, price, and unit, update its quantity and amount
         SaleItem existingItem = saleItems[existingIndex];
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
         String newQuantity =
-            (int.parse(existingItem.itemQuantity) + int.parse(parsedQuantity))
+            (BigInt.parse(existingItem.itemQuantity) +
+                    BigInt.parse(parsedQuantity))
                 .toString();
-        double newAmount = parsedPrice * int.parse(newQuantity);
+        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
         saleItems[existingIndex] = existingItem
             .updateQuantity(newQuantity)
             .updateItemAmount(newAmount);

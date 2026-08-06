@@ -433,7 +433,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   ) async {
     setState(() {
       party_count = "0";
-      if (int.parse(party_count) < 2) {
+      if ((int.tryParse(party_count) ?? 0) < 2) {
         party_text = "Party";
       } else {
         party_text = "Parties";
@@ -469,7 +469,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
           filteredItems_parties = parties_list;
           setState(() {
             party_count = filteredItems_parties.length.toString();
-            if (int.parse(party_count) < 2) {
+            if ((int.tryParse(party_count) ?? 0) < 2) {
               party_text = "Party";
             } else {
               party_text = "Parties";
@@ -492,7 +492,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     setState(() {
       if (parties_list.isEmpty) {
         party_count = "0";
-        if (int.parse(party_count) < 2) {
+        if ((int.tryParse(party_count) ?? 0) < 2) {
           party_text = "Party";
         } else {
           party_text = "Parties";
@@ -510,7 +510,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   ) async {
     setState(() {
       party_count = "0";
-      if (int.parse(party_count) < 2) {
+      if ((int.tryParse(party_count) ?? 0) < 2) {
         party_text = "Party";
       } else {
         party_text = "Parties";
@@ -547,7 +547,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
           setState(() {
             party_count = filteredItems_parties.length.toString();
-            if (int.parse(party_count) < 2) {
+            if ((int.tryParse(party_count) ?? 0) < 2) {
               party_text = "Party";
             } else {
               party_text = "Parties";
@@ -570,7 +570,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     setState(() {
       if (parties_list.isEmpty) {
         party_count = "0";
-        if (int.parse(party_count) < 2) {
+        if ((int.tryParse(party_count) ?? 0) < 2) {
           party_text = "Party";
         } else {
           party_text = "Parties";
@@ -630,7 +630,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
           filteredItems_parties = parties_list;
           setState(() {
             party_count = filteredItems_parties.length.toString();
-            if (int.parse(party_count) < 2) {
+            if ((int.tryParse(party_count) ?? 0) < 2) {
               party_text = "Party";
             } else {
               party_text = "Parties";
@@ -653,7 +653,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     setState(() {
       if (parties_list.isEmpty) {
         party_count = "0";
-        if (int.parse(party_count) < 2) {
+        if ((int.tryParse(party_count) ?? 0) < 2) {
           party_text = "Party";
         } else {
           party_text = "Parties";
@@ -671,7 +671,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   ) async {
     setState(() {
       party_count = "0";
-      if (int.parse(party_count) < 2) {
+      if ((int.tryParse(party_count) ?? 0) < 2) {
         party_text = "Party";
       } else {
         party_text = "Parties";
@@ -719,7 +719,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
           setState(() {
             party_count = filteredItems_parties.length.toString();
-            if (int.parse(party_count) < 2) {
+            if ((int.tryParse(party_count) ?? 0) < 2) {
               party_text = "Party";
             } else {
               party_text = "Parties";
@@ -742,7 +742,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     setState(() {
       if (parties_list.isEmpty) {
         party_count = "0";
-        if (int.parse(party_count) < 2) {
+        if ((int.tryParse(party_count) ?? 0) < 2) {
           party_text = "Party";
         } else {
           party_text = "Parties";
@@ -889,7 +889,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                     filteredItems_parties = parties_list;
                   }
                   party_count = filteredItems_parties.length.toString();
-                  if(int.parse(party_count)<2)
+                  if((int.tryParse(party_count) ?? 0)<2)
                   {
                     party_text = "Party";
                   }
@@ -1118,7 +1118,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                       filteredItems_parties.clear();
                                       parties_list.clear();
                                       party_count = "0";
-                                      party_text = int.parse(party_count) < 2
+                                      party_text = (int.tryParse(party_count) ?? 0) < 2
                                           ? "Party"
                                           : "Parties";
                                     });
@@ -1162,7 +1162,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
                                 party_count = filteredItems_parties.length
                                     .toString();
-                                if (int.parse(party_count) < 2) {
+                                if ((int.tryParse(party_count) ?? 0) < 2) {
                                   party_text = "Party";
                                 } else {
                                   party_text = "Parties";

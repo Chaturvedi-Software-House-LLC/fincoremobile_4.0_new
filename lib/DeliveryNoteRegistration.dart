@@ -20,6 +20,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'widgets/signature_capture.dart';
 import 'widgets/searchable_selector.dart';
 
 class Deliverynoteregistration extends StatefulWidget {
@@ -985,11 +986,15 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
     final pdf = pw.Document();
 
-    int totalQuantity = 0;
+    // BigInt, not int - a manually-typed quantity can run past int64 range
+    // and int.parse() throws FormatException on that instead of silently
+    // erroring, crashing PDF generation outright (see the meter-reading
+    // BigInt fix above for the same overflow class of bug).
+    BigInt totalQuantity = BigInt.zero;
     double totalitemAmount = 0;
     for (var item in saleItems) {
       String qty = item.itemQuantity;
-      int qty_int = int.parse(qty);
+      BigInt qty_int = BigInt.parse(qty);
       totalQuantity += qty_int;
 
       totalitemAmount += double.parse(
@@ -2402,6 +2407,20 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     // severs that link.
     FocusScope.of(context).requestFocus(FocusNode());
 
+    // UniGas only: this reset runs right after printUniGasPdf's full-screen
+    // printing animation dialog pops itself (Navigator.pop() inside a
+    // delayed callback, not synchronously with this function). Navigator's
+    // own focus-restoration-to-previous-route can land on the NEXT frame,
+    // after the drop above already ran - reclaiming focus for the Party
+    // field and popping its suggestions list back open. A second drop
+    // scheduled for the next frame beats that race instead of just the
+    // first one.
+    if (isUniGasMeterReadingSerial) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) FocusScope.of(context).requestFocus(FocusNode());
+      });
+    }
+
     setState(() {
       controller_narration.clear();
       controller_refno.clear();
@@ -2909,22 +2928,35 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                     pw.Row(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        // Blank box for the customer's physical
-                        // signature/stamp.
-                        pw.Container(
-                          width: 60,
-                          height: 60,
-                          decoration: pw.BoxDecoration(
-                            border: pw.Border.all(width: 1),
-                          ),
-                        ),
+                        // Shows the receiver's captured on-screen signature
+                        // when available, otherwise a blank box for the
+                        // customer's physical signature/stamp.
+                        bulkReceiverSignatureBytes != null
+                            ? pw.Container(
+                                width: 60,
+                                height: 60,
+                                decoration: pw.BoxDecoration(
+                                  border: pw.Border.all(width: 1),
+                                ),
+                                child: pw.Image(
+                                  pw.MemoryImage(bulkReceiverSignatureBytes!),
+                                  fit: pw.BoxFit.contain,
+                                ),
+                              )
+                            : pw.Container(
+                                width: 60,
+                                height: 60,
+                                decoration: pw.BoxDecoration(
+                                  border: pw.Border.all(width: 1),
+                                ),
+                              ),
                         pw.SizedBox(width: 8),
                         pw.Expanded(
                           child: pw.Column(
                             crossAxisAlignment: pw.CrossAxisAlignment.start,
                             children: [
                               pw.Text(
-                                'Name:',
+                                'Name: ${bulkReceiverNameController.text.trim().isEmpty ? '' : bulkReceiverNameController.text.trim()}',
                                 style: pw.TextStyle(
                                   fontSize: 8,
                                   fontWeight: pw.FontWeight.bold,
@@ -2932,7 +2964,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                               ),
                               pw.SizedBox(height: 20),
                               pw.Text(
-                                'Phone:',
+                                'Phone: ${bulkReceiverMobileController.text.trim().isEmpty ? '' : bulkReceiverMobileController.text.trim()}',
                                 style: pw.TextStyle(
                                   fontSize: 8,
                                   fontWeight: pw.FontWeight.bold,
@@ -3449,9 +3481,8 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       return;
     }
 
-    // UniGas bulk gas delivery: Receiver Name/Signature is mandatory.
+    // UniGas delivery (bulk or cylinder): Receiver Name is mandatory.
     if (isUniGasMeterReadingSerial &&
-        _isBulkDelivery == true &&
         bulkReceiverNameController.text.trim().isEmpty) {
       showAppMessage(
         context,
@@ -5951,19 +5982,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     _showMultiItemSelectPopup(context);
   }
 
-  // Opens the full-screen signature pad and stores the captured PNG bytes
-  // once the receiver signs and taps Save.
-  Future<void> _captureBulkReceiverSignature(BuildContext context) async {
-    final Uint8List? bytes = await Navigator.of(context).push<Uint8List>(
-      MaterialPageRoute(builder: (_) => const SignatureCapturePage()),
-    );
-    if (bytes != null) {
-      setState(() {
-        bulkReceiverSignatureBytes = bytes;
-      });
-    }
-  }
-
   // Receiver EID# so it always reads as a UAE Emirates ID:
   // 784-YYYY-NNNNNNN-C (3-4-7-1 digit grouping, 15 digits total). The
   // "784" prefix is fixed - typing over/deleting it just puts it back.
@@ -7307,11 +7325,15 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
       if (existingIndex != -1) {
         final existing = saleItems[existingIndex];
-        final String newQty = (int.parse(existing.itemQuantity) + parsedQty)
-            .toString();
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
+        final String newQty =
+            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
+                .toString();
         saleItems[existingIndex] = existing
             .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * int.parse(newQty));
+            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
       } else {
         saleItems.add(
           SaleItem(
@@ -9398,10 +9420,14 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       if (existingIndex != -1) {
         // Item already exists with the same name, price, and unit, update its quantity and amount
         SaleItem existingItem = saleItems[existingIndex];
+        // BigInt, not int - a manually-typed quantity can run past int64
+        // range and int.parse() throws FormatException on that instead of
+        // silently erroring, crashing the add-item flow outright.
         String newQuantity =
-            (int.parse(existingItem.itemQuantity) + int.parse(parsedQuantity))
+            (BigInt.parse(existingItem.itemQuantity) +
+                    BigInt.parse(parsedQuantity))
                 .toString();
-        double newAmount = parsedPrice * int.parse(newQuantity);
+        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
         saleItems[existingIndex] = existingItem
             .updateQuantity(newQuantity)
             .updateItemAmount(newAmount);
@@ -10463,258 +10489,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                               ],
                             ),
 
-                            if (isUniGasMeterReadingSerial &&
-                                _isBulkDelivery == true)
-                              EntrySection(
-                                icon: Icons.assignment_ind_outlined,
-                                title: "Receiver Information",
-                                iconGradient: [Colors.teal, Colors.tealAccent],
-                                children: [
-                                  EntryFormField(
-                                    label: "Receiver Name *",
-                                    icon: Icons.person_outline,
-                                    iconGradient: [
-                                      Colors.teal,
-                                      Colors.tealAccent,
-                                    ],
-                                    controller: bulkReceiverNameController,
-                                  ),
-                                  EntryFormField(
-                                    label: "Receiver Mobile",
-                                    icon: Icons.phone_outlined,
-                                    iconGradient: [
-                                      Colors.blue,
-                                      Colors.blueAccent,
-                                    ],
-                                    controller: bulkReceiverMobileController,
-                                    keyboardType: TextInputType.phone,
-                                    validator: (value) => null,
-                                  ),
-                                  EntryFormField(
-                                    label: "Receiver EID#",
-                                    icon: Icons.badge_outlined,
-                                    iconGradient: [
-                                      Colors.purple,
-                                      Colors.deepPurpleAccent,
-                                    ],
-                                    controller: bulkReceiverEidController,
-                                    keyboardType: TextInputType.number,
-                                    onChanged: _formatBulkReceiverEid,
-                                    validator: (value) => null,
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      left: 16,
-                                      right: 16,
-                                      top: 2,
-                                      bottom: 6,
-                                    ),
-                                    child: Text(
-                                      "Format: 784-****-*******-*",
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 11,
-                                        fontStyle: FontStyle.italic,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant
-                                            .withValues(alpha: 0.7),
-                                      ),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      4,
-                                      16,
-                                      6,
-                                    ),
-                                    child: GestureDetector(
-                                      onTap: () =>
-                                          _captureBulkReceiverSignature(
-                                            context,
-                                          ),
-                                      child: Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color:
-                                              bulkReceiverSignatureBytes == null
-                                              ? (Theme.of(context).brightness ==
-                                                        Brightness.dark
-                                                    ? Colors.white.withValues(
-                                                        alpha: 0.05,
-                                                      )
-                                                    : Colors.grey.shade100)
-                                              : Colors.white,
-                                          borderRadius: BorderRadius.circular(
-                                            14,
-                                          ),
-                                          border: Border.all(
-                                            color:
-                                                bulkReceiverSignatureBytes ==
-                                                    null
-                                                ? Colors.grey.shade400
-                                                : Colors.teal,
-                                            width: 1.4,
-                                            style: BorderStyle.solid,
-                                          ),
-                                        ),
-                                        child:
-                                            bulkReceiverSignatureBytes == null
-                                            ? Row(
-                                                // Top-aligned (not the Row
-                                                // default of center) so the
-                                                // icon/chevron stay pinned
-                                                // to the first line instead
-                                                // of re-centering against
-                                                // the text column once it
-                                                // wraps to 2-3 lines on
-                                                // narrower screens.
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.all(8),
-                                                    decoration: BoxDecoration(
-                                                      gradient:
-                                                          const LinearGradient(
-                                                            colors: [
-                                                              Colors.teal,
-                                                              Colors.tealAccent,
-                                                            ],
-                                                          ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            10,
-                                                          ),
-                                                    ),
-                                                    child: const Icon(
-                                                      Icons.draw_outlined,
-                                                      color: Colors.white,
-                                                      size: 20,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          "Tap to Capture Receiver Signature",
-                                                          // No maxLines/
-                                                          // ellipsis - wraps
-                                                          // across as many
-                                                          // lines as it
-                                                          // needs instead of
-                                                          // truncating or
-                                                          // overflowing on
-                                                          // narrow screens.
-                                                          softWrap: true,
-                                                          style:
-                                                              GoogleFonts.poppins(
-                                                                fontSize: 13,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                              ),
-                                                        ),
-                                                        Text(
-                                                          "Hand the device to the receiver to sign",
-                                                          softWrap: true,
-                                                          style: GoogleFonts.poppins(
-                                                            fontSize: 11,
-                                                            color: Theme.of(context)
-                                                                .colorScheme
-                                                                .onSurfaceVariant,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  const Icon(
-                                                    Icons.chevron_right,
-                                                  ),
-                                                ],
-                                              )
-                                            : Row(
-                                                children: [
-                                                  ClipRRect(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          8,
-                                                        ),
-                                                    child: Container(
-                                                      color:
-                                                          Colors.grey.shade200,
-                                                      width: 70,
-                                                      height: 45,
-                                                      child: Image.memory(
-                                                        bulkReceiverSignatureBytes!,
-                                                        fit: BoxFit.contain,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Expanded(
-                                                    child: Row(
-                                                      children: [
-                                                        const Icon(
-                                                          Icons.check_circle,
-                                                          color: Colors.teal,
-                                                          size: 18,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 6,
-                                                        ),
-                                                        // Flexible (not a
-                                                        // bare Text) so this
-                                                        // wraps/shrinks
-                                                        // instead of
-                                                        // overflowing into
-                                                        // "Retake" on
-                                                        // narrower screens -
-                                                        // the outer Expanded
-                                                        // only bounds the
-                                                        // whole inner Row,
-                                                        // not this Text on
-                                                        // its own.
-                                                        Flexible(
-                                                          child: Text(
-                                                            "Signature captured",
-                                                            softWrap: true,
-                                                            style: GoogleFonts.poppins(
-                                                              fontSize: 13,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Text(
-                                                    "Retake",
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: app_color,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-
                             EntrySection(
                               icon: Icons.list,
                               title: "Ledger",
@@ -10778,6 +10552,77 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                 ),
                               ],
                             ),
+
+                            if (isUniGasMeterReadingSerial)
+                              EntrySection(
+                                icon: Icons.assignment_ind_outlined,
+                                title: "Receiver Information",
+                                iconGradient: [Colors.teal, Colors.tealAccent],
+                                children: [
+                                  EntryFormField(
+                                    label: "Receiver Name *",
+                                    icon: Icons.person_outline,
+                                    iconGradient: [
+                                      Colors.teal,
+                                      Colors.tealAccent,
+                                    ],
+                                    controller: bulkReceiverNameController,
+                                  ),
+                                  EntryFormField(
+                                    label: "Receiver Mobile",
+                                    icon: Icons.phone_outlined,
+                                    iconGradient: [
+                                      Colors.blue,
+                                      Colors.blueAccent,
+                                    ],
+                                    controller: bulkReceiverMobileController,
+                                    keyboardType: TextInputType.phone,
+                                    validator: (value) => null,
+                                  ),
+                                  // EID# is bulk (tanker) delivery only -
+                                  // cylinder deliveries, Sales, and Receipt
+                                  // just take Name/Mobile/Signature.
+                                  if (_isBulkDelivery == true) ...[
+                                    EntryFormField(
+                                      label: "Receiver EID#",
+                                      icon: Icons.badge_outlined,
+                                      iconGradient: [
+                                        Colors.purple,
+                                        Colors.deepPurpleAccent,
+                                      ],
+                                      controller: bulkReceiverEidController,
+                                      keyboardType: TextInputType.number,
+                                      onChanged: _formatBulkReceiverEid,
+                                      validator: (value) => null,
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        left: 16,
+                                        right: 16,
+                                        top: 2,
+                                        bottom: 6,
+                                      ),
+                                      child: Text(
+                                        "Format: 784-****-*******-*",
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          fontStyle: FontStyle.italic,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant
+                                              .withValues(alpha: 0.7),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  ReceiverSignatureTile(
+                                    signatureBytes: bulkReceiverSignatureBytes,
+                                    onCaptured: (bytes) => setState(() {
+                                      bulkReceiverSignatureBytes = bytes;
+                                    }),
+                                  ),
+                                ],
+                              ),
 
                             Row(
                               children: [
@@ -11151,233 +10996,3 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   }
 }
 
-// ─── UniGas Bulk Delivery - Receiver Signature Capture ─────────────
-// Draws the receiver's on-screen signature (finger/stylus) and hands
-// back a PNG image of it, embedded directly into the printed Bulk Gas
-// Delivery Note in place of the blank "Signature:" pen-fill line.
-class _SignatureStrokePainter extends CustomPainter {
-  final List<List<Offset>> strokes;
-  _SignatureStrokePainter(this.strokes);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    for (final stroke in strokes) {
-      for (int i = 0; i < stroke.length - 1; i++) {
-        canvas.drawLine(stroke[i], stroke[i + 1], paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SignatureStrokePainter oldDelegate) => true;
-}
-
-class SignatureCapturePage extends StatefulWidget {
-  const SignatureCapturePage({super.key});
-
-  @override
-  State<SignatureCapturePage> createState() => _SignatureCapturePageState();
-}
-
-class _SignatureCapturePageState extends State<SignatureCapturePage> {
-  final List<List<Offset>> _strokes = [];
-  final GlobalKey _repaintKey = GlobalKey();
-  bool _isSaving = false;
-
-  void _handlePanStart(DragStartDetails details) {
-    setState(() {
-      _strokes.add([details.localPosition]);
-    });
-  }
-
-  void _handlePanUpdate(DragUpdateDetails details) {
-    setState(() {
-      _strokes.last.add(details.localPosition);
-    });
-  }
-
-  void _clear() {
-    setState(() {
-      _strokes.clear();
-    });
-  }
-
-  Future<void> _save() async {
-    if (_strokes.isEmpty) return;
-    setState(() => _isSaving = true);
-    try {
-      final boundary =
-          _repaintKey.currentContext!.findRenderObject()
-              as RenderRepaintBoundary;
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      final bytes = byteData!.buffer.asUint8List();
-      if (mounted) Navigator.of(context).pop(bytes);
-    } catch (e) {
-      debugPrint('SIGNATURE CAPTURE ERROR: $e');
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: app_color,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          "Receiver Signature",
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, size: 18, color: Colors.grey),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      "Please hand the device to the receiver and ask "
-                      "them to sign in the box below with their finger.",
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: Colors.grey.shade400, width: 1.5),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: RepaintBoundary(
-                      key: _repaintKey,
-                      child: Container(
-                        color: Colors.white,
-                        width: double.infinity,
-                        height: double.infinity,
-                        child: Stack(
-                          children: [
-                            if (_strokes.isEmpty)
-                              Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.draw_outlined,
-                                      size: 48,
-                                      color: Colors.grey.shade300,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      "Sign here",
-                                      style: GoogleFonts.poppins(
-                                        color: Colors.grey.shade400,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            GestureDetector(
-                              onPanStart: _handlePanStart,
-                              onPanUpdate: _handlePanUpdate,
-                              child: CustomPaint(
-                                painter: _SignatureStrokePainter(_strokes),
-                                size: Size.infinite,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _strokes.isEmpty ? null : _clear,
-                      icon: const Icon(Icons.refresh),
-                      label: Text(
-                        "Clear",
-                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: (_strokes.isEmpty || _isSaving) ? null : _save,
-                      icon: _isSaving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.check, color: Colors.white),
-                      label: Text(
-                        "Save Signature",
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: app_color,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

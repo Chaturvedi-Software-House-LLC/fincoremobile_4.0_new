@@ -88,11 +88,20 @@ class _AgeingConfigState extends State<AgeingConfig> {
         heading3txtController.text.isNotEmpty &&
         heading4txtController.text.isNotEmpty &&
         heading5txtController.text.isNotEmpty) {
-      int heading1_int = int.parse(heading1);
-      int heading2_int = int.parse(heading2);
-      int heading3_int = int.parse(heading3);
-      int heading4_int = int.parse(heading4);
-      int heading5_int = int.parse(heading5);
+      final int? heading1_int = int.tryParse(heading1);
+      final int? heading2_int = int.tryParse(heading2);
+      final int? heading3_int = int.tryParse(heading3);
+      final int? heading4_int = int.tryParse(heading4);
+      final int? heading5_int = int.tryParse(heading5);
+
+      if (heading1_int == null ||
+          heading2_int == null ||
+          heading3_int == null ||
+          heading4_int == null ||
+          heading5_int == null) {
+        showToast('Please enter valid numbers for all ageing fields');
+        return;
+      }
 
       if (heading1_int > 0 &&
           heading2_int > heading1_int &&

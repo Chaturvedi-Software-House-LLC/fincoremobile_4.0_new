@@ -128,9 +128,22 @@ class _FastMovingInactiveItemsState
         slowmovingitemsqtycontroller.text.isNotEmpty &&
         slowmovingitemsvaluecontroller.text.isNotEmpty &&
         inactiveitemsdayscontroller.text.isNotEmpty) {
-      int fastmovingdays = int.parse(fastmovingitemsdayscontroller.text);
-      int slowmovingdays = int.parse(slowmovingitemsdayscontroller.text);
-      int inactivedays = int.parse(inactiveitemsdayscontroller.text);
+      final int? fastmovingdays = int.tryParse(
+        fastmovingitemsdayscontroller.text,
+      );
+      final int? slowmovingdays = int.tryParse(
+        slowmovingitemsdayscontroller.text,
+      );
+      final int? inactivedays = int.tryParse(
+        inactiveitemsdayscontroller.text,
+      );
+
+      if (fastmovingdays == null ||
+          slowmovingdays == null ||
+          inactivedays == null) {
+        showToast('Please enter valid numbers for the day fields');
+        return;
+      }
 
       if (inactivedays <= slowmovingdays || inactivedays <= fastmovingdays) {
         showToast('Inactive days must be greater than fast/slow moving days');

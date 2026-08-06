@@ -166,65 +166,79 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       if (!mounted) return;
 
       if (data == true) {
-        final responseData = json.decode(utf8.decode(response.bodyBytes));
+        // A degraded/overloaded backend can return a truncated, malformed,
+        // or unexpected-shape body under heavy concurrent login load -
+        // guard the whole decode/rebuild so that shows as a normal error
+        // message instead of crashing the login flow outright.
+        try {
+          final responseData = json.decode(utf8.decode(response.bodyBytes));
 
-        if (responseData is List && responseData.isNotEmpty) {
-          final userName = responseData[0]['name']?.toString() ?? '';
-          await prefs_login.setString('name', userName);
-        }
-
-        final myList = <Map<String, dynamic>>[];
-
-        for (final data in responseData) {
-          final newObj = <String, dynamic>{
-            'serial_no': data['serial_no'],
-            'role_id': data['role_id'],
-            'license_expiry': data['license_expiry'],
-            'website_url': data['website_url'],
-            'token': data['token'],
-          };
-
-          if (data['spectra_allocations'] != null) {
-            newObj['spectra_allocations'] = data['spectra_allocations'];
+          if (responseData is! List) {
+            throw const FormatException('Expected a JSON list response');
           }
 
-          myList.add(newObj);
+          if (responseData.isNotEmpty) {
+            final userName = responseData[0]['name']?.toString() ?? '';
+            await prefs_login.setString('name', userName);
+          }
+
+          final myList = <Map<String, dynamic>>[];
+
+          for (final data in responseData) {
+            final newObj = <String, dynamic>{
+              'serial_no': data['serial_no'],
+              'role_id': data['role_id'],
+              'license_expiry': data['license_expiry'],
+              'website_url': data['website_url'],
+              'token': data['token'],
+            };
+
+            if (data['spectra_allocations'] != null) {
+              newObj['spectra_allocations'] = data['spectra_allocations'];
+            }
+
+            myList.add(newObj);
+          }
+
+          final jsonString = jsonEncode(myList);
+
+          // "Remember me" as a user-facing toggle is gone - username/
+          // password are no longer prefilled into the form on next launch.
+          // These are still saved every time, silently, purely as the
+          // credential source Settings' biometric toggle and the post-
+          // login "Enable Face ID/Biometric?" prompt need to persist
+          // biometric_username/biometric_password - never shown back to
+          // the user or used to auto-fill/auto-submit the login form.
+          prefs_login.setString('username_remember', usernamee);
+          prefs_login.setString('password_remember', passwordd);
+          prefs_login.setString('username', usernamee);
+          prefs_login.setString('password', passwordd);
+          prefs_login.remove('sync_pref');
+          prefs_login.remove('serial_no');
+
+          prefs_login.setString('login_list', jsonString);
+
+          if (_biometricEnabled) {
+            prefs_login.setString('biometric_username', usernamee);
+            prefs_login.setString('biometric_password', passwordd);
+          }
+
+          if (!mounted) return;
+
+          await _maybeOfferBiometricEnable();
+
+          if (!mounted) return;
+
+          navigator.pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => SerialSelect(autoNavigate: myList.length == 1),
+            ),
+          );
+        } catch (e) {
+          debugPrint('LOGIN RESPONSE PARSE ERROR: $e');
+          if (!mounted) return;
+          showAppMessage(context, 'An error occured.');
         }
-
-        final jsonString = jsonEncode(myList);
-
-        // "Remember me" as a user-facing toggle is gone - username/
-        // password are no longer prefilled into the form on next launch.
-        // These are still saved every time, silently, purely as the
-        // credential source Settings' biometric toggle and the post-
-        // login "Enable Face ID/Biometric?" prompt need to persist
-        // biometric_username/biometric_password - never shown back to
-        // the user or used to auto-fill/auto-submit the login form.
-        prefs_login.setString('username_remember', usernamee);
-        prefs_login.setString('password_remember', passwordd);
-        prefs_login.setString('username', usernamee);
-        prefs_login.setString('password', passwordd);
-        prefs_login.remove('sync_pref');
-        prefs_login.remove('serial_no');
-
-        prefs_login.setString('login_list', jsonString);
-
-        if (_biometricEnabled) {
-          prefs_login.setString('biometric_username', usernamee);
-          prefs_login.setString('biometric_password', passwordd);
-        }
-
-        if (!mounted) return;
-
-        await _maybeOfferBiometricEnable();
-
-        if (!mounted) return;
-
-        navigator.pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => SerialSelect(autoNavigate: myList.length == 1),
-          ),
-        );
       } else {
         if (!mounted) return;
 
