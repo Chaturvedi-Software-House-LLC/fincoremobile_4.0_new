@@ -3977,12 +3977,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.calendar_today_rounded,
-                    size: 16,
-                    color: app_color,
-                  ),
-                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       "$startdate_text - $enddate_text",
@@ -3994,6 +3988,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Icon(
                     Icons.edit_calendar_rounded,
                     size: 16,

@@ -22,6 +22,7 @@ import 'package:FincoreGo/viewVanAllocations.dart';
 import 'package:FincoreGo/l10n/app_localizations.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -106,6 +107,29 @@ class _AppBottomNavState extends State<AppBottomNav> {
     _loadPermissions();
     _getDeviceIdentifier();
     _initSocket();
+    _awaitPoppinsForLabelSizing();
+  }
+
+  // The per-label font-size measurement in _navLabelFontSize builds a
+  // TextPainter styled with GoogleFonts.poppins() - on the very first
+  // frame after a fresh install/cache clear, that font can still be
+  // downloading, so the measurement (and the real Text widget alongside
+  // it) briefly falls back to the platform default font. Once Poppins
+  // finishes loading, the Text widget's later paint picks it up
+  // automatically, but nothing re-runs the font-size calculation to
+  // match - it's stuck with whatever the fallback font's (usually
+  // narrower) metrics predicted, which is exactly how a label like
+  // "Parties" could measure as fitting on one line yet still wrap with
+  // an orphan character once real Poppins paints. Awaiting the pending
+  // fonts and rebuilding once guarantees the calculation and the render
+  // always use the same, final font.
+  Future<void> _awaitPoppinsForLabelSizing() async {
+    try {
+      await GoogleFonts.pendingFonts();
+    } catch (e) {
+      debugPrint('Error awaiting Poppins font load for bottom nav: $e');
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadPermissions() async {
@@ -381,17 +405,10 @@ class _AppBottomNavState extends State<AppBottomNav> {
             children: [
               Icon(icon, size: 22, color: textColor),
               const SizedBox(height: 4),
-              Text(
-                label,
-                maxLines: 2,
-                softWrap: true,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
-                  color: textColor,
-                  height: 1.2,
-                ),
+              AdaptiveNavLabel(
+                label: label,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
+                color: textColor,
               ),
             ],
           ),
@@ -1085,5 +1102,122 @@ class _AppBottomNavState extends State<AppBottomNav> {
         );
       },
     );
+  }
+}
+
+// Wrapping to a 2nd line is fine when more than one character spills over
+// (e.g. "Sales Order" breaking after a word) - but for a single long word
+// wrapping onto 2 lines can leave just one orphan character alone on line
+// 2 ("Parties" -> "Partie" / "s"), which reads as a layout glitch rather
+// than a real wrap.
+//
+// A prior version tried to predict this ahead of time with a parallel
+// TextPainter measurement, but that measurement can disagree with the
+// real render for reasons outside this widget's control (font-loading
+// timing, text-scale settings, subpixel rounding) - it kept mispredicting
+// "fits" for labels that still wrapped with an orphan character. This
+// version instead inspects the ACTUAL rendered paragraph after each frame
+// (via the same RenderParagraph Flutter itself just laid out - not a
+// separate guess) and only shrinks, one small step at a time, for as long
+// as the real render still shows exactly one trailing character alone on
+// its own line.
+class AdaptiveNavLabel extends StatefulWidget {
+  final String label;
+  final FontWeight fontWeight;
+  final Color color;
+
+  const AdaptiveNavLabel({
+    required this.label,
+    required this.fontWeight,
+    required this.color,
+  });
+
+  @override
+  State<AdaptiveNavLabel> createState() => AdaptiveNavLabelState();
+}
+
+class AdaptiveNavLabelState extends State<AdaptiveNavLabel> {
+  static const double _baseFontSize = 11;
+  static const double _minFontSize = 8.5;
+
+  final GlobalKey _key = GlobalKey();
+  double _fontSize = _baseFontSize;
+  String? _resolvedFor;
+
+  @override
+  void didUpdateWidget(covariant AdaptiveNavLabel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.label != widget.label ||
+        oldWidget.fontWeight != widget.fontWeight) {
+      // A different label (or weight, e.g. active-tab change) needs its
+      // own fresh check - the previous label's resolved size doesn't
+      // necessarily apply.
+      _fontSize = _baseFontSize;
+      _resolvedFor = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_resolvedFor != '${widget.label}_${_fontSize}_${widget.fontWeight}') {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkWrap());
+    }
+    return Text(
+      widget.label,
+      key: _key,
+      maxLines: 2,
+      softWrap: true,
+      textAlign: TextAlign.center,
+      style: GoogleFonts.poppins(
+        fontSize: _fontSize,
+        fontWeight: widget.fontWeight,
+        color: widget.color,
+        height: 1.2,
+      ),
+    );
+  }
+
+  void _checkWrap() {
+    if (!mounted) return;
+    final markResolved = '${widget.label}_${_fontSize}_${widget.fontWeight}';
+    final renderObject = _key.currentContext?.findRenderObject();
+    if (renderObject is! RenderParagraph || widget.label.length < 2) {
+      _resolvedFor = markResolved;
+      return;
+    }
+
+    // Compare which line the last two characters actually landed on, in
+    // the real, already-painted paragraph. Same line (whether that's line
+    // 1 - no wrap at all - or line 2 with 2+ characters together) is
+    // fine, either way. Different lines means the very last character is
+    // stranded alone - shrink one step and let the next frame re-check.
+    final lastCharBoxes = renderObject.getBoxesForSelection(
+      TextSelection(
+        baseOffset: widget.label.length - 1,
+        extentOffset: widget.label.length,
+      ),
+    );
+    final secondLastCharBoxes = renderObject.getBoxesForSelection(
+      TextSelection(
+        baseOffset: widget.label.length - 2,
+        extentOffset: widget.label.length - 1,
+      ),
+    );
+    if (lastCharBoxes.isEmpty || secondLastCharBoxes.isEmpty) {
+      _resolvedFor = markResolved;
+      return;
+    }
+
+    final bool orphaned =
+        lastCharBoxes.first.top > secondLastCharBoxes.first.top;
+
+    if (!orphaned || _fontSize <= _minFontSize) {
+      _resolvedFor = markResolved;
+      return;
+    }
+
+    setState(() {
+      _fontSize = (_fontSize - 0.5).clamp(_minFontSize, _baseFontSize);
+    });
   }
 }
