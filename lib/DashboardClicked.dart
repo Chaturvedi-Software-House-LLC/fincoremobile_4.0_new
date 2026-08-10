@@ -5440,6 +5440,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                   refno: card.refno,
                   refdate: card.refdate,
                   masterid: card.masterid,
+                  ledger: card.ledger,
                 ),
               ),
             );

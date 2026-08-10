@@ -96,7 +96,8 @@ class TransactionsClicked extends StatefulWidget {
       refno,
       refdate,
       masterid,
-      isoptional;
+      isoptional,
+      ledger;
   TransactionsClicked({
     required this.vchtype,
     required this.startdate,
@@ -108,6 +109,7 @@ class TransactionsClicked extends StatefulWidget {
     required this.refdate,
     required this.masterid,
     required this.isoptional,
+    required this.ledger,
   });
   @override
   _TransactionsClickedPageState createState() => _TransactionsClickedPageState(
@@ -121,6 +123,7 @@ class TransactionsClicked extends StatefulWidget {
     refdate: refdate,
     masterid: masterid,
     isoptional: isoptional,
+    ledger: ledger,
   );
 }
 
@@ -134,7 +137,8 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       refno = "",
       refdate = "",
       masterid = "",
-      isoptional = "";
+      isoptional = "",
+      ledger = "";
 
   String startDateString = "", endDateString = "", token = '';
 
@@ -165,6 +169,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
     required this.refdate,
     required this.masterid,
     required this.isoptional,
+    required this.ledger,
   });
 
   String? SecuritybtnAcessHolder;
@@ -1063,6 +1068,8 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (widget.ledger.trim().isNotEmpty && widget.ledger != 'null')
+            _buildRow(Icons.person_outline, "Party", widget.ledger),
           _buildRow(Icons.receipt_long_rounded, "Voucher No", widget.vchno),
           _buildRow(
             Icons.calendar_today,
@@ -1099,7 +1106,13 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
   Widget _buildRow(IconData icon, String label, String value) {
     // 🌈 Assign a unique gradient color based on the icon type
     LinearGradient getIconGradient() {
-      if (icon == Icons.receipt_long_rounded) {
+      if (icon == Icons.person_outline) {
+        return const LinearGradient(
+          colors: [Color(0xFF11998E), Color(0xFF38EF7D)], // teal-green
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        );
+      } else if (icon == Icons.receipt_long_rounded) {
         return const LinearGradient(
           colors: [Color(0xFFFF9966), Color(0xFFFF5E62)], // orange-red
           begin: Alignment.topLeft,

@@ -2154,6 +2154,7 @@ class _TransactionsPageState extends State<Transactions>
                                                     refno: card.refno,
                                                     refdate: card.refdate,
                                                     masterid: card.masterid,
+                                                    ledger: card.ledger,
                                                   ),
                                             ),
                                           );
