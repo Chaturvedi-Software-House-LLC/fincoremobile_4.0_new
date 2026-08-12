@@ -1553,7 +1553,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 </div>''';
 
     try {
-       // await send(message, smtpServer);
+       await send(message, smtpServer);
 
       /*showAppMessage(context, 'Message sent', isError: false);*/
 
