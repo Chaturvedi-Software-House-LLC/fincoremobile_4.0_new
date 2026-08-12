@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -55,6 +56,13 @@ class BiometricAuthService {
 
   /// Prompts the OS fingerprint/Face ID dialog. Returns true only on a
   /// genuine successful biometric match.
+  ///
+  /// `isDeviceSupported()`/`getAvailableBiometrics()` can report hardware
+  /// as present even when nothing is actually enrolled (seen on iOS) - the
+  /// only reliable signal for "not actually usable right now" is this call
+  /// itself failing with NotEnrolled/PasscodeNotSet/NotAvailable. When that
+  /// happens, silently turn the feature back off so the app stops trying
+  /// to use it and falls back to the Remember Me switch instead.
   Future<bool> authenticate({
     String reason = 'Authenticate to sign in to Fincore Go',
   }) async {
@@ -64,8 +72,18 @@ class BiometricAuthService {
         options: const AuthenticationOptions(
           biometricOnly: true,
           stickyAuth: true,
+          // We show our own messaging/fallback (the Remember Me switch) -
+          // suppress the plugin's own native "not set up" alert.
+          useErrorDialogs: false,
         ),
       );
+    } on PlatformException catch (e) {
+      if (e.code == 'NotEnrolled' ||
+          e.code == 'PasscodeNotSet' ||
+          e.code == 'NotAvailable') {
+        await setEnabled(false);
+      }
+      return false;
     } catch (_) {
       return false;
     }

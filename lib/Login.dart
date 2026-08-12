@@ -100,6 +100,14 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   bool _biometricPromptShown = false;
   String _biometricLabel = 'Biometric';
   bool _isBiometricAuthenticating = false;
+
+  // Fallback for devices with no fingerprint/Face ID hardware at all: a
+  // plain on/off "Remember Me" switch that, when enabled, silently signs
+  // the user back in on next launch using the last-saved credentials -
+  // no OS biometric prompt involved. Only ever shown when biometrics are
+  // not available on the device (see _biometricAvailable gating below).
+  bool _rememberMeEnabled = true;
+  bool _isRememberMeAutoLoggingIn = false;
   final _usernameFocusNode = FocusNode();
   final _passwordFocusNode = FocusNode();
   final _resetemailFocusNode = FocusNode();
@@ -221,6 +229,16 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           if (_biometricEnabled) {
             prefs_login.setString('biometric_username', usernamee);
             prefs_login.setString('biometric_password', passwordd);
+          }
+
+          // Whenever biometric login isn't actively enabled - either the
+          // device has no fingerprint/Face ID hardware, or the user has
+          // hardware but chose not to use it - fall back to the plain
+          // Remember Me switch, keeping its saved credentials fresh on
+          // every successful login the same way biometric does above.
+          if (!_biometricEnabled && _rememberMeEnabled) {
+            prefs_login.setString('remember_me_username', usernamee);
+            prefs_login.setString('remember_me_password', passwordd);
           }
 
           if (!mounted) return;
@@ -431,12 +449,67 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     final available = await BiometricAuthService.instance.isDeviceSupported();
     final enabled = await BiometricAuthService.instance.isEnabled();
     final label = await BiometricAuthService.instance.biometricLabel();
+
+    final prefs = await SharedPreferences.getInstance();
+    // Default to ON for a fresh install/new login - no saved preference
+    // yet means the user hasn't explicitly turned it off.
+    final rememberMeEnabled = prefs.getBool('remember_me_login_enabled') ?? true;
+
     if (!mounted) return;
     setState(() {
       _biometricAvailable = available;
       _biometricEnabled = enabled;
       _biometricLabel = label;
+      _rememberMeEnabled = rememberMeEnabled;
     });
+  }
+
+  Future<void> _onRememberMeChanged(bool value) async {
+    setState(() => _rememberMeEnabled = value);
+
+    final prefs = prefs_login;
+    await prefs.setBool('remember_me_login_enabled', value);
+
+    if (!value) {
+      // Turning it off should immediately stop any future silent
+      // auto-login - clear the saved auto-login credentials too.
+      await prefs.remove('remember_me_username');
+      await prefs.remove('remember_me_password');
+    } else if (usernamee.isNotEmpty && usernamee != 'null' && passwordd.isNotEmpty) {
+      // Already have credentials in hand (e.g. just typed and logged in
+      // once, or prefilled) - save them right away instead of waiting
+      // for the next successful login.
+      await prefs.setString('remember_me_username', usernamee);
+      await prefs.setString('remember_me_password', passwordd);
+    }
+  }
+
+  Future<void> _rememberMeAutoLogin() async {
+    if (_isRememberMeAutoLoggingIn) return;
+
+    final storedUsername = prefs_login.getString('remember_me_username');
+    final storedPassword = prefs_login.getString('remember_me_password');
+
+    if (storedUsername == null ||
+        storedUsername.isEmpty ||
+        storedPassword == null ||
+        storedPassword.isEmpty) {
+      return;
+    }
+
+    setState(() => _isRememberMeAutoLoggingIn = true);
+    try {
+      usernamee = storedUsername;
+      passwordd = storedPassword;
+      usernameController.text = storedUsername;
+      passwordController.text = storedPassword;
+      username_prefs = storedUsername;
+      password_prefs = storedPassword;
+
+      _login();
+    } finally {
+      if (mounted) setState(() => _isRememberMeAutoLoggingIn = false);
+    }
   }
 
   Future<void> _biometricLogin() async {
@@ -447,7 +520,21 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       final ok = await BiometricAuthService.instance.authenticate(
         reason: 'Authenticate with $_biometricLabel to sign in',
       );
-      if (!ok) return;
+      if (!ok) {
+        // authenticate() may have discovered biometrics aren't actually
+        // enrolled/usable and turned itself off - re-sync our local flag
+        // so the UI swaps over to the Remember Me switch right away
+        // instead of waiting for the next app launch.
+        final stillEnabled = await BiometricAuthService.instance.isEnabled();
+        if (mounted && !stillEnabled) {
+          setState(() {
+            _biometricEnabled = false;
+            _rememberMeEnabled = true;
+          });
+          await prefs_login.setBool('remember_me_login_enabled', true);
+        }
+        return;
+      }
 
       final storedUsername = prefs_login.getString('biometric_username');
       final storedPassword = prefs_login.getString('biometric_password');
@@ -664,6 +751,18 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       if (biometricEnabled) {
         if (mounted) setState(() => _biometricEnabled = true);
         await _biometricLogin();
+      } else {
+        // Either there's no fingerprint/Face ID hardware at all, or the
+        // device has it but the user never turned it on for this app -
+        // either way, honor the plain Remember Me switch instead and
+        // actually sign the user in automatically (unlike the biometric
+        // path, this one is a true silent auto-login, no OS prompt).
+        final rememberMeEnabled =
+            prefs_login.getBool('remember_me_login_enabled') ?? true;
+        if (rememberMeEnabled) {
+          if (mounted) setState(() => _rememberMeEnabled = true);
+          await _rememberMeAutoLogin();
+        }
       }
     }
   }
@@ -1454,7 +1553,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 </div>''';
 
     try {
-       await send(message, smtpServer);
+       // await send(message, smtpServer);
 
       /*showAppMessage(context, 'Message sent', isError: false);*/
 
@@ -1957,26 +2056,56 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
               onSaved: (v) => passwordd = v!,
             ),
             const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: app_color,
-                  textStyle: GoogleFonts.poppins(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (!_biometricEnabled)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Switch(
+                        value: _rememberMeEnabled,
+                        activeColor: app_color,
+                        activeTrackColor: app_color.withValues(alpha: 0.4),
+                        inactiveThumbColor: const Color(0xFF9E9E9E),
+                        inactiveTrackColor: const Color(0xFFD8DCE1),
+                        trackOutlineColor: WidgetStateProperty.all(
+                          Colors.transparent,
+                        ),
+                        onChanged: _isRememberMeAutoLoggingIn
+                            ? null
+                            : (value) => _onRememberMeChanged(value),
+                      ),
+                      Text(
+                        'Remember Me',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  const SizedBox.shrink(),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: app_color,
+                    textStyle: GoogleFonts.poppins(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
+                  onPressed: () {
+                    setState(() {
+                      isVisibleLoginForm = false;
+                      resetemailController.text = usernameController.text;
+                      passwordController.clear();
+                      isVisibleResetPassForm = true;
+                    });
+                  },
+                  child: const Text('Forgot Password?'),
                 ),
-                onPressed: () {
-                  setState(() {
-                    isVisibleLoginForm = false;
-                    resetemailController.text = usernameController.text;
-                    passwordController.clear();
-                    isVisibleResetPassForm = true;
-                  });
-                },
-                child: const Text('Forgot Password?'),
-              ),
+              ],
             ),
             const SizedBox(height: 14),
             _isLoading

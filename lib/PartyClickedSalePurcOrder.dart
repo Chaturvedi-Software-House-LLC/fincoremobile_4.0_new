@@ -576,17 +576,25 @@ class _PartyClickedSalePurcOrderPageState
         if (values_list != null) {
           String desiredValue = ledger; // Replace with your desired value
           Data_Top? selectedValue;
-          setState(() {
-            dropdownItems = values_list;
-          });
           try {
-            selectedValue = dropdownItems.firstWhere(
+            selectedValue = values_list.firstWhere(
               (item) => item.Partyledger == desiredValue,
             );
           } catch (e) {
             selectedValue = null;
           }
-          selectedTopValue = selectedValue;
+          // dropdownItems and selectedTopValue must update together in the
+          // same setState - assigning selectedTopValue outside setState (as
+          // this used to) doesn't trigger a rebuild, so the AppBar's
+          // DropdownButton kept rendering its stale (often null) value
+          // until some unrelated rebuild happened to occur later. Release
+          // builds batch/skip more of those incidental rebuilds than debug
+          // does, which is why this only showed as a blank dropdown title
+          // in release.
+          setState(() {
+            dropdownItems = values_list;
+            selectedTopValue = selectedValue;
+          });
           fetchData(
             vchtype,
             selectedTopValue?.Partyledger ?? '',

@@ -706,7 +706,17 @@ class _PartyClickedSalePurcOrderClickedPageState
     } catch (e) {
       selectedValue = null;
     }
-    selectedTopValue = selectedValue;
+    // This runs inside an async initState-triggered call, so the first
+    // build() already happened before this resolves - assigning outside
+    // setState (as this used to) means the AppBar's DropdownButton never
+    // gets told to rebuild with the real value, and keeps showing its
+    // initial (blank) state until some unrelated rebuild happens to occur
+    // later. Release builds batch/skip more of those incidental rebuilds
+    // than debug does, which is why this only showed as a blank dropdown
+    // title in release.
+    setState(() {
+      selectedTopValue = selectedValue;
+    });
     fetchData(vchtype, ledger, type, endDateString, selectedTopValue?.item ?? item);
   }
 
