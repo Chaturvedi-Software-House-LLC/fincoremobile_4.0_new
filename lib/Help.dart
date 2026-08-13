@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'constants.dart';
+import 'package:FincoreGo/AssistantChat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
@@ -156,6 +157,118 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     } else {
       showAppMessage(context, 'Could not open email app');
     }
+  }
+
+  static const List<Color> _liveChatGradient = [
+    Color(0xFF6D5BFF),
+    Color(0xFF00C2CB),
+  ];
+
+  Widget _buildLiveChatCard() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AssistantChat()),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: _liveChatGradient,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: _liveChatGradient.last.withValues(alpha: 0.35),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Live Chat',
+                        style: GoogleFonts.poppins(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.auto_awesome_rounded,
+                              color: Colors.white,
+                              size: 11,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              'Powered by AI',
+                              style: GoogleFonts.poppins(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Get instant answers about using Fincore Go',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.white.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Colors.white,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildGoogleLocationCard() {
@@ -400,6 +513,9 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                     ],
                   ),
                 ),
+
+                const SizedBox(height: 14),
+                _buildLiveChatCard(),
 
                 const SizedBox(height: 14),
                 // Contact Info Card

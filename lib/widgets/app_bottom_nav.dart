@@ -46,6 +46,7 @@ enum AppMoreItem {
   settings,
   changePassword,
   help,
+  assistant,
 }
 
 enum AppEntryType { none, sales, receipt, salesOrder, deliveryNote }
@@ -361,6 +362,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
       ),
     );
   }
+
 
   Widget _navTile(
     String label,
@@ -703,17 +705,26 @@ class _AppBottomNavState extends State<AppBottomNav> {
     AppMoreItem moreItem = AppMoreItem.none,
     bool enabled = true,
     bool isDanger = false,
+    bool isHighlighted = false,
   }) {
     final isActive =
         moreItem != AppMoreItem.none && widget.activeMoreItem == moreItem;
     final canTap = enabled && !isActive;
     final tileColor = isDanger
         ? Colors.redAccent
+        : isHighlighted
+        ? Colors.white
         : isActive
         ? app_color
         : app_color;
 
-    return InkWell(
+    // The Assistant tile gets a vivid gradient treatment (instead of the
+    // flat tinted-teal look every other tile uses) plus a small "AI" badge,
+    // so it visually reads as something new/different worth tapping, not
+    // just another settings-style menu item.
+    final gradientColors = const [Color(0xFF6D5BFF), Color(0xFF00C2CB)];
+
+    final tile = InkWell(
       onTap: canTap ? onTap : null,
       borderRadius: BorderRadius.circular(14),
       child: Opacity(
@@ -721,20 +732,40 @@ class _AppBottomNavState extends State<AppBottomNav> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           decoration: BoxDecoration(
-            color: isDanger
+            gradient: isHighlighted
+                ? LinearGradient(
+                    colors: gradientColors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+            color: isHighlighted
+                ? null
+                : isDanger
                 ? Colors.redAccent.withOpacity(0.06)
                 : isActive
                 ? app_color.withOpacity(0.14)
                 : app_color.withOpacity(0.055),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDanger
-                  ? Colors.redAccent.withOpacity(0.18)
-                  : isActive
-                  ? app_color.withOpacity(0.38)
-                  : app_color.withOpacity(0.16),
-              width: isActive ? 1.2 : 0.8,
-            ),
+            border: isHighlighted
+                ? null
+                : Border.all(
+                    color: isDanger
+                        ? Colors.redAccent.withOpacity(0.18)
+                        : isActive
+                        ? app_color.withOpacity(0.38)
+                        : app_color.withOpacity(0.16),
+                    width: isActive ? 1.2 : 0.8,
+                  ),
+            boxShadow: isHighlighted
+                ? [
+                    BoxShadow(
+                      color: gradientColors.last.withOpacity(0.35),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -751,9 +782,13 @@ class _AppBottomNavState extends State<AppBottomNav> {
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
                   fontSize: 12,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  fontWeight: isActive || isHighlighted
+                      ? FontWeight.w700
+                      : FontWeight.w500,
                   color: isDanger
                       ? Colors.redAccent
+                      : isHighlighted
+                      ? Colors.white
                       : isActive
                       ? app_color
                       : Theme.of(context).colorScheme.onSurface,
@@ -763,6 +798,42 @@ class _AppBottomNavState extends State<AppBottomNav> {
           ),
         ),
       ),
+    );
+
+    if (!isHighlighted) return tile;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        tile,
+        Positioned(
+          top: -6,
+          right: -6,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.orangeAccent,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.15),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Text(
+              'AI',
+              style: GoogleFonts.poppins(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
