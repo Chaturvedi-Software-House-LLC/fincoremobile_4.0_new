@@ -14,6 +14,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _kBrandStart = Color(0xFF6D5BFF);
 const _kBrandEnd = Color(0xFF00C2CB);
 
+/// The backend response for a query/document-analysis call: the answer
+/// text, plus an explicit flag (set only by the server's unsupported-
+/// voucher-type guardrail) for whether the "Contact Support Team" card
+/// should always be shown alongside it.
+class _AssistantAnswer {
+  const _AssistantAnswer({required this.text, required this.requiresSupport});
+  final String text;
+  final bool requiresSupport;
+}
+
 // -----------------------------------------------------------------------
 // Message model
 // -----------------------------------------------------------------------
@@ -267,9 +277,13 @@ class _AssistantChatState extends State<AssistantChat> {
     "can't help with that",
     "i'm not sure",
     'not sure about that',
-    'contact support',
     "don't have that information",
     'coming soon',
+    // Deliberately NOT "contact support" - the backend's own correct,
+    // complete answers for unsupported voucher types/features legitimately
+    // end with "...please contact support (More -> Help) to request it."
+    // Treating that phrase as a failure signal caused the escalation card
+    // to double-trigger right after a perfectly good answer.
   ];
 
   bool _looksLikeDeadEnd(String answerText) {
@@ -433,16 +447,23 @@ class _AssistantChatState extends State<AssistantChat> {
     _scrollToBottom();
 
     try {
-      final answer = file != null
+      final result = file != null
           ? await _analyzeDocument(file, question)
           : await _askQuestion(question);
 
       setState(() {
         _messages.remove(placeholder);
-        _messages.add(_ChatMessage(text: answer, isUser: false));
+        _messages.add(_ChatMessage(text: result.text, isUser: false));
       });
 
-      if (_looksLikeDeadEnd(answer) || _userSeemsStuck(question)) {
+      // requiresSupport is an explicit server-side flag (set only by the
+      // unsupported-voucher-type guardrail) - more reliable than trying to
+      // text-match "contact support" in the answer, which previously either
+      // double-triggered on the guardrail's own answer or, after that was
+      // fixed, never triggered at all for it.
+      if (result.requiresSupport ||
+          _looksLikeDeadEnd(result.text) ||
+          _userSeemsStuck(question)) {
         setState(
               () => _messages.add(
             _ChatMessage(text: '', isUser: false, isSupportForm: true),
@@ -452,14 +473,11 @@ class _AssistantChatState extends State<AssistantChat> {
     } catch (e) {
       setState(() {
         _messages.remove(placeholder);
+        // Couldn't reach the backend/model at all - don't just show a dead
+        // error message, go straight to the "contact support" escalation
+        // so the user has somewhere to go instead of a dead end.
         _messages.add(
-          _ChatMessage(
-            text:
-            'Sorry, I could not reach the assistant right now. Please '
-                'try again in a moment.',
-            isUser: false,
-            isError: true,
-          ),
+          _ChatMessage(text: '', isUser: false, isSupportForm: true),
         );
       });
     } finally {
@@ -469,7 +487,7 @@ class _AssistantChatState extends State<AssistantChat> {
     }
   }
 
-  Future<String> _askQuestion(String question) async {
+  Future<_AssistantAnswer> _askQuestion(String question) async {
     final uri = Uri.parse('$_hostname/api/assistant/query');
     final response = await http
         .post(
@@ -484,7 +502,8 @@ class _AssistantChatState extends State<AssistantChat> {
     return _extractAnswer(response);
   }
 
-  Future<String> _analyzeDocument(PlatformFile file, String question) async {
+  Future<_AssistantAnswer> _analyzeDocument(
+      PlatformFile file, String question) async {
     final uri = Uri.parse('$_hostname/api/assistant/analyze-document');
     final request = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = 'Bearer $_token'
@@ -503,14 +522,21 @@ class _AssistantChatState extends State<AssistantChat> {
     return _extractAnswer(response);
   }
 
-  String _extractAnswer(http.Response response) {
+  _AssistantAnswer _extractAnswer(http.Response response) {
     if (response.statusCode != 200) {
       throw Exception('Assistant request failed (${response.statusCode})');
     }
     final body = jsonDecode(response.body);
     final data = body is Map && body['data'] != null ? body['data'] : body;
     final answer = data is Map ? data['answer'] : null;
-    if (answer is String && answer.trim().isNotEmpty) return answer.trim();
+    if (answer is String && answer.trim().isNotEmpty) {
+      final requiresSupport =
+          data is Map && data['requiresSupport'] == true;
+      return _AssistantAnswer(
+        text: answer.trim(),
+        requiresSupport: requiresSupport,
+      );
+    }
     throw Exception('Empty response from assistant');
   }
 
