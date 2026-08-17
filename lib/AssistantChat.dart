@@ -53,7 +53,7 @@ class _ChatMessage {
     // stale, non-functional card.
     isSupportForm: false,
     timestamp:
-        DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+    DateTime.tryParse(json['timestamp'] as String? ?? '') ??
         DateTime.now(),
   );
 }
@@ -381,7 +381,7 @@ class _AssistantChatState extends State<AssistantChat> {
       }
       if (_isBareAffirmative(question)) {
         setState(
-          () => _messages.add(
+              () => _messages.add(
             _ChatMessage(
               text: 'Sure - what would you like help with?',
               isUser: false,
@@ -397,7 +397,7 @@ class _AssistantChatState extends State<AssistantChat> {
 
     if (_wantsHumanSupport(question)) {
       setState(
-        () => _messages.add(
+            () => _messages.add(
           _ChatMessage(text: '', isUser: false, isSupportForm: true),
         ),
       );
@@ -413,7 +413,7 @@ class _AssistantChatState extends State<AssistantChat> {
 
     if (question.isNotEmpty && _isClosingSmallTalk(question)) {
       setState(
-        () => _messages.add(
+            () => _messages.add(
           _ChatMessage(
             text: 'Happy to help! Want to ask something else, or should I '
                 'end this chat?',
@@ -444,7 +444,7 @@ class _AssistantChatState extends State<AssistantChat> {
 
       if (_looksLikeDeadEnd(answer) || _userSeemsStuck(question)) {
         setState(
-          () => _messages.add(
+              () => _messages.add(
             _ChatMessage(text: '', isUser: false, isSupportForm: true),
           ),
         );
@@ -455,7 +455,7 @@ class _AssistantChatState extends State<AssistantChat> {
         _messages.add(
           _ChatMessage(
             text:
-                'Sorry, I could not reach the assistant right now. Please '
+            'Sorry, I could not reach the assistant right now. Please '
                 'try again in a moment.',
             isUser: false,
             isError: true,
@@ -473,13 +473,13 @@ class _AssistantChatState extends State<AssistantChat> {
     final uri = Uri.parse('$_hostname/api/assistant/query');
     final response = await http
         .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $_token',
-          },
-          body: jsonEncode({'question': question}),
-        )
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_token',
+      },
+      body: jsonEncode({'question': question}),
+    )
         .timeout(const Duration(seconds: 45));
     return _extractAnswer(response);
   }
@@ -532,7 +532,7 @@ class _AssistantChatState extends State<AssistantChat> {
       ..recipients.add('saadan@ca-eim.com')
       ..subject = 'Fincore Go Assistant - Support Request'
       ..html =
-          '''
+      '''
           <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
             <p><b>Name:</b> $name</p>
             <p><b>Email:</b> $email</p>
@@ -574,33 +574,33 @@ class _AssistantChatState extends State<AssistantChat> {
             child: _messages.isEmpty
                 ? _buildWelcome(subTextColor, textColor)
                 : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, index) {
-                      final entry = _messages[index];
-                      final showDateDivider =
-                          index == 0 ||
-                          !_isSameDay(
-                            _messages[index - 1].timestamp,
-                            entry.timestamp,
-                          );
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (showDateDivider)
-                            _buildDateDivider(entry.timestamp, subTextColor),
-                          _buildMessageBubble(
-                            entry,
-                            llmBubbleColor,
-                            textColor,
-                            subTextColor,
-                            isDark,
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final entry = _messages[index];
+                final showDateDivider =
+                    index == 0 ||
+                        !_isSameDay(
+                          _messages[index - 1].timestamp,
+                          entry.timestamp,
+                        );
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (showDateDivider)
+                      _buildDateDivider(entry.timestamp, subTextColor),
+                    _buildMessageBubble(
+                      entry,
+                      llmBubbleColor,
+                      textColor,
+                      subTextColor,
+                      isDark,
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
           _buildInputBar(inputBg, inputBorder, textColor, isDark),
         ],
@@ -704,8 +704,8 @@ class _AssistantChatState extends State<AssistantChat> {
             const SizedBox(height: 18),
             Text(
               "Hi! I'm the Fincore Go assistant. Ask me anything about "
-              'using the app - navigation, entries, parties, settings, and '
-              'more. You can also attach a PDF and ask me about it.',
+                  'using the app - navigation, entries, parties, settings, and '
+                  'more. You can also attach a PDF and ask me about it.',
               textAlign: TextAlign.center,
               style: TextStyle(color: textColor, fontSize: 14.5, height: 1.4),
             ),
@@ -777,12 +777,12 @@ class _AssistantChatState extends State<AssistantChat> {
   }
 
   Widget _buildMessageBubble(
-    _ChatMessage entry,
-    Color llmBubbleColor,
-    Color textColor,
-    Color subTextColor,
-    bool isDark,
-  ) {
+      _ChatMessage entry,
+      Color llmBubbleColor,
+      Color textColor,
+      Color subTextColor,
+      bool isDark,
+      ) {
     final isUser = entry.isUser;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
@@ -837,16 +837,16 @@ class _AssistantChatState extends State<AssistantChat> {
                     decoration: BoxDecoration(
                       gradient: isUser
                           ? const LinearGradient(
-                              colors: [_kBrandStart, _kBrandEnd],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            )
+                        colors: [_kBrandStart, _kBrandEnd],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
                           : null,
                       color: isUser
                           ? null
                           : (entry.isError
-                                ? Colors.red.withOpacity(isDark ? 0.15 : 0.06)
-                                : llmBubbleColor),
+                          ? Colors.red.withOpacity(isDark ? 0.15 : 0.06)
+                          : llmBubbleColor),
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(18),
                         topRight: const Radius.circular(18),
@@ -856,14 +856,14 @@ class _AssistantChatState extends State<AssistantChat> {
                       boxShadow: isUser
                           ? null
                           : [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(
-                                  isDark ? 0.25 : 0.05,
-                                ),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
+                        BoxShadow(
+                          color: Colors.black.withOpacity(
+                            isDark ? 0.25 : 0.05,
+                          ),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -930,11 +930,11 @@ class _AssistantChatState extends State<AssistantChat> {
   }
 
   Widget _buildInputBar(
-    Color inputBg,
-    Color inputBorder,
-    Color textColor,
-    bool isDark,
-  ) {
+      Color inputBg,
+      Color inputBorder,
+      Color textColor,
+      bool isDark,
+      ) {
     return SafeArea(
       top: false,
       child: Padding(
@@ -1095,9 +1095,9 @@ class _InlineSupportForm extends StatefulWidget {
   final String email;
   final bool isDark;
   final Future<void> Function({
-    required String name,
-    required String email,
-    required String details,
+  required String name,
+  required String email,
+  required String details,
   })
   onSend;
 
@@ -1215,7 +1215,7 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
               children: [
                 Text(
                   "Looks like I couldn't fully help with that. Send our "
-                  "support team a message below and we'll get back to you.",
+                      "support team a message below and we'll get back to you.",
                   style: TextStyle(
                     color: subTextColor,
                     fontSize: 12.5,
@@ -1235,7 +1235,7 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
                       Expanded(
                         child: Text(
                           'Message sent - our team will reach out to you '
-                          'shortly.',
+                              'shortly.',
                           style: TextStyle(color: textColor, fontSize: 13),
                         ),
                       ),
@@ -1294,19 +1294,19 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
                       ),
                       child: _status == _SupportFormStatus.sending
                           ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation(
-                                  Colors.white,
-                                ),
-                              ),
-                            )
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(
+                            Colors.white,
+                          ),
+                        ),
+                      )
                           : const Text(
-                              'Send',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
+                        'Send',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
                 ],
@@ -1319,15 +1319,15 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
   }
 
   Widget _field(
-    String label,
-    TextEditingController controller,
-    Color fieldBg,
-    Color textColor,
-    Color subTextColor, {
-    required bool enabled,
-    int maxLines = 1,
-    String? hint,
-  }) {
+      String label,
+      TextEditingController controller,
+      Color fieldBg,
+      Color textColor,
+      Color subTextColor, {
+        required bool enabled,
+        int maxLines = 1,
+        String? hint,
+      }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
