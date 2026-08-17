@@ -543,6 +543,7 @@ class _AssistantChatState extends State<AssistantChat> {
   Future<void> _sendSupportEmail({
     required String name,
     required String email,
+    required String phone,
     required String details,
   }) async {
     final smtpServer = SmtpServer(
@@ -562,6 +563,7 @@ class _AssistantChatState extends State<AssistantChat> {
           <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
             <p><b>Name:</b> $name</p>
             <p><b>Email:</b> $email</p>
+            <p><b>Contact Number:</b> ${phone.trim().isEmpty ? 'Not provided' : phone}</p>
             <p><b>Message:</b></p>
             <p>${details.replaceAll('\n', '<br>')}</p>
             <hr>
@@ -1123,6 +1125,7 @@ class _InlineSupportForm extends StatefulWidget {
   final Future<void> Function({
   required String name,
   required String email,
+  required String phone,
   required String details,
   })
   onSend;
@@ -1136,6 +1139,7 @@ enum _SupportFormStatus { idle, sending, sent, failed }
 class _InlineSupportFormState extends State<_InlineSupportForm> {
   late final TextEditingController _nameController;
   late final TextEditingController _emailController;
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
   _SupportFormStatus _status = _SupportFormStatus.idle;
 
@@ -1150,6 +1154,7 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _messageController.dispose();
     super.dispose();
   }
@@ -1163,6 +1168,7 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
       await widget.onSend(
         name: _nameController.text,
         email: _emailController.text,
+        phone: _phoneController.text.trim(),
         details: message,
       );
       if (mounted) setState(() => _status = _SupportFormStatus.sent);
@@ -1287,6 +1293,17 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
                   ),
                   const SizedBox(height: 10),
                   _field(
+                    'Contact Number',
+                    _phoneController,
+                    fieldBg,
+                    textColor,
+                    subTextColor,
+                    enabled: _status != _SupportFormStatus.sending,
+                    hint: 'Your phone number (optional)',
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 10),
+                  _field(
                     'Message',
                     _messageController,
                     fieldBg,
@@ -1353,6 +1370,7 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
         required bool enabled,
         int maxLines = 1,
         String? hint,
+        TextInputType? keyboardType,
       }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1370,6 +1388,7 @@ class _InlineSupportFormState extends State<_InlineSupportForm> {
           controller: controller,
           enabled: enabled,
           maxLines: maxLines,
+          keyboardType: keyboardType,
           style: TextStyle(color: textColor, fontSize: 13.5),
           decoration: InputDecoration(
             isDense: true,
