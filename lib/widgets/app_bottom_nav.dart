@@ -13,10 +13,12 @@ import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:FincoreGo/PendingSalesOrderEntry.dart';
 import 'package:FincoreGo/RolesView.dart';
 import 'package:FincoreGo/SerialSelect.dart';
+import 'package:FincoreGo/CompanySelectTallyOauth.dart';
 import 'package:FincoreGo/widgets/company_switcher.dart';
 import 'package:FincoreGo/Settings.dart';
 import 'package:FincoreGo/Transactions.dart';
 import 'package:FincoreGo/UserView.dart';
+import 'package:FincoreGo/api/auth_repository.dart';
 import 'package:FincoreGo/constants.dart';
 import 'package:FincoreGo/viewVanAllocations.dart';
 import 'package:FincoreGo/l10n/app_localizations.dart';
@@ -465,7 +467,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
                         title: "Companies",
                         onTap: () {
                           Navigator.pop(context);
-                          _replaceWith(SerialSelect());
+                          navigateToCompanySwitch(context);
                         },
                       ),
 
@@ -1129,6 +1131,11 @@ class _AppBottomNavState extends State<AppBottomNav> {
                         onPressed: () async {
                           final prefs = await SharedPreferences.getInstance();
                           await prefs.clear();
+                          // Revokes the tally-oauth session and clears its
+                          // tokens - separate storage (flutter_secure_storage)
+                          // from the prefs.clear() above, so it needs its
+                          // own explicit call.
+                          await AuthRepository.instance.logout();
 
                           final jsonPayload = {
                             'username': usernamePrefs,

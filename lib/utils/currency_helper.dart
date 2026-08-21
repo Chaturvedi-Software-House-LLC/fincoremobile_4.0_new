@@ -5,7 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 Future<void> checkCurrencyMismatch(BuildContext context) async {
   final prefs = await SharedPreferences.getInstance();
   final userCurrency = prefs.getString('currencycode') ?? "AED";
-  final baseCurrency = prefs.getString('base_currency') ?? "AED";
+  final baseCurrency = prefs.getString('base_currency');
+
+  // `base_currency` is written as an empty string (not `null`) for a
+  // tally-oauth-only session - tally-api has no Company-master sync yet,
+  // so this field is genuinely unknown, not "same as the app's currency".
+  // Treating "" as a real mismatch produced a false-positive warning with
+  // an empty currency code: "doesn't match ... base currency ()."
+  if (baseCurrency == null || baseCurrency.isEmpty) return;
 
   if (userCurrency != baseCurrency) {
     ScaffoldMessenger.of(context).showSnackBar(

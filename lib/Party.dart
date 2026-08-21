@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:ui';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/constants.dart';
@@ -10,7 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'PartyClicked.dart';
 import 'SerialSelect.dart';
-import 'package:http/http.dart' as http;
+import 'CompanySelectTallyOauth.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'widgets/searchable_selector.dart';
@@ -22,8 +21,11 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/api_exception.dart';
+import 'api/ledger_repository.dart';
 
 class party {
+  final int masterId;
   final String partyname;
   final String alias;
   final String mobile;
@@ -31,6 +33,7 @@ class party {
   final String maxdate;
 
   party({
+    required this.masterId,
     required this.partyname,
     required this.alias,
     required this.mobile,
@@ -38,13 +41,24 @@ class party {
     required this.maxdate,
   });
 
+  /// Maps a tally-api ledger row (base `/ledgers` list, or one merged with
+  /// `lastVoucherDate` by `LedgerRepository.listInactiveLedgers`) - no
+  /// legacy `getLedger`/`getInactiveLedger` shape survives here.
+  ///
+  /// The base ledger list has no per-ledger "last activity" date (that
+  /// only exists on the inactive-ledgers report), so `maxdate` is only
+  /// ever populated for rows coming from the Inactive Parties list - the
+  /// main "All Parties" list shows '-' where it used to show a date. No
+  /// tally-api field fills that gap for an active ledger.
   factory party.fromJson(Map<String, dynamic> json) {
+    final alias = (json['alias'] as List?)?.cast<String>() ?? const [];
     return party(
-      partyname: json['name'].toString(),
-      alias: json['alias'].toString(),
-      mobile: json['mobile'].toString(),
-      email: json['email'].toString(),
-      maxdate: json['maxdate'].toString() ?? "",
+      masterId: json['masterId'] as int,
+      partyname: (json['name'] ?? '').toString(),
+      alias: alias.isEmpty ? 'null' : alias.join(', '),
+      mobile: (json['mobileNumber'] ?? json['phoneNumber'] ?? 'null').toString(),
+      email: (json['email'] ?? 'null').toString(),
+      maxdate: (json['lastVoucherDate'] ?? '').toString(),
     );
   }
 }
@@ -69,7 +83,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   List<party> filteredItems_parties =
       []; // Initialize an empty list to hold the filtered items
 
-  String party_count = "0", token = '';
+  String party_count = "0";
 
   String? SecuritybtnAcessHolder;
 
@@ -105,10 +119,9 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       username = "";
   bool _isLoading = false;
 
-  String? HttpURL_Parent, HttpURL_parties, HttpURL_inactiveparties;
-
   dynamic _selectedparty = "All Parties";
   List<String> spinner_list = ["All Parties"];
+  final Map<String, int> _groupMasterIdByName = {};
 
   List<party> parties_list = [];
 
@@ -368,76 +381,52 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     return formated_alias;
   }
 
+  /// Populates the "parent" dropdown from tally-api's party-like groups
+  /// (see LedgerRepository's doc comment on the group-name/reservedName
+  /// match it uses in place of the legacy `ledGroups` server-side filter).
   Future<void> fetchParentData(final String ledGroups) async {
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final url = Uri.parse(HttpURL_Parent!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'ledGroups': ledGroups});
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        for (var item in data) {
-          String partyname = item['parent'];
-          spinner_list.add(partyname);
-        }
-        setState(() {
-          _selectedparty = spinner_list[0];
-        });
-        setState(() {
-          isClicked_allparties = true;
-          isClicked_inactiveparties = false;
-        });
-        fetchPartyData(_selectedparty);
+      final groups = await LedgerRepository.instance.listPartyGroups();
+      _groupMasterIdByName.clear();
+      for (final group in groups) {
+        final name = group['name'] as String;
+        _groupMasterIdByName[name] = group['masterId'] as int;
+        spinner_list.add(name);
       }
-    } catch (e) {
       setState(() {
-        _isLoading = false;
+        _selectedparty = spinner_list[0];
+        isClicked_allparties = true;
+        isClicked_inactiveparties = false;
       });
-      print(e);
+      fetchPartyData(_selectedparty);
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() => _isLoading = false);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() => _isLoading = false);
     }
   }
 
   void fetchPartyData(String party) {
-    if (party == "All Parties") {
-      party = "";
-      fetchall_parties(party, ledgroups);
-    } else {
-      fetchcustom_parties(party, ledgroups);
-    }
+    fetchParties(party == "All Parties" ? null : _groupMasterIdByName[party]);
   }
 
   void fetchInactivePartyData(String party, String date) {
-    if (party == "All Parties") {
-      party = "";
-
-      fetchinactiveall_parties(party, date);
-    } else {
-      fetchinactivecustom_parties(party, date);
-    }
+    fetchInactiveParties(
+      party == "All Parties" ? null : _groupMasterIdByName[party],
+      date,
+    );
   }
 
-  Future<void> fetchall_parties(
-    final String parent,
-    final String ledGroups,
-  ) async {
+  Future<void> fetchParties(int? groupMasterId) async {
     setState(() {
       party_count = "0";
-      if ((int.tryParse(party_count) ?? 0) < 2) {
-        party_text = "Party";
-      } else {
-        party_text = "Parties";
-      }
+      party_text = "Party";
       _isLoading = true;
       _isAllList = false;
       isClicked_parties = true;
@@ -448,133 +437,36 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     parties_list.clear();
 
     try {
-      final url = Uri.parse(HttpURL_parties!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final rows = await LedgerRepository.instance.listLedgers(
+        groupMasterId: groupMasterId,
+      );
+      parties_list.addAll(rows.map(party.fromJson));
+      filteredItems_parties = parties_list;
 
-      var body = jsonEncode({'parent': parent, 'ledGroups': ledGroups});
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-          parties_list.addAll(
-            values_list.map((json) => party.fromJson(json)).toList(),
-          );
-          filteredItems_parties = parties_list;
-          setState(() {
-            party_count = filteredItems_parties.length.toString();
-            if ((int.tryParse(party_count) ?? 0) < 2) {
-              party_text = "Party";
-            } else {
-              party_text = "Parties";
-            }
-            _isAllList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
+      setState(() {
+        party_count = filteredItems_parties.length.toString();
+        party_text = filteredItems_parties.length == 1 ? "Party" : "Parties";
+        _isAllList = true;
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
         _isAllList = false;
         _isLoading = false;
       });
-      print(e);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isAllList = false;
+        _isLoading = false;
+      });
     }
 
     setState(() {
       if (parties_list.isEmpty) {
         party_count = "0";
-        if ((int.tryParse(party_count) ?? 0) < 2) {
-          party_text = "Party";
-        } else {
-          party_text = "Parties";
-        }
-        _isAllList = false;
-        isVisibleNoDataFound = true;
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> fetchcustom_parties(
-    final String parent,
-    final String ledGroups,
-  ) async {
-    setState(() {
-      party_count = "0";
-      if ((int.tryParse(party_count) ?? 0) < 2) {
         party_text = "Party";
-      } else {
-        party_text = "Parties";
-      }
-      _isLoading = true;
-      _isAllList = false;
-      isVisibleNoDataFound = false;
-    });
-
-    filteredItems_parties.clear();
-    parties_list.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_parties!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'parent': parent, 'ledGroups': ledGroups});
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          parties_list.addAll(
-            values_list.map((json) => party.fromJson(json)).toList(),
-          );
-          filteredItems_parties = parties_list;
-
-          setState(() {
-            party_count = filteredItems_parties.length.toString();
-            if ((int.tryParse(party_count) ?? 0) < 2) {
-              party_text = "Party";
-            } else {
-              party_text = "Parties";
-            }
-            _isAllList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
-      setState(() {
-        _isAllList = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (parties_list.isEmpty) {
-        party_count = "0";
-        if ((int.tryParse(party_count) ?? 0) < 2) {
-          party_text = "Party";
-        } else {
-          party_text = "Parties";
-        }
         _isAllList = false;
         isVisibleNoDataFound = true;
       }
@@ -582,10 +474,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     });
   }
 
-  Future<void> fetchinactiveall_parties(
-    final String parent,
-    final String date,
-  ) async {
+  Future<void> fetchInactiveParties(int? groupMasterId, String date) async {
     setState(() {
       party_count = "0";
       _isLoading = true;
@@ -598,155 +487,49 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     });
 
     try {
-      final url = Uri.parse(HttpURL_inactiveparties!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final rows = await LedgerRepository.instance.listInactiveLedgers(
+        asOf: DateTime.parse(date),
+        groupMasterId: groupMasterId,
+      );
+      parties_list.addAll(rows.map(party.fromJson));
 
-      var body = jsonEncode({
-        'parent': parent,
-        'date': date,
-        'ledGroups': ledgroups,
+      // A ledger with no voucher activity ever has a null lastVoucherDate
+      // (party.fromJson maps that to '') - sorts last rather than
+      // throwing, unlike a bare DateTime.parse would on an empty string.
+      parties_list.sort((a, b) {
+        final dateA = DateTime.tryParse(a.maxdate);
+        final dateB = DateTime.tryParse(b.maxdate);
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+        return dateB.compareTo(dateA);
       });
 
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-          parties_list.addAll(
-            values_list.map((json) => party.fromJson(json)).toList(),
-          );
-
-          parties_list.sort((a, b) {
-            DateTime dateA = DateTime.parse(a.maxdate);
-            DateTime dateB = DateTime.parse(b.maxdate);
-            return dateB.compareTo(dateA);
-          });
-
-          filteredItems_parties = parties_list;
-          setState(() {
-            party_count = filteredItems_parties.length.toString();
-            if ((int.tryParse(party_count) ?? 0) < 2) {
-              party_text = "Party";
-            } else {
-              party_text = "Parties";
-            }
-            _isAllList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
+      filteredItems_parties = parties_list;
+      setState(() {
+        party_count = filteredItems_parties.length.toString();
+        party_text = filteredItems_parties.length == 1 ? "Party" : "Parties";
+        _isAllList = true;
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
         _isAllList = false;
         _isLoading = false;
       });
-
-      print(e);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isAllList = false;
+        _isLoading = false;
+      });
     }
+
     setState(() {
       if (parties_list.isEmpty) {
         party_count = "0";
-        if ((int.tryParse(party_count) ?? 0) < 2) {
-          party_text = "Party";
-        } else {
-          party_text = "Parties";
-        }
-        _isAllList = false;
-        isVisibleNoDataFound = true;
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> fetchinactivecustom_parties(
-    final String parent,
-    final String date,
-  ) async {
-    setState(() {
-      party_count = "0";
-      if ((int.tryParse(party_count) ?? 0) < 2) {
         party_text = "Party";
-      } else {
-        party_text = "Parties";
-      }
-      _isLoading = true;
-      _isAllList = false;
-      isVisibleNoDataFound = false;
-    });
-
-    filteredItems_parties.clear();
-    parties_list.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_inactiveparties!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'parent': parent,
-        'date': date,
-        'ledGroups': ledgroups,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          parties_list.addAll(
-            values_list.map((json) => party.fromJson(json)).toList(),
-          );
-
-          parties_list.sort((a, b) {
-            DateTime dateA = DateTime.parse(a.maxdate);
-            DateTime dateB = DateTime.parse(b.maxdate);
-            return dateB.compareTo(dateA);
-          });
-
-          filteredItems_parties = parties_list;
-
-          setState(() {
-            party_count = filteredItems_parties.length.toString();
-            if ((int.tryParse(party_count) ?? 0) < 2) {
-              party_text = "Party";
-            } else {
-              party_text = "Parties";
-            }
-            _isAllList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
-      setState(() {
-        _isAllList = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (parties_list.isEmpty) {
-        party_count = "0";
-        if ((int.tryParse(party_count) ?? 0) < 2) {
-          party_text = "Party";
-        } else {
-          party_text = "Parties";
-        }
         _isAllList = false;
         isVisibleNoDataFound = true;
       }
@@ -763,20 +546,11 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
       int defaultDays =
           prefs.getInt('inactiveparties_days') ??
           30; // Default to 30 if not found
       _inactivedayscontroller.text = defaultDays.toString();
     });
-
-    HttpURL_Parent =
-        '$hostname/api/ledger/getParent/$company_lowercase/$serial_no';
-    HttpURL_parties =
-        '$hostname/api/ledger/getLedger/$company_lowercase/$serial_no';
-
-    HttpURL_inactiveparties =
-        '$hostname/api/ledger/getInactiveLedger/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -845,12 +619,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                   MediaQuery.of(context).size.width - (kToolbarHeight * 1.6),
             ),
             child: GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => SerialSelect()),
-                );
-              },
+              onTap: () => navigateToCompanySwitch(context),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1290,8 +1059,10 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) =>
-                                        PartyClicked(partyname: card.partyname),
+                                    builder: (context) => PartyClicked(
+                                      partyname: card.partyname,
+                                      ledgerMasterId: card.masterId,
+                                    ),
                                   ),
                                 );
                               },

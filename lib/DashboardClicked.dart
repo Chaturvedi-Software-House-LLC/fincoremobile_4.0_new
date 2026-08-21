@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'Dashboard.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'TransactionClicked.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
@@ -24,6 +25,11 @@ import 'package:cross_file/cross_file.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/ledger_repository.dart';
+import 'api/voucher_repository.dart';
+import 'api/pagination_helper.dart';
+import 'api/tally_api_client.dart';
+import 'api/monthly_bucket_helper.dart';
 
 class LedgerGroup {
   final String ledger;
@@ -322,6 +328,12 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   String startDateString = "", endDateString = "", vchtypes = "";
 
   String selectedSortOption = '', token = '';
+
+  /// True for a tally-oauth-only session (Phase 6) - `serial_no` is always
+  /// `""` for those (never a real legacy serial), vs. a real value for a
+  /// legacy-paired session. Drives every fetch function below to call its
+  /// tally-api sibling instead of the legacy implementation.
+  bool _useTallyApi = false;
 
   int counter = 0;
 
@@ -641,7 +653,101 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     return formatAmount(total.toString()); // you already have this
   }
 
-  Future<void> fetchLedgerGroups() async {
+  /// Cash/Bank tile's ledger-group step (lists Cash-in-Hand/Bank Accounts
+  /// ledgers with their balances, before drilling into one ledger's
+  /// vouchers). Dispatches to the tally-api sibling for a tally-oauth-only
+  /// session.
+  Future<void> fetchLedgerGroups() {
+    if (_useTallyApi) return _fetchLedgerGroupsTallyApi();
+    return _fetchLedgerGroupsLegacy();
+  }
+
+  /// tally-api equivalent of [_fetchLedgerGroupsLegacy] - the base
+  /// `/ledgers` list already returns per-ledger `openingBalance`/
+  /// `closingBalance` directly (no separate "get ledger group totals"
+  /// endpoint needed), filtered here to ledgers whose group's
+  /// `reservedName` is `Cash-in-Hand`/`Bank Accounts`/`Bank OD A/c` -
+  /// tally-api's own dashboard/summary cash classification.
+  Future<void> _fetchLedgerGroupsTallyApi() async {
+    setState(() {
+      filteredLedgerGroupList.clear();
+      ledgerGroupList.clear();
+      _isLoading = true;
+      _isLedgerGroupVisible = false;
+      _isSalesListVisible = false;
+    });
+
+    if (_selectedvoucher == "All Voucher Types") {
+      _selectedvoucher = "";
+    }
+
+    try {
+      // The base ledger list only carries groupMasterId/groupName, not the
+      // group's reservedName - fetch groups separately to classify by
+      // reservedName (a group named e.g. "Petty Cash" only counts as
+      // "cash" via its reservedName, not its display name).
+      final groups = await fetchAllPages(
+        (page) => TallyApiClient().getForCompany('/groups?page=$page&limit=100'),
+      );
+      const cashBankReservedNames = {
+        'Cash-in-Hand',
+        'Bank Accounts',
+        'Bank OD A/c',
+      };
+      final cashBankGroupIds = groups
+          .where((g) => cashBankReservedNames.contains(g['reservedName']))
+          .map((g) => g['masterId'] as int)
+          .toSet();
+
+      // `LedgerRepository.listLedgers()` with no groupMasterId defaults to
+      // party-like groups only (Sundry Debtors/Creditors) - Cash-in-Hand/
+      // Bank Accounts ledgers need one call per matched group id instead.
+      final cashBankLedgers = <Map<String, dynamic>>[];
+      for (final groupId in cashBankGroupIds) {
+        cashBankLedgers.addAll(
+          await LedgerRepository.instance.listLedgers(groupMasterId: groupId),
+        );
+      }
+
+      double totalOpening = 0;
+      final ledgerGroups = <LedgerGroup>[];
+      for (final ledger in cashBankLedgers) {
+        final opening = parseMoneyField(ledger['openingBalance']);
+        final closing = parseMoneyField(ledger['closingBalance']);
+        totalOpening += opening;
+        ledgerGroups.add(
+          LedgerGroup.fromJson({
+            'ledger': ledger['name'] ?? '',
+            'amount': closing - opening,
+            'opening': opening,
+          }),
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        opening_value = totalOpening.toString();
+        ledgerGroupList = ledgerGroups;
+        filteredLedgerGroupList = ledgerGroupList;
+        _isLedgerGroupVisible = true;
+        _isSalesListVisible = false;
+        _isOutstandingListVisible = false;
+        isVisibleNoDataFound = ledgerGroups.isEmpty;
+      });
+    } catch (e) {
+      setState(() {
+        _isLedgerGroupVisible = false;
+        _isSalesListVisible = false;
+        _isOutstandingListVisible = false;
+        isVisibleNoDataFound = true;
+      });
+      debugPrint('DashboardClicked tally-api fetchLedgerGroups failed: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchLedgerGroupsLegacy() async {
     setState(() {
       filteredLedgerGroupList.clear();
       ledgerGroupList.clear();
@@ -2266,7 +2372,47 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  Future<void> fetchParent(final String type) async {
+  /// Voucher-type filter dropdown for Sales/Purchase/Cash/Receipt/Payment
+  /// tiles. Dispatches to the tally-api sibling for a tally-oauth-only
+  /// session (see `_useTallyApi`'s doc comment) - same signature both ways.
+  Future<void> fetchParent(final String type) {
+    if (_useTallyApi) return _fetchParentTallyApi();
+    return _fetchParentLegacy(type);
+  }
+
+  /// tally-api equivalent of [_fetchParentLegacy] - sources the dropdown
+  /// from the `/voucher-types` master list (every voucher type in the
+  /// company) rather than legacy's `getvoucherNames` (only voucher types
+  /// that actually have vouchers in some unscoped set) - a reasonable
+  /// substitute, not a byte-for-byte match.
+  Future<void> _fetchParentTallyApi() async {
+    setState(() => _isLoading = true);
+    spinner_list.clear();
+
+    try {
+      final voucherTypes = await fetchAllPages(
+        (page) => TallyApiClient().getForCompany(
+          '/voucher-types?page=$page&limit=100',
+        ),
+      );
+
+      spinner_list.add(allvchtypes);
+      spinner_list.addAll(
+        voucherTypes.map((v) => (v['name'] ?? '').toString()),
+      );
+
+      setState(() {
+        _selectedvoucher = spinner_list[0];
+        _voucherController.text = _selectedvoucher;
+        fetchListData();
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint('DashboardClicked tally-api fetchParent failed: $e');
+    }
+  }
+
+  Future<void> _fetchParentLegacy(final String type) async {
     setState(() {
       _isLoading = true;
     });
@@ -2312,7 +2458,50 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
+  /// Ledger filter dropdown for Receivable/Payable tiles. Dispatches to the
+  /// tally-api sibling for a tally-oauth-only session.
   Future<void> fetchParent_Receivable_Payable(
+    final String orderby,
+    final String isdebit,
+    final String select,
+    final String parent,
+  ) {
+    if (_useTallyApi) return _fetchParentReceivablePayableTallyApi();
+    return _fetchParentReceivablePayableLegacy(
+      orderby,
+      isdebit,
+      select,
+      parent,
+    );
+  }
+
+  /// tally-api equivalent of [_fetchParentReceivablePayableLegacy] - every
+  /// ledger in the company (`/ledgers`), not scoped to ledgers that
+  /// actually have outstanding bills - a reasonable substitute, not a
+  /// byte-for-byte match.
+  Future<void> _fetchParentReceivablePayableTallyApi() async {
+    setState(() => _isLoading = true);
+    spinner_list.clear();
+
+    try {
+      final ledgers = await LedgerRepository.instance.listLedgers();
+      spinner_list.add(allparties);
+      spinner_list.addAll(ledgers.map((l) => (l['name'] ?? '').toString()));
+
+      setState(() {
+        _selectedvoucher = spinner_list[0];
+        _voucherController.text = _selectedvoucher;
+        fetchListData();
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint(
+        'DashboardClicked tally-api fetchParent_Receivable_Payable failed: $e',
+      );
+    }
+  }
+
+  Future<void> _fetchParentReceivablePayableLegacy(
     final String orderby,
     final String isdebit,
     final String select,
@@ -2368,8 +2557,176 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  // new function fetchSales_purchase_cash
+  /// Main Sales/Purchase/Cash voucher list. Dispatches to the tally-api
+  /// sibling for a tally-oauth-only session.
   Future<void> fetchSales_purchase_cash(
+    final String ledgroup,
+    final String startdate,
+    final String enddate,
+    final String vchtypes,
+    final String opening,
+    final String vchname,
+    final String ledger,
+  ) {
+    if (_useTallyApi) {
+      return _fetchSalesPurchaseCashTallyApi(
+        ledgroup: ledgroup,
+        startdate: startdate,
+        enddate: enddate,
+        vchname: vchname,
+        ledger: ledger,
+      );
+    }
+    return _fetchSalesPurchaseCashLegacy(
+      ledgroup,
+      startdate,
+      enddate,
+      vchtypes,
+      opening,
+      vchname,
+      ledger,
+    );
+  }
+
+  /// tally-api equivalent of [_fetchSalesPurchaseCashLegacy]. Classifies
+  /// vouchers by `voucherTypeName` using the same reservedName pairs
+  /// tally-api's own `reports/dashboard/summary` uses for the Sales/
+  /// Purchase KPI totals (`Sales`+`Credit Note` / `Purchase`+`Debit Note`) -
+  /// [ledgroup] here is literally "Sales Accounts"/"Purchase Accounts"/
+  /// "cash-in-hand,bank accounts" (legacy's own parameter values, reused
+  /// as the classification key rather than adding a new one).
+  ///
+  /// Simplification versus legacy: the displayed "ledger" (counterparty)
+  /// for each voucher is its first ledger entry, not specifically the
+  /// non-Sales/Purchase-Accounts side - resolving that properly needs the
+  /// full group hierarchy per ledger, which isn't fetched here. Good
+  /// enough for the common two-ledger voucher case, a known simplification
+  /// for anything more complex (see the migration plan's Phase 7).
+  Future<void> _fetchSalesPurchaseCashTallyApi({
+    required String ledgroup,
+    required String startdate,
+    required String enddate,
+    required String vchname,
+    required String ledger,
+  }) async {
+    setState(() {
+      _isLoading = true;
+      isSortVisible = false;
+    });
+
+    sales_purc_cash_list.clear();
+    filteredItems_sale_purc_cash.clear();
+    receivable_payable_list.clear();
+    filteredItems_receivable_payable.clear();
+
+    try {
+      final from = parseCompactDate(startdate);
+      final to = parseCompactDate(enddate);
+      final vouchers = await VoucherRepository.instance.listInRange(
+        from: from,
+        to: to,
+      );
+
+      const salesTypes = {'Sales', 'CreditNote'};
+      const purchaseTypes = {'Purchase', 'DebitNote'};
+      final allowedTypes = ledgroup == 'Sales Accounts'
+          ? salesTypes
+          : ledgroup == 'Purchase Accounts'
+          ? purchaseTypes
+          : null; // Cash/Bank step 2 - no voucher-type restriction, ledger-filtered instead
+
+      final items = <Sale_purc_cash>[];
+      for (final voucher in vouchers) {
+        final voucherType = (voucher['voucherTypeName'] as String? ?? '')
+            .replaceAll(' ', '');
+        if (allowedTypes != null && !allowedTypes.contains(voucherType)) {
+          continue;
+        }
+        if (vchname.isNotEmpty && voucher['voucherTypeName'] != vchname) {
+          continue;
+        }
+
+        final entries =
+            (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+            const [];
+        if (entries.isEmpty) continue;
+
+        if (ledger.isNotEmpty &&
+            !entries.any((e) => e['ledgerName'] == ledger)) {
+          continue;
+        }
+
+        final debitTotal = entries
+            .where((e) => e['isDebit'] == true)
+            .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+
+        items.add(
+          Sale_purc_cash.fromJson({
+            'vchname': voucher['voucherTypeName'] ?? '',
+            'vchno': voucher['number'] ?? '',
+            'amount': debitTotal,
+            'vchdate': voucher['date'] ?? '',
+            'ledger': entries.first['ledgerName'] ?? '',
+            'isoptional': voucher['isOptional'] ?? false,
+            'ispostdated': voucher['isPostDated'] ?? false,
+            'refno': voucher['reference'] ?? '',
+            'refdate': voucher['referenceDate'] ?? '',
+            'masterid': voucher['masterId'] ?? '',
+            'ledgers': [
+              for (final e in entries)
+                {
+                  'ledgername': e['ledgerName'] ?? '',
+                  'amount': parseMoneyField(e['amount']),
+                },
+            ],
+          }),
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        opening_value = '0';
+        sales_purc_cash_list
+          ..clear()
+          ..addAll(items);
+        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
+        isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
+        isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
+        _isLoading = false;
+      });
+
+      if (filteredItems_sale_purc_cash.isNotEmpty) {
+        switch (selectedSortOption) {
+          case 'Default':
+            sortByDefault();
+          case 'Newest to Oldest':
+            sortByDateHightoLow();
+          case 'Oldest to Newest':
+            sortByDateLowtoHigh();
+          case 'A->Z':
+            sortByAlphabetAtoZ();
+          case 'Z->A':
+            sortByAlphabetZtoA();
+          case 'Amount High to Low':
+            sortByAmountHightoLow();
+          case 'Amount Low to High':
+            sortByAmountLowtoHigh();
+        }
+      }
+      if (_isTopPartiesView) _computeTopParties();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        isVisibleNoDataFound = true;
+        isSortVisible = false;
+        _isLoading = false;
+      });
+      debugPrint('DashboardClicked tally-api sales/purchase/cash fetch failed: $e');
+    }
+  }
+
+  // new function fetchSales_purchase_cash
+  Future<void> _fetchSalesPurchaseCashLegacy(
     final String ledgroup,
     final String startdate,
     final String enddate,
@@ -2601,7 +2958,127 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   // new function fetchReceivable_payable
 
+  /// Receivable/Payable outstanding-bills list. Dispatches to the
+  /// tally-api sibling for a tally-oauth-only session.
   Future<void> fetchReceivable_payable(
+    final String orderby,
+    final String startdate,
+    final String enddate,
+    final String isdebit,
+    final String ledger,
+  ) {
+    if (_useTallyApi) {
+      return _fetchReceivablePayableTallyApi(isdebit: isdebit, ledger: ledger);
+    }
+    return _fetchReceivablePayableLegacy(
+      orderby,
+      startdate,
+      enddate,
+      isdebit,
+      ledger,
+    );
+  }
+
+  /// tally-api equivalent of [_fetchReceivablePayableLegacy], via
+  /// `LedgerRepository.outstandingBills` - company-wide when [ledger] is
+  /// empty ("All Parties"), scoped to one ledger's masterId (resolved by
+  /// name) otherwise. `isdebit == 'true'` selects Receivable (positive
+  /// `finalBalance`), else Payable (negative).
+  Future<void> _fetchReceivablePayableTallyApi({
+    required String isdebit,
+    required String ledger,
+  }) async {
+    setState(() {
+      _isLoading = true;
+      isSortVisible = false;
+    });
+
+    receivable_payable_list.clear();
+    filteredItems_receivable_payable.clear();
+    sales_purc_cash_list.clear();
+    filteredItems_sale_purc_cash.clear();
+
+    try {
+      int? ledgerMasterId;
+      if (ledger.isNotEmpty) {
+        final ledgers = await LedgerRepository.instance.listLedgers();
+        final match = ledgers.firstWhere(
+          (l) => l['name'] == ledger,
+          orElse: () => const {},
+        );
+        ledgerMasterId = match['masterId'] as int?;
+      }
+
+      final bills = await LedgerRepository.instance.outstandingBills(
+        ledgerMasterId: ledgerMasterId,
+      );
+
+      final wantReceivable = isdebit == 'true';
+      final items = <Receivable_payable>[];
+      double opening = 0;
+      for (final bill in bills) {
+        final balance = parseMoneyField(bill['finalBalance']);
+        final isReceivable = balance > 0;
+        if (isReceivable != wantReceivable) continue;
+        opening += balance;
+        items.add(
+          Receivable_payable.fromJson({
+            'ledger': bill['ledgerName'] ?? '',
+            'billno': bill['name'] ?? '',
+            'billdate': bill['date'] ?? '',
+            'billtype': bill['isAdvance'] == true ? 'Advance' : 'New Ref',
+            'duedate': bill['dueDate'] ?? '',
+            'outstanding': balance,
+          }),
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        opening_value = '0';
+        receivable_payable_list
+          ..clear()
+          ..addAll(items);
+        filteredItems_receivable_payable = List.from(receivable_payable_list);
+        isVisibleNoDataFound = filteredItems_receivable_payable.isEmpty;
+        isSortVisible = filteredItems_receivable_payable.isNotEmpty;
+        _isLoading = false;
+      });
+
+      if (filteredItems_receivable_payable.isNotEmpty) {
+        switch (selectedSortOption) {
+          case 'Default':
+            sortByDefault();
+          case 'Newest to Oldest':
+            sortByDateHightoLow();
+          case 'Oldest to Newest':
+            sortByDateLowtoHigh();
+          case 'A->Z':
+            sortByAlphabetAtoZ();
+          case 'Z->A':
+            sortByAlphabetZtoA();
+          case 'Amount High to Low':
+            sortByAmountHightoLow();
+          case 'Amount Low to High':
+            sortByAmountLowtoHigh();
+        }
+      }
+      if (_isAgeingView) {
+        _computeAgeingBuckets();
+        if (_isPartyAgeingView) _computePartyAgeing();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        isVisibleNoDataFound = true;
+        isSortVisible = false;
+        _isLoading = false;
+      });
+      debugPrint('DashboardClicked tally-api receivable/payable fetch failed: $e');
+    }
+  }
+
+  Future<void> _fetchReceivablePayableLegacy(
     final String orderby,
     final String startdate,
     final String enddate,
@@ -2823,9 +3300,136 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   */
 
+  /// Receipt/Payment voucher list. Dispatches to the tally-api sibling for
+  /// a tally-oauth-only session.
+  Future<void> fetchReceipt_Payment(
+    final String startdate,
+    final String enddate,
+    final String vchtypes,
+    final String vchname,
+  ) {
+    if (_useTallyApi) {
+      return _fetchReceiptPaymentTallyApi(
+        startdate: startdate,
+        enddate: enddate,
+        vchtypes: vchtypes,
+        vchname: vchname,
+      );
+    }
+    return _fetchReceiptPaymentLegacy(startdate, enddate, vchtypes, vchname);
+  }
+
+  /// tally-api equivalent of [_fetchReceiptPaymentLegacy] - filters
+  /// [VoucherRepository.listInRange] by `voucherTypeName == vchtypes`
+  /// ("Receipt"/"Payment"), same simplification as
+  /// `_fetchSalesPurchaseCashTallyApi` for the displayed "ledger" field.
+  Future<void> _fetchReceiptPaymentTallyApi({
+    required String startdate,
+    required String enddate,
+    required String vchtypes,
+    required String vchname,
+  }) async {
+    setState(() {
+      _isLoading = true;
+      isSortVisible = false;
+    });
+
+    sales_purc_cash_list.clear();
+    filteredItems_sale_purc_cash.clear();
+    receivable_payable_list.clear();
+    filteredItems_receivable_payable.clear();
+
+    try {
+      final from = parseCompactDate(startdate);
+      final to = parseCompactDate(enddate);
+      final vouchers = await VoucherRepository.instance.listInRange(
+        from: from,
+        to: to,
+      );
+
+      final items = <Sale_purc_cash>[];
+      for (final voucher in vouchers) {
+        if (voucher['voucherTypeName'] != vchtypes) continue;
+        if (vchname.isNotEmpty && voucher['voucherTypeName'] != vchname) {
+          continue;
+        }
+
+        final entries =
+            (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+            const [];
+        if (entries.isEmpty) continue;
+
+        final debitTotal = entries
+            .where((e) => e['isDebit'] == true)
+            .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+
+        items.add(
+          Sale_purc_cash.fromJson({
+            'vchname': voucher['voucherTypeName'] ?? '',
+            'vchno': voucher['number'] ?? '',
+            'amount': debitTotal,
+            'vchdate': voucher['date'] ?? '',
+            'ledger': entries.first['ledgerName'] ?? '',
+            'isoptional': voucher['isOptional'] ?? false,
+            'ispostdated': voucher['isPostDated'] ?? false,
+            'refno': voucher['reference'] ?? '',
+            'refdate': voucher['referenceDate'] ?? '',
+            'masterid': voucher['masterId'] ?? '',
+            'ledgers': [
+              for (final e in entries)
+                {
+                  'ledgername': e['ledgerName'] ?? '',
+                  'amount': parseMoneyField(e['amount']),
+                },
+            ],
+          }),
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        sales_purc_cash_list
+          ..clear()
+          ..addAll(items);
+        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
+        isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
+        isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
+        _isLoading = false;
+      });
+
+      if (filteredItems_sale_purc_cash.isNotEmpty) {
+        switch (selectedSortOption) {
+          case 'Default':
+            sortByDefault();
+          case 'Newest to Oldest':
+            sortByDateHightoLow();
+          case 'Oldest to Newest':
+            sortByDateLowtoHigh();
+          case 'A->Z':
+            sortByAlphabetAtoZ();
+          case 'Z->A':
+            sortByAlphabetZtoA();
+          case 'Amount High to Low':
+            sortByAmountHightoLow();
+          case 'Amount Low to High':
+            sortByAmountLowtoHigh();
+        }
+      }
+      if (_isTopPartiesView) _computeTopParties();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        isVisibleNoDataFound = true;
+        isSortVisible = false;
+        _isLoading = false;
+      });
+      debugPrint('DashboardClicked tally-api receipt/payment fetch failed: $e');
+    }
+  }
+
   // new function fetchReceipt_Payment
 
-  Future<void> fetchReceipt_Payment(
+  Future<void> _fetchReceiptPaymentLegacy(
     final String startdate,
     final String enddate,
     final String vchtypes,
@@ -3539,7 +4143,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
+      _useTallyApi = serial_no == null || serial_no!.isEmpty;
     });
 
     try {
@@ -3838,12 +4443,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                           : 1.6)),
             ),
             child: GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => SerialSelect()),
-                );
-              },
+              onTap: () => navigateToCompanySwitch(context),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

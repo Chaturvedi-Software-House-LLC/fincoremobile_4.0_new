@@ -712,7 +712,7 @@ class _PartyClickedSalePurcOrderPageState
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
       /*selectedTopValue = dropdownItems.first;
       filteredItems= item_list;
       isVisibleNoDataFound =false;

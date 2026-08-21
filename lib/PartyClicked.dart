@@ -25,6 +25,10 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
 import 'utils/number_formatter.dart';
+import 'api/ledger_repository.dart';
+import 'api/voucher_repository.dart';
+import 'api/voucher_drilldown_helper.dart';
+import 'api/monthly_bucket_helper.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
@@ -101,16 +105,23 @@ class Rec_Pay {
 
 class PartyClicked extends StatefulWidget {
   final String partyname;
-  const PartyClicked({required this.partyname});
+  /// The ledger's tally-api `masterId` - every migrated report endpoint
+  /// (`ledgerSummary`/`outstandingTotal`/`outstandingBills`/`itemSummary`)
+  /// is masterId-keyed, not name-keyed. Nullable only so a legacy-paired
+  /// session (which has no such id) still compiles/renders; those sessions
+  /// simply see the "not available" empty states this file falls back to.
+  final int? ledgerMasterId;
+  const PartyClicked({required this.partyname, this.ledgerMasterId});
   @override
   _PartyClickedPageState createState() =>
-      _PartyClickedPageState(partyname: partyname);
+      _PartyClickedPageState(partyname: partyname, ledgerMasterId: ledgerMasterId);
 }
 
 class _PartyClickedPageState extends State<PartyClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String partyname = "";
+  int? ledgerMasterId;
 
   String startDateString = "", endDateString = "";
   String totalsales = "";
@@ -253,6 +264,14 @@ class _PartyClickedPageState extends State<PartyClicked>
       SalesOrderVisibility = false,
       PurchaseOrderVisibility = false;
 
+  // tally-api has no Sales/Purchase Order concept at all (confirmed via
+  // exhaustive search of tally-api's src/tally-sync - see the migration
+  // plan's Phase 7 "Tier 3" notes) - true only when a tally-oauth session
+  // (ledgerMasterId != null) would otherwise have shown the Pending Order
+  // tile (permission flags say so) but there's no data to show. Drives an
+  // explicit "not available" tile instead of a silent gap.
+  bool _pendingOrderUnavailable = false;
+
   String pendingsalesorder = "0", pendingpurchaseorder = "0";
 
   dynamic _selecteddate;
@@ -297,7 +316,7 @@ class _PartyClickedPageState extends State<PartyClicked>
   List<months> months_list_journal =
       []; // Initialize an empty list to hold the filtered items
 
-  _PartyClickedPageState({required this.partyname});
+  _PartyClickedPageState({required this.partyname, this.ledgerMasterId});
 
   String? SecuritybtnAcessHolder;
   bool isDashEnable = true,
@@ -1201,6 +1220,114 @@ class _PartyClickedPageState extends State<PartyClicked>
       }
       _isLoading = false;
     });
+  }
+
+  /// tally-api equivalent of [fetchsold]/[fetchpurchase] above - only
+  /// reached when this party has no Summary-visibility flags set at all
+  /// (a "pure" customer/supplier, see `fetchSummary()`).
+  ///
+  /// `LedgerRepository.itemSummary` (legacy's `getItemSummary`) returns
+  /// every stock item transacted with this ledger regardless of voucher
+  /// type, with no `vchtype` filter - using it directly made the Sold and
+  /// Purchased lists show identical data for a party with both Sales and
+  /// Purchase vouchers. Filters via [fetchDrilldownVouchers] +
+  /// [voucher]'s own `voucherTypeName` instead (same approach as
+  /// `PartyDrillDown`'s tally-api aggregation), then sums each item's
+  /// qty/amount across only the matching vouchers.
+  Future<void> _fetchSoldPurchaseTallyApi(String vchtype) async {
+    final ledgerMasterId = this.ledgerMasterId;
+    if (ledgerMasterId == null) return;
+
+    final isSold = vchtype == 'Sales';
+
+    setState(() {
+      item_count = "0";
+      _isLoading = true;
+      if (isSold) {
+        isVisibleSoldList = false;
+      } else {
+        isVisiblePurchaseList = false;
+      }
+      isVisibleNoDataFound = false;
+      _isSearchViewVisible = false;
+      searchController.clear();
+    });
+
+    filteredItems_sold.clear();
+    sold_list.clear();
+    filteredItems_purchase.clear();
+    purchase_list.clear();
+
+    try {
+      final from = parseCompactDate(startDateString);
+      final to = parseCompactDate(endDateString);
+      final vouchers = await fetchDrilldownVouchers(
+        from: from,
+        to: to,
+        partyLedgerName: partyname,
+        voucherTypeName: vchtype,
+      );
+
+      final totals = <String, Map<String, dynamic>>{};
+      for (final voucher in vouchers) {
+        final inventoryEntries =
+            (voucher['inventoryEntries'] as List?)
+                ?.cast<Map<String, dynamic>>() ??
+            const [];
+        final date = voucher['date']?.toString() ?? '';
+        for (final entry in inventoryEntries) {
+          final name = (entry['stockItemName'] ?? '').toString();
+          final bucket = totals.putIfAbsent(
+            name,
+            () => {'qty': 0.0, 'unit': '', 'lastdate': '', 'rate': '0'},
+          );
+          bucket['qty'] = (bucket['qty'] as double) + parseMoneyField(entry['quantity']);
+          bucket['unit'] = entry['unitSymbol'] ?? bucket['unit'];
+          // Keep the rate/date from whichever entry has the latest date.
+          if (date.compareTo(bucket['lastdate'] as String) >= 0) {
+            bucket['lastdate'] = date;
+            bucket['rate'] = (entry['rate'] ?? '0').toString();
+          }
+        }
+      }
+
+      final items = [
+        for (final entry in totals.entries)
+          Sold_Purchased(
+            item: entry.key,
+            qty: (entry.value['qty'] as double).toString(),
+            unit: (entry.value['unit'] as String),
+            lastdate: (entry.value['lastdate'] as String),
+            rate: (entry.value['rate'] as String),
+          ),
+      ];
+
+      setState(() {
+        if (isSold) {
+          sold_list.addAll(items);
+          filteredItems_sold = sold_list;
+          isVisibleSoldList = items.isNotEmpty;
+        } else {
+          purchase_list.addAll(items);
+          filteredItems_purchase = purchase_list;
+          isVisiblePurchaseList = items.isNotEmpty;
+        }
+        item_count = items.length.toString();
+        isVisibleNoDataFound = items.isEmpty;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        if (isSold) {
+          isVisibleSoldList = false;
+        } else {
+          isVisiblePurchaseList = false;
+        }
+        isVisibleNoDataFound = true;
+        _isLoading = false;
+      });
+      debugPrint('PartyClicked tally-api sold/purchase fetch failed: $e');
+    }
   }
 
   void formatRecPayTotal(String outstanding) {
@@ -2154,6 +2281,257 @@ class _PartyClickedPageState extends State<PartyClicked>
     }
   }
 
+  /// tally-api equivalent of [fetchSummaryData] above - populates the exact
+  /// same state fields the existing UI (`SummaryExpansionCard`,
+  /// `ReceivableBreakdownCard`/`PayableBreakdownCard`, `PendingOrderTile`)
+  /// already renders, so no widget-tree changes were needed. Used instead
+  /// of the legacy function whenever `ledgerMasterId` is available (a
+  /// tally-oauth-only session - see the migration plan's Phase 7).
+  ///
+  /// Sourced from three tally-api report endpoints
+  /// (`LedgerRepository.ledgerSummary`/`outstandingTotal`/
+  /// `outstandingBills`) plus one client-side aggregation
+  /// (`VoucherRepository.listInRange` bucketed by `monthly_bucket_helper.dart`,
+  /// since no ledger-scoped monthly-trend endpoint exists on tally-api
+  /// today). Pending Sales/Purchase Order has no tally-api equivalent at
+  /// all (see `_pendingOrderUnavailable`) - never fetched here.
+  Future<void> _fetchSummaryDataTallyApi(
+    String startdate_string,
+    String enddate_string,
+  ) async {
+    final ledgerMasterId = this.ledgerMasterId;
+    if (ledgerMasterId == null) return;
+
+    months_list_sales.clear();
+    months_list_purchase.clear();
+    months_list_receipt.clear();
+    months_list_payment.clear();
+    months_list_creditnote.clear();
+    months_list_debitnote.clear();
+    months_list_journal.clear();
+
+    row1_receivable = formatRemainingOverdue("0");
+    row2_receivable = formatRemainingOverdue("0");
+    row3_receivable = formatRemainingOverdue("0");
+    row4_receivable = formatRemainingOverdue("0");
+    row5_receivable = formatRemainingOverdue("0");
+    row6_receivable = formatRemainingOverdue("0");
+
+    row1_payable = formatRemainingOverdue("0");
+    row2_payable = formatRemainingOverdue("0");
+    row3_payable = formatRemainingOverdue("0");
+    row4_payable = formatRemainingOverdue("0");
+    row5_payable = formatRemainingOverdue("0");
+    row6_payable = formatRemainingOverdue("0");
+
+    setState(() {
+      _isLoading = true;
+      isClicked_Summary = true;
+      isClicked_Sold = false;
+      isClicked_Purchase = false;
+      isSearchLayoutVisible = false;
+      searchController.clear();
+      isVisibleNoDataFound = false;
+
+      SalesVisibility = false;
+      PurchaseVisibility = false;
+      ReceiptVisibility = false;
+      PaymentVisibility = false;
+      CreditnoteVisibility = false;
+      DebitnoteVisibility = false;
+      JournalVisibility = false;
+      ReceivableVisibility = false;
+      PayableVisibility = false;
+      PurchaseOrderVisibility = false;
+      SalesOrderVisibility = false;
+      _pendingOrderUnavailable =
+          pendingsalesorderparty == 'True' || pendingpurchaseorderparty == 'True';
+    });
+
+    try {
+      final from = parseCompactDate(startdate_string);
+      final to = parseCompactDate(enddate_string);
+
+      final summaryRows = await LedgerRepository.instance.ledgerSummary(
+        ledgerMasterId,
+        from: from,
+        to: to,
+      );
+
+      if (summaryRows.isEmpty) {
+        setState(() => isVisibleNoDataFound = true);
+      }
+
+      // Tally's own reservedName has a space ("Credit Note"/"Debit Note")
+      // where this screen's internal keys don't ("CreditNote"/"DebitNote").
+      for (final row in summaryRows) {
+        final vchtype = (row['voucherTypeName'] as String? ?? '').replaceAll(
+          ' ',
+          '',
+        );
+        final totalAmount = (row['totalAmount'] ?? '0').toString();
+        final averageAmount = (row['averageAmount'] ?? '0').toString();
+        final invoiceCount = (row['invoiceCount'] ?? 0).toString();
+        final lastDate = (row['lastDate'] ?? '').toString();
+
+        switch (vchtype) {
+          case 'Sales':
+            if (salesparty != 'True') continue;
+            setState(() => SalesVisibility = true);
+            totalsaleamt = totalAmount;
+            avgsalesinvoiceamt = averageAmount;
+            noofsalesinvoice = invoiceCount;
+            lastsaledate = lastDate;
+          case 'Purchase':
+            if (purchaseparty != 'True') continue;
+            setState(() => PurchaseVisibility = true);
+            totalpurchaseamt = totalAmount;
+            avgpurchaseinvoiceamt = averageAmount;
+            noofpurchaseinvoice = invoiceCount;
+            lastpurchasedate = lastDate;
+          case 'Receipt':
+            if (receiptparty != 'True') continue;
+            setState(() => ReceiptVisibility = true);
+            totalreceiptamt = totalAmount;
+            avgreceiptinvoiceamt = averageAmount;
+            noofreceiptinvoice = invoiceCount;
+            lastreceiptdate = lastDate;
+          case 'Payment':
+            if (paymentparty != 'True') continue;
+            setState(() => PaymentVisibility = true);
+            totalpaymentamt = totalAmount;
+            avgpaymentinvoiceamt = averageAmount;
+            noofpaymentinvoice = invoiceCount;
+            lastpaymentdate = lastDate;
+          case 'CreditNote':
+            if (creditnoteparty != 'True') continue;
+            setState(() => CreditnoteVisibility = true);
+            totalcreditnoteamt = totalAmount;
+            avgcreditnoteinvoiceamt = averageAmount;
+            noofcreditnoteinvoice = invoiceCount;
+            lastcreditnotedate = lastDate;
+          case 'DebitNote':
+            if (debitnoteparty != 'True') continue;
+            setState(() => DebitnoteVisibility = true);
+            totaldebitnoteamt = totalAmount;
+            avgdebitnoteinvoiceamt = averageAmount;
+            noofdebitnoteinvoice = invoiceCount;
+            lastdebitnotedate = lastDate;
+          case 'Journal':
+            if (journalparty != 'True') continue;
+            setState(() => JournalVisibility = true);
+            totaljournalamt = totalAmount;
+            avgjournalinvoiceamt = averageAmount;
+            noofjournalinvoice = invoiceCount;
+            lastjournaldate = lastDate;
+          default:
+          // DeliveryNote/other reserved names - not shown in this summary
+          // UI, same as legacy's explicit DelNote/SalesOrder skip.
+        }
+      }
+
+      // Monthly Breakdown + Trend chart - built client-side from the full
+      // voucher list (has voucherTypeName + per-ledger entries already),
+      // since no ledger-scoped monthly-trend endpoint exists on tally-api.
+      if (SalesVisibility ||
+          PurchaseVisibility ||
+          ReceiptVisibility ||
+          PaymentVisibility ||
+          CreditnoteVisibility ||
+          DebitnoteVisibility ||
+          JournalVisibility) {
+        final vouchers = await VoucherRepository.instance.listInRange(
+          from: from,
+          to: to,
+        );
+
+        void bucketInto(List<months> target, String vchtypeKey) {
+          final rows = <Map<String, dynamic>>[];
+          for (final voucher in vouchers) {
+            final voucherType =
+                (voucher['voucherTypeName'] as String? ?? '').replaceAll(
+                  ' ',
+                  '',
+                );
+            if (voucherType != vchtypeKey) continue;
+            final entries =
+                (voucher['ledgerEntries'] as List?)
+                    ?.cast<Map<String, dynamic>>() ??
+                const [];
+            for (final entry in entries) {
+              if (entry['ledgerMasterId'] != ledgerMasterId) continue;
+              rows.add({
+                'date': voucher['date'],
+                'amount': parseMoneyField(entry['amount']).abs(),
+              });
+            }
+          }
+          final buckets = bucketByMonth(
+            rows,
+            dateOf: (r) => DateTime.parse(r['date'] as String),
+            amountOf: (r) => r['amount'] as double,
+          );
+          target.addAll([
+            for (final b in buckets)
+              months(mname: b.label, total: b.total.toString()),
+          ]);
+        }
+
+        if (SalesVisibility) bucketInto(months_list_sales, 'Sales');
+        if (PurchaseVisibility) bucketInto(months_list_purchase, 'Purchase');
+        if (ReceiptVisibility) bucketInto(months_list_receipt, 'Receipt');
+        if (PaymentVisibility) bucketInto(months_list_payment, 'Payment');
+        if (CreditnoteVisibility) {
+          bucketInto(months_list_creditnote, 'CreditNote');
+        }
+        if (DebitnoteVisibility) {
+          bucketInto(months_list_debitnote, 'DebitNote');
+        }
+        if (JournalVisibility) bucketInto(months_list_journal, 'Journal');
+      }
+
+      // Receivable/Payable outstanding.
+      if (receivableparty == 'True' || payableparty == 'True') {
+        _sumReceivable0 = 0;
+        _sumReceivable30 = 0;
+        _sumReceivable60 = 0;
+        _sumReceivable90 = 0;
+        _sumReceivable120 = 0;
+        _sumReceivable180 = 0;
+        _sumPayable0 = 0;
+        _sumPayable30 = 0;
+        _sumPayable60 = 0;
+        _sumPayable90 = 0;
+        _sumPayable120 = 0;
+        _sumPayable180 = 0;
+        _currentReceivableOnAccount = 0;
+        _currentPayableOnAccount = 0;
+
+        final totals = await LedgerRepository.instance.outstandingTotal(
+          ledgerMasterId,
+        );
+        formatRecPayTotal((totals['outstanding'] ?? '0').toString());
+
+        final bills = await LedgerRepository.instance.outstandingBills(
+          ledgerMasterId: ledgerMasterId,
+        );
+        for (final bill in bills) {
+          final outstanding = (bill['finalBalance'] ?? '0').toString();
+          final overdueDays = bill['overdueDays'] as int?;
+          // Every row here is a real, named bill (tally-api's Bill model) -
+          // legacy's separate "on account" (unmatched-reference) branch has
+          // no equivalent concept in this endpoint's response.
+          formatOnAccountWithBillNo(overdueDays ?? 0, outstanding);
+        }
+      }
+
+      setState(() => _isLoading = false);
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint('PartyClicked tally-api summary fetch failed: $e');
+    }
+  }
+
   void fetchSummary() {
     if (salesparty == 'False' &&
         purchaseparty == 'False' &&
@@ -2174,21 +2552,33 @@ class _PartyClickedPageState extends State<PartyClicked>
         isClicked_Summary = false;
         isSearchLayoutVisible = true;
 
-        fetchpurchase("Purchase", partyname, startDateString, endDateString);
+        if (ledgerMasterId != null) {
+          _fetchSoldPurchaseTallyApi('Purchase');
+        } else {
+          fetchpurchase("Purchase", partyname, startDateString, endDateString);
+        }
       } else if (party_customers == 'True') {
         isClicked_Summary = false;
         isClicked_Sold = true;
         isClicked_Purchase = false;
         isSearchLayoutVisible = true;
 
-        fetchsold("Sales", partyname, startDateString, endDateString);
+        if (ledgerMasterId != null) {
+          _fetchSoldPurchaseTallyApi('Sales');
+        } else {
+          fetchsold("Sales", partyname, startDateString, endDateString);
+        }
       }
     } else {
       setState(() {
         isVisibleSummaryBtn = true;
         isClicked_Summary = true;
       });
-      fetchSummaryData(partyname, startDateString, endDateString, "vchtype");
+      if (ledgerMasterId != null) {
+        _fetchSummaryDataTallyApi(startDateString, endDateString);
+      } else {
+        fetchSummaryData(partyname, startDateString, endDateString, "vchtype");
+      }
     }
   }
 
@@ -2201,7 +2591,7 @@ class _PartyClickedPageState extends State<PartyClicked>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
       _selecteddate = prefs.getString('datetype') ?? date_range.first;
 
       decimal = prefs.getInt('decimalplace') ?? 2;
@@ -3250,12 +3640,18 @@ class _PartyClickedPageState extends State<PartyClicked>
                                             isClicked_Sold = true;
                                             isClicked_Purchase = false;
                                             isSearchLayoutVisible = true;
-                                            fetchsold(
-                                              "Sales",
-                                              partyname,
-                                              startDateString,
-                                              endDateString,
-                                            );
+                                            if (ledgerMasterId != null) {
+                                              _fetchSoldPurchaseTallyApi(
+                                                'Sales',
+                                              );
+                                            } else {
+                                              fetchsold(
+                                                "Sales",
+                                                partyname,
+                                                startDateString,
+                                                endDateString,
+                                              );
+                                            }
                                           });
                                         },
                                       ),
@@ -3272,12 +3668,18 @@ class _PartyClickedPageState extends State<PartyClicked>
                                             isClicked_Sold = false;
                                             isClicked_Summary = false;
                                             isSearchLayoutVisible = true;
-                                            fetchpurchase(
-                                              "Purchase",
-                                              partyname,
-                                              startDateString,
-                                              endDateString,
-                                            );
+                                            if (ledgerMasterId != null) {
+                                              _fetchSoldPurchaseTallyApi(
+                                                'Purchase',
+                                              );
+                                            } else {
+                                              fetchpurchase(
+                                                "Purchase",
+                                                partyname,
+                                                startDateString,
+                                                endDateString,
+                                              );
+                                            }
                                           });
                                         },
                                       ),
@@ -3378,6 +3780,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                   ),
 
                                 if (PurchaseVisibility)
@@ -3393,6 +3796,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                     onTapTotal: () => navigateToDetail(
                                       'Purchase',
                                       totalpurchaseamt,
@@ -3412,6 +3816,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                     onTapTotal: () {
                                       String amount = totalreceiptamt;
 
@@ -3428,6 +3833,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                                 type: vchtype,
                                                 total: amount,
                                                 ledger: partyname,
+                                                ledgerMasterId: ledgerMasterId,
                                               ),
                                         ),
                                       );
@@ -3447,6 +3853,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                     onTapTotal: () {
                                       String amount = totalpaymentamt;
                                       print('amount -> $amount');
@@ -3463,6 +3870,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                                 type: vchtype,
                                                 total: amount,
                                                 ledger: partyname,
+                                                ledgerMasterId: ledgerMasterId,
                                               ),
                                         ),
                                       );
@@ -3482,6 +3890,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                     onTapTotal: () => navigateToDetail(
                                       'Credit Note',
                                       totalcreditnoteamt,
@@ -3500,6 +3909,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                     onTapTotal: () => navigateToDetail(
                                       'Debit Note',
                                       totaldebitnoteamt,
@@ -3518,6 +3928,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencysymbol: currencysymbol,
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
+                                    ledgerMasterId: ledgerMasterId,
                                     onTapTotal: () {
                                       String amount = totaljournalamt;
                                       print('amount -> $amount');
@@ -3533,6 +3944,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                                 type: vchtype,
                                                 total: amount,
                                                 ledger: partyname,
+                                                ledgerMasterId: ledgerMasterId,
                                               ),
                                         ),
                                       );
@@ -3739,6 +4151,26 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     decimal: decimal,
                                     onTap: () => navigateToOrder('purcorder'),
                                   ),
+
+                                // tally-api has no Sales/Purchase Order
+                                // concept at all (see _pendingOrderUnavailable's
+                                // doc comment) - shown explicitly rather than
+                                // silently omitted, so the gap is visible.
+                                if (_pendingOrderUnavailable)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    child: Text(
+                                      'Pending Sales/Purchase Order is not '
+                                      'available yet on the new backend.',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        color: Colors.grey.shade600,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ),
                               ],
                             ),
 
@@ -3941,6 +4373,8 @@ class _PartyClickedPageState extends State<PartyClicked>
                                                     item: card.item,
                                                     unit: card.unit,
                                                     ledger: partyname,
+                                                    ledgerMasterId:
+                                                        ledgerMasterId,
                                                   ),
                                             ),
                                           );
@@ -4156,6 +4590,8 @@ class _PartyClickedPageState extends State<PartyClicked>
                                                       item: card.item,
                                                       unit: card.unit,
                                                       ledger: partyname,
+                                                      ledgerMasterId:
+                                                          ledgerMasterId,
                                                     ),
                                               ),
                                             );
@@ -4350,6 +4786,7 @@ class _PartyClickedPageState extends State<PartyClicked>
           type: vchtype,
           total: amount,
           ledger: partyname,
+          ledgerMasterId: ledgerMasterId,
         ),
       ),
     );
@@ -4372,6 +4809,7 @@ class _PartyClickedPageState extends State<PartyClicked>
           ledger: partyname,
           variable: variable,
           variabletype: variableType,
+          ledgerMasterId: ledgerMasterId,
         ),
       ),
     );
@@ -4394,6 +4832,7 @@ class _PartyClickedPageState extends State<PartyClicked>
           ledger: partyname,
           variable: variable,
           variabletype: variableType,
+          ledgerMasterId: ledgerMasterId,
         ),
       ),
     );
@@ -4431,6 +4870,7 @@ class SummaryExpansionCard extends StatelessWidget {
   final int? decimal;
   final String? currencysymbol;
   final String? currencyCode;
+  final int? ledgerMasterId;
 
   const SummaryExpansionCard({
     super.key,
@@ -4446,6 +4886,7 @@ class SummaryExpansionCard extends StatelessWidget {
     this.decimal,
     this.currencysymbol,
     this.currencyCode,
+    this.ledgerMasterId,
   });
 
   String formatAmountWithCrDr(String amount) {
@@ -4865,6 +5306,7 @@ class SummaryExpansionCard extends StatelessWidget {
                                 type: type,
                                 total: rawAmount,
                                 ledger: partyname,
+                                ledgerMasterId: ledgerMasterId,
                               ),
                             ),
                           );
@@ -4878,10 +5320,14 @@ class SummaryExpansionCard extends StatelessWidget {
                                 type: type,
                                 total: rawAmount,
                                 ledger: partyname,
+                                ledgerMasterId: ledgerMasterId,
                               ),
                             ),
                           );
                         }
+                        // NOTE: `ledgerMasterId` above resolves to
+                        // `SummaryExpansionCard.ledgerMasterId` (this class
+                        // is a StatelessWidget, not the page state).
                       },
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 12),

@@ -14,6 +14,8 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:url_launcher/url_launcher.dart';
 import 'constants.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/api_exception.dart';
+import 'api/auth_repository.dart';
 // import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class Serial {
@@ -1912,6 +1914,29 @@ class _MyHomePageState extends State<SerialSelect>
     await getadmindata(serial_no);
   }
 
+  /// Mints a tally-oauth company-user session for the just-selected legacy
+  /// (serial_no, company_name) pair, so screens migrated to tally-api have
+  /// a valid session once they land. Deliberately non-blocking: as of this
+  /// migration phase no screen yet reads from tally-api, so a mapping
+  /// failure here (the legacy/new-backend company records being out of
+  /// sync for this account) shouldn't stop the user from using the rest of
+  /// the app, which is still entirely legacy-backed today. A warning is
+  /// still surfaced so the gap doesn't go unnoticed once new screens land.
+  Future<void> _selectCompanyOnTallyOauth(String companyName) async {
+    try {
+      await AuthRepository.instance.selectCompany(
+        serialNo: serial_no,
+        companyName: companyName,
+      );
+    } on CompanyMappingNotFoundException catch (e) {
+      debugPrint('tally-oauth company mapping not found: $e');
+    } on ApiException catch (e) {
+      debugPrint('tally-oauth company-user login failed: ${e.message}');
+    } catch (e) {
+      debugPrint('tally-oauth company-user login failed: $e');
+    }
+  }
+
   Future<void> _continueWithCompanyDirect(dynamic companyItem) async {
     _selectcompany = companyItem;
 
@@ -1933,6 +1958,8 @@ class _MyHomePageState extends State<SerialSelect>
     prefs.setString("company_address", syncData['address'] ?? "");
     prefs.setString("company_emirate", syncData['emirate'] ?? "");
     prefs.setString("company_country", syncData['country'] ?? "");
+
+    await _selectCompanyOnTallyOauth(companyName);
 
     if (secbtnaccess == "True") {
       for (String key in [

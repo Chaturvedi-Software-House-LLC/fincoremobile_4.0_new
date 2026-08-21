@@ -19,10 +19,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'DashboardAnalytics.dart';
 import 'PendingSalesOrderEntry.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/api_exception.dart';
+import 'api/dashboard_repository.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField;
 
 List<String> months_chart = [];
 List<String> months_chart_line_graph = [
@@ -161,7 +165,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
   bool isExpired = false;
 
-  String HttpURL = "", HttpURL_charts = "", HttpURL_piecharts = "";
+  String HttpURL_piecharts = "";
 
   String startDateString = "", endDateString = "";
   String? hostname = "",
@@ -1137,6 +1141,15 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     });
   }
 
+  /// Dashboard's own date strings are built as `yyyyMMdd` (no separators,
+  /// see startDateString/endDateString above) - tally-api's date query
+  /// params expect `YYYY-MM-DD`.
+  DateTime _parseYyyyMMdd(String value) => DateTime(
+    int.parse(value.substring(0, 4)),
+    int.parse(value.substring(4, 6)),
+    int.parse(value.substring(6, 8)),
+  );
+
   Future<void> fetchDashData(String startdate, String enddate) async {
     if (!isVisibleNoAccess) {
       setState(() {
@@ -1144,92 +1157,44 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       });
       /*showProgressDialog_LoadData(context, _isLoading);*/
 
-      final url = Uri.parse(HttpURL);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'startdate': startdate, 'enddate': enddate});
       final stopwatch = Stopwatch()..start();
 
-      final response = await http.post(url, body: body, headers: headers);
-
-      stopwatch.stop();
-
-      setState(() {
-        apiResponseTime = "${stopwatch.elapsedMilliseconds} ms";
-      });
-
-      print(' response time -> $apiResponseTime');
-      print(' dash response -> ${response.body}');
-
-      final dash_data = jsonDecode(utf8.decode(response.bodyBytes));
-
       try {
-        if (response.statusCode == 200) {
-          print(dash_data);
+        final dash_data = await DashboardRepository.instance.summary(
+          from: _parseYyyyMMdd(startdate),
+          to: _parseYyyyMMdd(enddate),
+        );
+        stopwatch.stop();
+        setState(() {
+          apiResponseTime = "${stopwatch.elapsedMilliseconds} ms";
+        });
 
-          if (dash_data != null) {
-            sales_value =
-                double.tryParse(dash_data['sales']?.toString() ?? "0") ?? 0.0;
-            purchase_value =
-                double.tryParse(dash_data['purchase']?.toString() ?? "0") ??
-                0.0;
-            receipt_value =
-                double.tryParse(dash_data['receipt']?.toString() ?? "0") ?? 0.0;
-            payment_value =
-                double.tryParse(dash_data['payment']?.toString() ?? "0") ?? 0.0;
-            cash_value =
-                double.tryParse(dash_data['cash']?.toString() ?? "0") ?? 0.0;
-            outstandingreceivable_value =
-                double.tryParse(dash_data['receivable']?.toString() ?? "0") ??
-                0.0;
-            outstandingpayable_value =
-                double.tryParse(dash_data['payable']?.toString() ?? "0") ?? 0.0;
+        // Every field is a money string (formatMoney), never absent -
+        // dashboard-reports/summary always returns all seven keys.
+        sales_value = double.tryParse(dash_data['sales']?.toString() ?? "0") ?? 0.0;
+        purchase_value =
+            double.tryParse(dash_data['purchase']?.toString() ?? "0") ?? 0.0;
+        receipt_value =
+            double.tryParse(dash_data['receipt']?.toString() ?? "0") ?? 0.0;
+        payment_value =
+            double.tryParse(dash_data['payment']?.toString() ?? "0") ?? 0.0;
+        cash_value = double.tryParse(dash_data['cash']?.toString() ?? "0") ?? 0.0;
+        outstandingreceivable_value =
+            double.tryParse(dash_data['receivable']?.toString() ?? "0") ?? 0.0;
+        outstandingpayable_value =
+            double.tryParse(dash_data['payable']?.toString() ?? "0") ?? 0.0;
 
-            prefs.setDouble('sales', sales_value);
-            prefs.setDouble('purchase', purchase_value);
-            prefs.setDouble('receipt', receipt_value);
-            prefs.setDouble('payment', payment_value);
-            prefs.setDouble('receivable', outstandingreceivable_value);
-            prefs.setDouble('payable', outstandingpayable_value);
-            prefs.setDouble('cash', cash_value);
-          } else {
-            prefs.remove('sales');
-            prefs.remove('purchase');
-            prefs.remove('receipt');
-            prefs.remove('payment');
-            prefs.remove('receivable');
-            prefs.remove('payable');
-            prefs.remove('cash');
-            throw Exception('Failed to fetch data');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = AppLocalizations.of(context).errorFetchingData;
-          }
-          showAppMessage(context, error);
-        }
+        prefs.setDouble('sales', sales_value);
+        prefs.setDouble('purchase', purchase_value);
+        prefs.setDouble('receipt', receipt_value);
+        prefs.setDouble('payment', payment_value);
+        prefs.setDouble('receivable', outstandingreceivable_value);
+        prefs.setDouble('payable', outstandingpayable_value);
+        prefs.setDouble('cash', cash_value);
+      } on ApiException catch (e) {
+        showAppMessage(context, e.message);
       } catch (e) {
-        String error = '';
-
-        if (dash_data.containsKey('error')) {
-          setState(() {
-            error = dash_data['error'];
-          });
-        } else {
-          error = AppLocalizations.of(context).errorFetchingData;
-        }
-        showAppMessage(context, error);
+        showAppMessage(context, AppLocalizations.of(context).errorFetchingData);
       }
 
       try {
@@ -1237,124 +1202,64 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             barchartdashprefs == 'True' ||
             piechartdashprefs == 'True') {
           if (linechartdashprefs == 'True' || barchartdashprefs == 'True') {
-            final url_charts = Uri.parse(HttpURL_charts);
+            try {
+              final chartRows = await DashboardRepository.instance.salesChart(
+                from: _parseYyyyMMdd(startdate),
+                to: _parseYyyyMMdd(enddate),
+                groupBy: 'month',
+              );
 
-            Map<String, String> headers_charts = {
-              'Authorization': 'Bearer $token',
-              "Content-Type": "application/json",
-            };
-
-            var body_charts = jsonEncode({
-              "startdate": startdate,
-              "enddate": enddate,
-              "groupBy": "month",
-            });
-
-            final response_charts = await http.post(
-              url_charts,
-              body: body_charts,
-              headers: headers_charts,
-            );
-
-            if (response_charts.statusCode == 200) {
-              if (response_charts.body == '[]') {
+              if (chartRows.isEmpty) {
                 setState(() {
                   isBarChartVisible = false;
                   isVisibleLineChart = false;
                   _isLoading = false;
                 });
-                /*showProgressDialog_LoadData(context, _isLoading);*/
               } else {
                 lineBars.clear();
                 salesDataList.clear();
                 recDataList.clear();
                 data.clear();
-                Map<String, dynamic> responseJson = json.decode(
-                  response_charts.body,
-                );
 
-                try {
-                  List<dynamic> successArray = responseJson['success'];
+                // dashboard-reports/sales-chart returns one flat period
+                // list (no year grouping), unlike the legacy endpoint's
+                // year->months nesting that fed the multi-year line-overlay
+                // view (`data`/`lineChartData`, colored per year via
+                // yearColors). That overlay can't be reconstructed from
+                // this shape, so the line-chart mode is dropped entirely
+                // here - `data` stays empty and only the single-series bar
+                // chart (salesDataList/recDataList) is shown, regardless of
+                // the linechartdash preference.
+                setState(() {
+                  isVisibleLineChart = false;
+                  isBarChartVisible = barchartdashprefs == 'True';
 
-                  setState(() {
-                    data.addAll(successArray.cast<Map<String, dynamic>>());
-
-                    for (var yearData in data) {
-                      var value = yearData['value'];
-
-                      int monthCount = value.length;
-                      if (monthCount == 1) {
-                        setState(() {
-                          isVisibleLineChart = false;
-                        });
-                        for (var monthData in value) {
-                          double sales = double.parse(
-                            monthData['sales'].toString(),
-                          );
-                          double receipt = double.parse(
-                            monthData['receipt'].toString(),
-                          );
-
-                          /*print(response_charts.body);*/
-
-                          salesDataList.add(-sales);
-                          recDataList.add(receipt);
-                          if (barchartdashprefs == 'True') {
-                            isBarChartVisible = true;
-                          } else {
-                            isBarChartVisible = false;
-                          }
-                        }
-                      } else {
-                        setState(() {
-                          if (linechartdashprefs == 'True') {
-                            isVisibleLineChart = true;
-                          } else {
-                            isVisibleLineChart = false;
-                          }
-                        });
-                        for (var monthData in value) {
-                          double sales = double.parse(
-                            monthData['sales'].toString(),
-                          );
-                          double receipt = double.parse(
-                            monthData['receipt'].toString(),
-                          );
-
-                          salesDataList.add(-sales);
-                          recDataList.add(receipt);
-
-                          if (barchartdashprefs == 'True') {
-                            isBarChartVisible = true;
-                          } else {
-                            isBarChartVisible = false;
-                          }
-                        }
-                      }
-                    }
-                  });
-                } catch (f) {
-                  print(f);
-                  setState(() {
-                    isVisibleLineChart = false;
-                    isBarChartVisible = false;
-                  });
-                }
+                  for (final row in chartRows) {
+                    final sales = double.tryParse(row['sales'].toString()) ?? 0.0;
+                    final receipt =
+                        double.tryParse(row['receipt'].toString()) ?? 0.0;
+                    salesDataList.add(-sales);
+                    recDataList.add(receipt);
+                  }
+                });
               }
 
               generateMonthsList();
-            } else {
-              Map<String, dynamic> data = json.decode(response_charts.body);
-              String error = '';
-
-              if (data.containsKey('error')) {
-                setState(() {
-                  error = data['error'];
-                });
-              } else {
-                error = AppLocalizations.of(context).errorSomethingWentWrong;
-              }
-              showAppMessage(context, error);
+            } on ApiException catch (e) {
+              showAppMessage(context, e.message);
+              setState(() {
+                isVisibleLineChart = false;
+                isBarChartVisible = false;
+              });
+            } catch (e) {
+              showAppMessage(
+                context,
+                AppLocalizations.of(context).errorSomethingWentWrong,
+              );
+              setState(() {
+                isVisibleLineChart = false;
+                isBarChartVisible = false;
+              });
             }
           } else {
             setState(() {
@@ -1364,30 +1269,40 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           }
 
           if (piechartdashprefs == 'True') {
-            final url_piecharts = Uri.parse(HttpURL_piecharts);
+            try {
+              // `reports/dashboard/voucher-type-breakdown` (tally-api) -
+              // replaces the legacy per-ledger `/api/dashboard/piechart/...`
+              // call, which required `hostname`/`token` (absent for a
+              // tally-oauth-only session) and silently threw, aborting this
+              // whole function before `isChartsVisible` was ever set - the
+              // root cause of "no analytics showing" for those sessions.
+              final breakdown = await DashboardRepository.instance
+                  .voucherTypeBreakdown(
+                    from: _parseYyyyMMdd(startdate),
+                    to: _parseYyyyMMdd(enddate),
+                  );
 
-            Map<String, String> headers_piecharts = {
-              'Authorization': 'Bearer $token',
-              "Content-Type": "application/json",
-            };
+              final salesSlices = breakdown
+                  .where((row) => (parseMoneyField(row['sales'])).abs() > 0)
+                  .map(
+                    (row) => {
+                      'name': row['voucherTypeName'] ?? 'Unknown',
+                      'amount': parseMoneyField(row['sales']),
+                    },
+                  )
+                  .toList();
+              final purchaseSlices = breakdown
+                  .where((row) => (parseMoneyField(row['purchase'])).abs() > 0)
+                  .map(
+                    (row) => {
+                      'name': row['voucherTypeName'] ?? 'Unknown',
+                      'amount': parseMoneyField(row['purchase']),
+                    },
+                  )
+                  .toList();
 
-            var body_piecharts = jsonEncode({
-              "startdate": startdate,
-              "enddate": enddate,
-            });
-
-            final response_piecharts = await http.post(
-              url_piecharts,
-              body: body_piecharts,
-              headers: headers_piecharts,
-            );
-
-            if (response_piecharts.statusCode == 200) {
-              Map<String, dynamic> pieChartData = json.decode(
-                response_piecharts.body,
-              );
-              piechartsaleslist = pieChartData['sales'];
-              piechartpurchaselist = pieChartData['purchase'];
+              piechartsaleslist = salesSlices;
+              piechartpurchaselist = purchaseSlices;
 
               if (piechartsaleslist.isEmpty && piechartpurchaselist.isEmpty) {
                 setState(() {
@@ -1398,43 +1313,27 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               } else {
                 setState(() {
                   isPieChartVisible = true;
+                  isSalesPieChartVisible = piechartsaleslist.isNotEmpty;
+                  isPurchasePieChartVisible = piechartpurchaselist.isNotEmpty;
                 });
-                if (piechartsaleslist.isEmpty) {
-                  setState(() {
-                    isSalesPieChartVisible = false;
-                  });
-                } else {
-                  setState(() {
-                    isSalesPieChartVisible = true;
-                  });
-                }
-                if (piechartpurchaselist.isEmpty) {
-                  setState(() {
-                    isPurchasePieChartVisible = false;
-                  });
-                } else {
-                  setState(() {
-                    isPurchasePieChartVisible = true;
-                  });
-                }
               }
-            } else {
+            } on ApiException catch (e) {
               setState(() {
                 isPieChartVisible = false;
                 isPurchasePieChartVisible = false;
                 isSalesPieChartVisible = false;
               });
-              Map<String, dynamic> data = json.decode(response_piecharts.body);
-              String error = '';
-
-              if (data.containsKey('error')) {
-                setState(() {
-                  error = data['error'];
-                });
-              } else {
-                error = AppLocalizations.of(context).errorSomethingWentWrong;
-              }
-              showAppMessage(context, error);
+              showAppMessage(context, e.message);
+            } catch (e) {
+              setState(() {
+                isPieChartVisible = false;
+                isPurchasePieChartVisible = false;
+                isSalesPieChartVisible = false;
+              });
+              showAppMessage(
+                context,
+                AppLocalizations.of(context).errorSomethingWentWrong,
+              );
             }
           }
           setState(() {
@@ -2253,10 +2152,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       barrierDismissible: false,
       onGotIt: (dialogContext) {
         Navigator.pop(dialogContext);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => SerialSelect()),
-        );
+        navigateToCompanySwitch(context);
       },
     );
   }
@@ -2338,8 +2234,13 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     serial_no = prefs.getString('serial_no');
     username = prefs.getString('username');
     license_expiry = prefs.getString('license_expiry');
-    token = prefs.getString('token')!;
-    base_currency = prefs.getString('base_currency')!;
+    // `token` is a legacy-backend bearer token - absent entirely for a
+    // tally-oauth-only login (Phase 6), which never populates it. A bare
+    // `!` here used to throw and abort the rest of this function (and
+    // therefore fetchDashData()) before it ever ran, leaving the dashboard
+    // silently blank for those sessions.
+    token = prefs.getString('token') ?? '';
+    base_currency = prefs.getString('base_currency') ?? '';
 
     _loadNumberScale();
 
@@ -2619,24 +2520,17 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     outstandingreceivable_value = 0.0;
     cash_value = 0.0;
 
-    HttpURL =
-        hostname! +
-        "/api/dashboard/home/" +
-        company_lowercase! +
-        "/" +
-        serial_no!;
-    HttpURL_charts =
-        hostname! +
-        "/api/dashboard/chart/" +
-        company_lowercase! +
-        "/" +
-        serial_no!;
+    // `hostname` is absent entirely for a tally-oauth-only session (Phase
+    // 6) - this used to force-unwrap it and throw here, aborting the rest
+    // of _initSharedPreferences() (including the fetchDashData() call
+    // further down) before it ever ran, so the whole dashboard - not just
+    // the still-legacy pie chart this URL feeds - silently never loaded.
     HttpURL_piecharts =
-        hostname! +
+        (hostname ?? '') +
         "/api/dashboard/piechart/" +
         company_lowercase! +
         "/" +
-        serial_no!;
+        (serial_no ?? '');
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -2653,7 +2547,16 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
       } else if (SecuritybtnAcessHolder == "False") {
         val = "";
       }
-      fetchUserData(username!, serial_no!, val);
+      // `username` (legacy prefs key) is never set for a tally-oauth-only
+      // session (Phase 6) - this used to force-unwrap it and throw here,
+      // aborting the rest of _initSharedPreferences() (including the
+      // fetchDashData() call further down) before it ever ran. fetchUserData
+      // itself is a legacy `/api/login/get` lookup with no tally-oauth
+      // equivalent, so there's nothing useful to call for this session type -
+      // name/email just stay whatever they were already (unset).
+      if (username != null) {
+        fetchUserData(username!, serial_no ?? '', val);
+      }
     }
     if (SecuritybtnAcessHolder == "True") {
       isRolesVisible = true;
@@ -3035,12 +2938,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               ),*/
             centerTitle: true,
             title: GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => SerialSelect()),
-                );
-              },
+              onTap: () => navigateToCompanySwitch(context),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth:

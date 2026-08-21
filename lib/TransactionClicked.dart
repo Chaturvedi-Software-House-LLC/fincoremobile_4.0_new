@@ -5,12 +5,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/voucher_repository.dart';
+import 'api/api_exception.dart';
 
 class LedgerEntries {
   final String ledger, amount;
@@ -213,6 +216,18 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
   String billsentries = '';
   String costcentreentries = '';
 
+  // True for a tally-oauth-only session (no legacy serial_no) - drives
+  // fetchData()'s dispatch to the tally-api path instead of the legacy
+  // collection-based HTTP calls, which require `hostname`/`token` that are
+  // never populated for these sessions (see CompanySelectTallyOauth.dart).
+  bool _useTallyApi = false;
+
+  // tally-api's vouchers/:masterId has no bill-wise breakdown (bills are a
+  // separate ledger-scoped model, not attached to a voucher) - the Bills
+  // section shows this instead of silently staying empty. Same pattern as
+  // PartyClicked's Pending Order gap.
+  bool _billsUnavailable = false;
+
   String handleGodown(String godown) {
     if (godown == 'null' || godown.isEmpty) {
       godown = 'Not Available';
@@ -255,6 +270,118 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
   }
 
   Future<void> fetchData(
+    final String ledgercollection,
+    final String billscollection,
+    final String inventorycollections,
+    String costcentercollections,
+    final String masterid,
+  ) async {
+    if (_useTallyApi) {
+      return _fetchDataTallyApi(masterid);
+    }
+    return _fetchDataLegacy(
+      ledgercollection,
+      billscollection,
+      inventorycollections,
+      costcentercollections,
+      masterid,
+    );
+  }
+
+  /// tally-api path: a single `GET vouchers/:masterId` call already returns
+  /// ledger/inventory/cost-centre entries together (see `VoucherRepository`),
+  /// replacing the 4 separate legacy collection calls below. Bills have no
+  /// tally-api equivalent for this endpoint (see `_billsUnavailable`).
+  Future<void> _fetchDataTallyApi(String masterid) async {
+    setState(() {
+      isVisibleLedgerEntry = false;
+      isVisibleBills = false;
+      isVisibleInventoryEntry = false;
+      isVisibleCostCenter = false;
+      _billsUnavailable = false;
+      _isLoading = true;
+    });
+
+    try {
+      final voucherId = int.tryParse(masterid);
+      if (voucherId == null) {
+        throw Exception('Missing voucher masterId');
+      }
+      final voucher = await VoucherRepository.instance.getByMasterId(
+        voucherId,
+      );
+
+      final ledgerRows =
+          (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+          const [];
+      final inventoryRows =
+          (voucher['inventoryEntries'] as List?)
+              ?.cast<Map<String, dynamic>>() ??
+          const [];
+      final costCentreRows =
+          (voucher['costCentreAllocations'] as List?)
+              ?.cast<Map<String, dynamic>>() ??
+          const [];
+
+      ledgerentries_list = ledgerRows
+          .map(
+            (row) => LedgerEntries(
+              ledger: (row['ledgerName'] ?? '').toString(),
+              amount: (row['amount'] ?? '0').toString(),
+            ),
+          )
+          .toList();
+
+      inventoryentries_list = inventoryRows
+          .map(
+            (row) => InventoryEntries(
+              item: (row['stockItemName'] ?? '').toString(),
+              qty: (row['quantity'] ?? '0').toString(),
+              rate: (row['rate'] ?? '0').toString(),
+              discount: (row['discountPercentage'] ?? '0').toString(),
+              amount: (row['amount'] ?? '0').toString(),
+              godown: (row['godownName'] ?? 'null').toString(),
+            ),
+          )
+          .toList();
+
+      costcenter_list = costCentreRows
+          .map(
+            (row) => CostCenter(
+              costcentre: (row['costCentreName'] ?? '').toString(),
+              amount: (row['amount'] ?? '0').toString(),
+            ),
+          )
+          .toList();
+
+      setState(() {
+        isVisibleLedgerEntry = ledgerentries_list.isNotEmpty;
+        isVisibleInventoryEntry = inventoryentries_list.isNotEmpty;
+        isVisibleCostCenter = costcenter_list.isNotEmpty;
+        _billsUnavailable = true;
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      setState(() {
+        isVisibleLedgerEntry = false;
+        isVisibleBills = false;
+        isVisibleInventoryEntry = false;
+        isVisibleCostCenter = false;
+        _isLoading = false;
+      });
+      showAppMessage(context, e.message);
+    } catch (e) {
+      setState(() {
+        isVisibleLedgerEntry = false;
+        isVisibleBills = false;
+        isVisibleInventoryEntry = false;
+        isVisibleCostCenter = false;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _fetchDataLegacy(
     final String ledgercollection,
     final String billscollection,
     final String inventorycollections,
@@ -595,7 +722,8 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
+      _useTallyApi = serial_no == null || serial_no!.isEmpty;
     });
 
     ledgerentries = prefs.getString("ledgerentries") ?? 'False';
@@ -703,12 +831,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
             },
           ),
           title: GestureDetector(
-            onTap: () {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => SerialSelect()),
-              );
-            },
+            onTap: () => navigateToCompanySwitch(context),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [

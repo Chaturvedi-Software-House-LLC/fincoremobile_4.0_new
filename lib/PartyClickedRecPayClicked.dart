@@ -14,6 +14,8 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
 import 'widgets/scroll_fab.dart';
+import 'api/ledger_repository.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField;
 
 class Data {
   final String billno;
@@ -57,6 +59,7 @@ class PartyTotalClickedRecPayClicked extends StatefulWidget {
       total,
       variable,
       variabletype;
+  final int? ledgerMasterId;
 
   const PartyTotalClickedRecPayClicked({
     required this.startdate_string,
@@ -66,6 +69,7 @@ class PartyTotalClickedRecPayClicked extends StatefulWidget {
     required this.total,
     required this.variable,
     required this.variabletype,
+    this.ledgerMasterId,
   });
   @override
   _PartyTotalClickedRecPayClickedPageState createState() =>
@@ -77,6 +81,7 @@ class PartyTotalClickedRecPayClicked extends StatefulWidget {
         ledger: ledger,
         variable: variable,
         variabletype: variabletype,
+        ledgerMasterId: ledgerMasterId,
       );
 }
 
@@ -91,6 +96,7 @@ class _PartyTotalClickedRecPayClickedPageState
       total = "",
       variable = "",
       variabletype = "";
+  final int? ledgerMasterId;
 
   int counter = 0;
   double total_double = 0;
@@ -126,6 +132,7 @@ class _PartyTotalClickedRecPayClickedPageState
     required this.total,
     required this.variable,
     required this.variabletype,
+    this.ledgerMasterId,
   });
 
   String? SecuritybtnAcessHolder;
@@ -892,6 +899,46 @@ class _PartyTotalClickedRecPayClickedPageState
   }
 
   Future<void> fetchCreditlimit(final String ledger) async {
+    if (ledgerMasterId != null) {
+      return _fetchCreditlimitTallyApi();
+    }
+    return _fetchCreditlimitLegacy(ledger);
+  }
+
+  /// tally-api path: `creditLimit`/`creditPeriod` are already columns on
+  /// the base `/ledgers` list row - no separate endpoint like legacy's
+  /// `getLedger` is needed.
+  Future<void> _fetchCreditlimitTallyApi() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final ledgers = await LedgerRepository.instance.listLedgers();
+      final match = ledgers.firstWhere(
+        (l) => l['masterId'] == ledgerMasterId,
+        orElse: () => const {},
+      );
+
+      final creditLimitValue = parseMoneyField(match['creditLimit']);
+      creditlimit = creditLimitValue.toString();
+
+      final creditPeriodRaw = match['creditPeriod']?.toString();
+      if (creditPeriodRaw == null || creditPeriodRaw.isEmpty) {
+        creditperiod = '0';
+      } else if (creditPeriodRaw.contains('Days')) {
+        setState(() => isVisibleDays = false);
+        creditperiod = creditPeriodRaw;
+      } else {
+        setState(() => isVisibleDays = true);
+        creditperiod = creditPeriodRaw;
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  Future<void> _fetchCreditlimitLegacy(final String ledger) async {
     setState(() {
       _isLoading = true;
     });
@@ -963,6 +1010,96 @@ class _PartyTotalClickedRecPayClickedPageState
     _selectedAgeingBucket = null;
 
     try {
+      if (ledgerMasterId != null) {
+        await _fetchDataTallyApi(isDebit);
+      } else {
+        await _fetchDataLegacy(orderby, ledger, groupby, enddate, variabletype, isDebit);
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      print(e);
+    }
+
+    setState(() {
+      if (item_list.isEmpty) {
+        isVisibleNoDataFound = true;
+        isSortVisible = false;
+      } else {
+        isSortVisible = true;
+        switch (selectedSortOption) {
+          case 'Default':
+            sortByDefault(); // Call the sorting function
+            break;
+          case 'Newest to Oldest':
+            sortByDateHightoLow(); // Call the sorting function
+            break;
+          case 'Oldest to Newest':
+            sortByDateLowtoHigh(); // Call the sorting function
+            break;
+          case 'A->Z':
+            sortByAlphabetAtoZ(); // Call the sorting function
+            break;
+          case 'Z->A':
+            sortByAlphabetZtoA(); // Call the sorting function
+            break;
+          case 'Amount High to Low':
+            sortByAmountHightoLow(); // Call the sorting function
+            break;
+          case 'Amount Low to High':
+            sortByAmountLowtoHigh(); // Call the sorting function
+            break;
+        }
+      }
+      _isLoading = false;
+    });
+  }
+
+  /// tally-api path: `reports/ledgers/outstanding-bills` already returns
+  /// every open bill for this ledger with a server-computed `overdueDays` -
+  /// no separate "showAll"/ageing-bucket param needed, since the ageing
+  /// bucket split happens entirely client-side in this screen already
+  /// (`_ageingBuckets`/`_selectedAgeingBucket`). `isDebit == 'true'` (set by
+  /// the caller for the Receivable tile) keeps only bills with a positive
+  /// balance; the Payable tile (isDebit == '') keeps the rest - matching
+  /// `DashboardClicked.dart`'s `_fetchReceivablePayableTallyApi` convention.
+  Future<void> _fetchDataTallyApi(final String isDebit) async {
+    final bills = await LedgerRepository.instance.outstandingBills(
+      ledgerMasterId: ledgerMasterId,
+    );
+
+    final rows = bills.where((bill) {
+      final balance = parseMoneyField(bill['finalBalance']);
+      return isDebit == 'true' ? balance > 0 : balance <= 0;
+    }).map((bill) {
+      return Data.fromJson({
+        'billno': bill['name'] ?? '',
+        'overdue': bill['overdueDays']?.toString() ?? '0',
+        'outstanding': parseMoneyField(bill['finalBalance']).abs(),
+        'billdate': bill['date'] ?? '',
+        'duedate': bill['dueDate'] ?? 'null',
+      });
+    }).toList();
+
+    isVisibleNoDataFound = false;
+    item_list.addAll(rows);
+    filteredItems = item_list;
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _fetchDataLegacy(
+    final String orderby,
+    final String ledger,
+    final String groupby,
+    final String enddate,
+    final String variabletype,
+    final String isDebit,
+  ) async {
+    try {
       final url = Uri.parse(HttpURL!);
       Map<String, String> headers = {
         'Authorization': 'Bearer $token',
@@ -1009,39 +1146,6 @@ class _PartyTotalClickedRecPayClickedPageState
       });
       print(e);
     }
-
-    setState(() {
-      if (item_list.isEmpty) {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
   }
 
   Future<void> _initSharedPreferences() async {
@@ -1054,7 +1158,7 @@ class _PartyTotalClickedRecPayClickedPageState
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
 
     String? currencyCode = '';
@@ -1270,6 +1374,19 @@ class _PartyTotalClickedRecPayClickedPageState
                 }
               },
               icon: Icon(Icons.search, color: Colors.white, size: 22),
+            ),
+            // Sort in the app bar, matching standard Material/iOS
+            // placement - see PartyDrillDown.dart's identical fix for why
+            // the floating pill it replaces was a poor pattern.
+            IconButton(
+              onPressed: isSortVisible
+                  ? () => _showSelectionWindow(context)
+                  : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible ? Colors.white : Colors.white38,
+                size: 22,
+              ),
             ),
             IconButton(
               onPressed: () {
@@ -1891,61 +2008,6 @@ class _PartyTotalClickedRecPayClickedPageState
                 ),
             ],
           ),
-
-          if (isSortVisible)
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    _showSelectionWindow(context);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [app_color, app_color],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(50),
-                      boxShadow: [
-                        BoxShadow(
-                          color: app_color.withOpacity(0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.tune_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Sort',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
 
           if (_isLoading)
             Positioned.fill(

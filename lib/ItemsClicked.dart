@@ -13,11 +13,14 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'package:FincoreGo/widgets/entry_widgets.dart';
+import 'api/stock_repository.dart';
+import 'api/monthly_bucket_helper.dart';
 
 class Sale_Purc {
   final String month, amount;
@@ -42,6 +45,10 @@ class ItemsClicked extends StatefulWidget {
       inventory_closing,
       lastpurcrate,
       alias;
+  /// The stock item's tally-api `masterId` - `stockItemSummary`/
+  /// `stockItemMovement` are both masterId-keyed. Nullable only so a
+  /// legacy-paired session (which has no such id) still compiles/renders.
+  final int? stockItemMasterId;
   const ItemsClicked({
     required this.itemname,
     required this.unit,
@@ -52,6 +59,7 @@ class ItemsClicked extends StatefulWidget {
     required this.inventory_closing,
     required this.lastpurcrate,
     required this.alias,
+    this.stockItemMasterId,
   });
   @override
   _ItemsClickedPageState createState() => _ItemsClickedPageState(
@@ -64,6 +72,7 @@ class ItemsClicked extends StatefulWidget {
     inventory_closing: inventory_closing,
     lastpurcrate: lastpurcrate,
     alias: alias,
+    stockItemMasterId: stockItemMasterId,
   );
 }
 
@@ -80,6 +89,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
       lastpurcrate = "",
       alias = "",
       token = '';
+  int? stockItemMasterId;
   String startDateString = "", endDateString = "";
   String totalsales = "", HttpURL_Main = "", HttpURL_months_sales = "";
   String vchtypes = "purchase" + "," + "sales";
@@ -135,6 +145,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     required this.inventory_closing,
     required this.lastpurcrate,
     required this.alias,
+    this.stockItemMasterId,
   });
 
   String? SecuritybtnAcessHolder;
@@ -236,7 +247,142 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     }
   }
 
+  /// Dispatches to the tally-api path when this screen was reached from a
+  /// migrated Items list (`stockItemMasterId` present - a tally-oauth-only
+  /// session, see the migration plan's Phase 7), else keeps the legacy
+  /// implementation exactly as before. Same signature both ways, so all 9
+  /// call sites (one per date-range shortcut) are untouched.
   Future<void> fetchMainData(
+    String vchtypes,
+    String item_name,
+    String startdate_string,
+    String enddate_string,
+    String groupby,
+  ) async {
+    if (stockItemMasterId != null) {
+      return _fetchMainDataTallyApi(startdate_string, enddate_string);
+    }
+    return _fetchMainDataLegacy(
+      vchtypes,
+      item_name,
+      startdate_string,
+      enddate_string,
+      groupby,
+    );
+  }
+
+  /// tally-api equivalent of [_fetchMainDataLegacy] below - populates the
+  /// exact same `sales_*`/`purchase_*`/`list_sale`/`list_purchase` state
+  /// fields the existing UI already renders. `lastsaledate`/`lastsaleprice`
+  /// (and their purchase equivalents) are deliberately left untouched here,
+  /// matching legacy's own behavior of sourcing those two fields from the
+  /// widget's constructor params (already fetched by Items.dart) rather
+  /// than the summary response.
+  Future<void> _fetchMainDataTallyApi(
+    String startdate_string,
+    String enddate_string,
+  ) async {
+    final stockItemMasterId = this.stockItemMasterId;
+    if (stockItemMasterId == null || !(salesummary_visible || purchasesummary_visible)) {
+      isDateVisible = false;
+      return;
+    }
+
+    isDateVisible = true;
+    list_sale.clear();
+    list_purchase.clear();
+
+    setState(() {
+      _isLoading = true;
+      isPurchaseClickableCard = false;
+      isSalesClickableCard = false;
+      isVisibleSalesList = false;
+      isClicked_Salesicon = false;
+      isVisiblePurchaseList = false;
+      isClicked_Purchaseicon = false;
+    });
+
+    sales_noofinvoices = 'Not Available';
+    sales_totalnetsales = '0';
+    sales_totalsalesqty = 'Not Available';
+    sales_minrate = 'Not Available';
+    sales_maxrate = 'Not Available';
+
+    purchase_noofinvoices = 'Not Available';
+    purchase_totalnetpurchase = '0';
+    purchase_totalpurchaseqty = 'Not Available';
+    purchase_minrate = 'Not Available';
+    purchase_maxrate = 'Not Available';
+
+    try {
+      final from = parseCompactDate(startdate_string);
+      final to = parseCompactDate(enddate_string);
+
+      final rows = await StockRepository.instance.stockItemSummary(
+        stockItemMasterId,
+        from: from,
+        to: to,
+      );
+
+      Future<void> bucketMonths(
+        List<Sale_Purc> target,
+        int voucherTypeMasterId,
+      ) async {
+        final movement = await StockRepository.instance.stockItemMovement(
+          stockItemMasterId,
+          from: from,
+          to: to,
+          voucherTypeMasterId: voucherTypeMasterId,
+        );
+        final buckets = bucketByMonth(
+          movement,
+          dateOf: (r) => DateTime.parse(r['date'] as String),
+          amountOf: (r) => parseMoneyField(r['amount']).abs(),
+        );
+        target.addAll([
+          for (final b in buckets) Sale_Purc(month: b.label, amount: b.total.toString()),
+        ]);
+      }
+
+      for (final row in rows) {
+        final vchtype = (row['voucherTypeName'] as String? ?? '');
+        final voucherTypeMasterId = row['voucherTypeMasterId'] as int?;
+
+        if (vchtype == 'Sales') {
+          isSalesClickableCard = true;
+          sales_noofinvoices = (row['invoiceCount'] ?? 0).toString();
+          sales_totalnetsales = formatTotal(row['totalAmount'], decimals: decimal!);
+          sales_lastsaledate = convertDateFormat(item_lastsaledate);
+          sales_lastsaleprice = formatBackendValue(item_rate, decimals: decimal!);
+          sales_totalsalesqty = (row['totalQuantity'] ?? '0').toString();
+          sales_minrate = formatRate((row['minRate'] ?? '0').toString(), decimals: decimal!);
+          sales_maxrate = formatRate((row['maxRate'] ?? '0').toString(), decimals: decimal!);
+          if (voucherTypeMasterId != null) {
+            await bucketMonths(list_sale, voucherTypeMasterId);
+          }
+        } else if (vchtype == 'Purchase') {
+          isPurchaseClickableCard = true;
+          purchase_noofinvoices = (row['invoiceCount'] ?? 0).toString();
+          purchase_totalnetpurchase = formatTotal(row['totalAmount'], decimals: decimal!);
+          purchase_lastpurchasedate = convertDateFormat(item_lastpurchdate);
+          purchase_lastpurchaseprice = formatBackendValue(lastpurcrate, decimals: decimal!);
+          purchase_totalpurchaseqty = (row['totalQuantity'] ?? '0').toString();
+          purchase_minrate = formatRate((row['minRate'] ?? '0').toString(), decimals: decimal!);
+          purchase_maxrate = formatRate((row['maxRate'] ?? '0').toString(), decimals: decimal!);
+          if (voucherTypeMasterId != null) {
+            await bucketMonths(list_purchase, voucherTypeMasterId);
+          }
+        }
+      }
+
+      setState(() => _isLoading = false);
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint('ItemsClicked tally-api summary fetch failed: $e');
+    }
+  }
+
+  Future<void> _fetchMainDataLegacy(
     String vchtypes,
     String item_name,
     String startdate_string,
@@ -495,7 +641,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     company_lowercase = company!.replaceAll(' ', '').toLowerCase();
     serial_no = prefs.getString('serial_no');
     username = prefs.getString('username');
-    token = prefs.getString('token')!;
+    token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     _selecteddate = prefs.getString('datetype') ?? date_range.first;
 
     decimal = prefs.getInt('decimalplace') ?? 2;
@@ -1257,12 +1403,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             },
           ),
           title: GestureDetector(
-            onTap: () {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => SerialSelect()),
-              );
-            },
+            onTap: () => navigateToCompanySwitch(context),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1868,6 +2009,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                   type: vchtype,
                   total: amount,
                   item_name: itemname,
+                  stockItemMasterId: stockItemMasterId,
                 ),
               ),
             );

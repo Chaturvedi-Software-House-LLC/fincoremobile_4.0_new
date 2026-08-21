@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -8,10 +7,11 @@ import 'package:mailer/smtp_server.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'UserView.dart';
 import 'constants.dart';
-import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
+import 'api/api_exception.dart';
+import 'api/identity_repository.dart';
 
 class CreateUser extends StatefulWidget {
   const CreateUser({Key? key}) : super(key: key);
@@ -31,13 +31,9 @@ class _CreateUserPageState extends State<CreateUser>
       _isFocused_email = false,
       _isFocus_name = false;
 
-  List<dynamic> myData_roles = [];
+  List<Map<String, dynamic>> myData_roles = [];
 
-  dynamic _selectedrole;
-  List<String> _selectedCompanies = [];
-  List<String> myDataCompanies = [];
-
-  String user_email_fetched = "";
+  Map<String, dynamic>? _selectedrole;
 
   late final TextEditingController controller_username =
       TextEditingController();
@@ -96,9 +92,8 @@ class _CreateUserPageState extends State<CreateUser>
         isRolesVisible = false;
         isUserVisible = false;
       }
-      fetchRoles(serial_no!);
-      fetchCompany(serial_no!);
     });
+    fetchRoles();
   }
 
   void sendUserCredentialsEmailSMTP({
@@ -207,361 +202,73 @@ class _CreateUserPageState extends State<CreateUser>
     }
   }
 
-  Future<void> userRegistration(
-    String selectedserial,
-    String email,
-    String password,
-    String rolename,
-    String name,
-  ) async {
+  /// Creates (or reuses, per company-user.service.ts's create()) a `User`
+  /// and links it to the current company-user session's company - unlike
+  /// the legacy backend, there is no "allowed companies" multi-select
+  /// concept: a company-user is always scoped to exactly one company (the
+  /// one that's currently active), so that step is gone entirely.
+  Future<void> userRegistration({
+    required String userNameOrEmail,
+    required String password,
+    required String roleId,
+    required String name,
+  }) async {
     setState(() {
       _isLoading = true;
     });
 
-    try {
-      final url = Uri.parse('$BASE_URL_config/api/login/userRegistration');
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $authTokenBase',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        "username": email,
-        "serialno": selectedserial,
-        "password": password,
-        "rolename": rolename,
-        "name": name,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        String responsee = response.body;
-
-        if (responsee == "User Registered Successfully") {
-          showAppMessage(context, "User created successfully", isError: false);
-          addAllowedCompanies(email, serial_no!, _selectedCompanies);
-
-          controller_username.clear();
-          controller_name.clear();
-          controller_password.clear();
-          _selectedrole = myData_roles[0];
-          FocusScope.of(context).unfocus();
-
-          if (isEmail(email)) {
-            sendUserCredentialsEmailSMTP(
-              email: email,
-              name: name,
-              password: password,
-            );
-          }
-        } else if (responsee == "No of users exceeded") {
-          controller_username.clear();
-          controller_name.clear();
-          controller_password.clear();
-          _selectedrole = myData_roles.first;
-          FocusScope.of(context).unfocus();
-        } else {
-          controller_username.clear();
-          controller_name.clear();
-          controller_password.clear();
-          _selectedrole = myData_roles[0];
-          FocusScope.of(context).unfocus();
-        }
-      } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
-        }
-
-        showAppMessage(context, error);
-      }
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      print(e);
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> fetchRoles(String selectedserial) async {
-    /*setState(() {
-      _isLoading = true;
-    });*/
+    final nameParts = name.trim().split(RegExp(r'\s+'));
+    final firstName = nameParts.first;
+    final lastName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : firstName;
+    final isEmailLogin = isEmail(userNameOrEmail);
 
     try {
-      final url = Uri.parse('$BASE_URL_config/api/roles/get');
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $authTokenBase',
-        "Content-Type": "application/json",
-      };
+      await IdentityRepository.instance.createCompanyUser(
+        userName: userNameOrEmail,
+        firstName: firstName,
+        lastName: lastName,
+        password: password,
+        roleId: roleId,
+        email: isEmailLogin ? userNameOrEmail : null,
+      );
 
-      var body = jsonEncode({'serialno': selectedserial});
+      showAppMessage(context, "User created successfully", isError: false);
 
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        myData_roles = jsonDecode(utf8.decode(response.bodyBytes));
-        if (myData_roles != null) {
-          setState(() {
-            _selectedrole = myData_roles.first;
-          });
-        }
-
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      print(e);
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> fetchCompany(String selectedserial) async {
-    myDataCompanies.clear();
-    final url = Uri.parse('$BASE_URL_config/api/admin/getCompany');
-
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({'serialno': selectedserial});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final List<dynamic> responseData = jsonDecode(utf8.decode(response.bodyBytes));
-      if (responseData != null) {
-        setState(() {
-          myDataCompanies = responseData.map<String>((item) {
-            return item['company_name'] as String;
-          }).toList();
-        });
-      }
-
-      setState(() {
-        _isLoading = false;
-      });
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-      showAppMessage(context, error);
-
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> addAllowedCompanies(
-    String email,
-    String serialno,
-    List<String> companies_list,
-  ) async {
-    // myDataCompanies.clear();
-    final url = Uri.parse('$BASE_URL_config/api/roles/allowed_companies');
-
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
-
-    print('$serialno, $email, $companies_list');
-
-    var body = jsonEncode({
-      'serial_no': serialno,
-      'user_name': email,
-      'companies': companies_list,
-    });
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      print(response.body);
-
-      setState(() {
-        _selectedCompanies.clear();
-      });
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-      showAppMessage(context, error);
-
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _openMultiSelectDialog() async {
-    List<String> tempSelectedCompanies = List.from(_selectedCompanies);
-
-    final selectedValues = await showDialog<List<String>>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-          contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
-          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Select Companies',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.close,
-                  size: 20,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                onPressed: () => Navigator.pop(context),
-                splashRadius: 20,
-              ),
-            ],
-          ),
-          content: StatefulBuilder(
-            builder: (context, setState) {
-              bool isAllSelected =
-                  tempSelectedCompanies.length == myDataCompanies.length;
-
-              return SizedBox(
-                width: double.maxFinite,
-                height: 170,
-                child: Scrollbar(
-                  thumbVisibility: true,
-                  child: ListView(
-                    children: [
-                      // Select All
-                      CheckboxListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          'Select All',
-                          style: GoogleFonts.poppins(fontSize: 14),
-                        ),
-                        value: isAllSelected,
-                        onChanged: (bool? checked) {
-                          setState(() {
-                            if (checked == true) {
-                              tempSelectedCompanies = List.from(
-                                myDataCompanies,
-                              );
-                            } else {
-                              tempSelectedCompanies.clear();
-                            }
-                          });
-                        },
-                        activeColor: Colors.teal,
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                      Divider(),
-
-                      // Individual Company Checkboxes
-                      ...myDataCompanies.map((company) {
-                        return CheckboxListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            company,
-                            style: GoogleFonts.poppins(fontSize: 14),
-                          ),
-                          value: tempSelectedCompanies.contains(company),
-                          onChanged: (bool? checked) {
-                            setState(() {
-                              if (checked == true) {
-                                tempSelectedCompanies.add(company);
-                              } else {
-                                tempSelectedCompanies.remove(company);
-                              }
-                            });
-                          },
-                          activeColor: Colors.teal,
-                          controlAffinity: ListTileControlAffinity.leading,
-                        );
-                      }).toList(),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.poppins(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onPressed: () => Navigator.pop(context, tempSelectedCompanies),
-              child: Text(
-                'Confirm',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
+      if (isEmailLogin) {
+        sendUserCredentialsEmailSMTP(
+          email: userNameOrEmail,
+          name: name,
+          password: password,
         );
-      },
-    );
+      }
 
-    // Save selected companies if confirmed
-    if (selectedValues != null) {
+      controller_username.clear();
+      controller_name.clear();
+      controller_password.clear();
+      FocusScope.of(context).unfocus();
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Company scoping now comes from the company-user session's token, not
+  /// a `serialno` in the request body - no param needed here anymore.
+  Future<void> fetchRoles() async {
+    try {
+      final result = await IdentityRepository.instance.listRoles(limit: 100);
+      final items = (result.data as List).cast<Map<String, dynamic>>();
       setState(() {
-        _selectedCompanies = selectedValues;
+        myData_roles = items;
+        _selectedrole = items.isNotEmpty ? items.first : null;
       });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
     }
   }
 
@@ -751,44 +458,10 @@ class _CreateUserPageState extends State<CreateUser>
                               value: _selectedrole,
                               items: myData_roles,
                               itemLabel: (item) =>
-                                  (item['role_name'] ?? '').toString(),
+                                  (item['name'] ?? '').toString(),
                               hintText: 'Choose a role',
                               onChanged: (value) =>
                                   setState(() => _selectedrole = value),
-                            ),
-                            const SizedBox(height: 20),
-                            Text(
-                              "Allowed Companies",
-                              style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            GestureDetector(
-                              onTap: _openMultiSelectDialog,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 12,
-                                ),
-                                constraints: const BoxConstraints(
-                                  minHeight: 56,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).cardColor,
-                                  borderRadius: _formFieldBorderRadius,
-                                  border: Border.all(
-                                    color: Theme.of(context).dividerColor,
-                                  ),
-                                ),
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  _selectedCompanies.isNotEmpty
-                                      ? _selectedCompanies.join('\n')
-                                      : 'Tap to select companies',
-                                  style: GoogleFonts.poppins(fontSize: 14),
-                                ),
-                              ),
                             ),
                             SizedBox(height: 24),
                             ElevatedButton(
@@ -978,9 +651,9 @@ class _CreateUserPageState extends State<CreateUser>
   void _submitForm() {
     final name = controller_name.text.trim();
     final username = controller_username.text.trim();
-    final role = _selectedrole?["role_name"];
+    final roleId = _selectedrole?["id"] as String?;
 
-    if (name.isEmpty || username.isEmpty || role == null) {
+    if (name.isEmpty || username.isEmpty || roleId == null) {
       showAppMessage(context, "Please fill all required fields.");
       return;
     }
@@ -1008,7 +681,12 @@ class _CreateUserPageState extends State<CreateUser>
 
     _updateFocus();
 
-    userRegistration(serial_no!, username, finalPassword, role, name);
+    userRegistration(
+      userNameOrEmail: username,
+      password: finalPassword,
+      roleId: roleId,
+      name: name,
+    );
   }
 
   /*void _submitForm() {

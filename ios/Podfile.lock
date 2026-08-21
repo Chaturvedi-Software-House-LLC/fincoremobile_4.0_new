@@ -38,6 +38,9 @@ PODS:
   - Flutter (1.0.0)
   - flutter_keyboard_visibility (0.0.1):
     - Flutter
+  - flutter_secure_storage_darwin (10.0.0):
+    - Flutter
+    - FlutterMacOS
   - fluttertoast (0.0.2):
     - Flutter
   - local_auth_darwin (0.0.1):
@@ -77,6 +80,7 @@ DEPENDENCIES:
   - file_picker (from `.symlinks/plugins/file_picker/ios`)
   - Flutter (from `Flutter`)
   - flutter_keyboard_visibility (from `.symlinks/plugins/flutter_keyboard_visibility/ios`)
+  - flutter_secure_storage_darwin (from `.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
   - fluttertoast (from `.symlinks/plugins/fluttertoast/ios`)
   - local_auth_darwin (from `.symlinks/plugins/local_auth_darwin/darwin`)
   - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
@@ -107,6 +111,8 @@ EXTERNAL SOURCES:
     :path: Flutter
   flutter_keyboard_visibility:
     :path: ".symlinks/plugins/flutter_keyboard_visibility/ios"
+  flutter_secure_storage_darwin:
+    :path: ".symlinks/plugins/flutter_secure_storage_darwin/darwin"
   fluttertoast:
     :path: ".symlinks/plugins/fluttertoast/ios"
   local_auth_darwin:
@@ -141,6 +147,7 @@ SPEC CHECKSUMS:
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_keyboard_visibility: 4625131e43015dbbe759d9b20daaf77e0e3f6619
+  flutter_secure_storage_darwin: acdb3f316ed05a3e68f856e0353b133eec373a23
   fluttertoast: 2c67e14dce98bbdb200df9e1acf610d7a6264ea1
   local_auth_darwin: c3ee6cce0a8d56be34c8ccb66ba31f7f180aaebb
   open_file_ios: 5ff7526df64e4394b4fe207636b67a95e83078bb

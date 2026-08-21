@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/ModifyUser.dart';
 import 'package:flutter/material.dart';
@@ -6,24 +5,41 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'CreateUser.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
-import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/api_exception.dart';
+import 'api/identity_repository.dart';
 
+/// A tally-oauth CompanyUser - `id` is the CompanyUser record's own id
+/// (needed for update/delete), `roleId` its currently assigned role
+/// (needed to preselect the role dropdown in ModifyUser).
 class UserModel {
-  final String role_name;
+  final String id;
+  final String roleId;
+  final String roleName;
   final String name;
   final String email;
 
-  UserModel({required this.role_name, required this.name, required this.email});
+  UserModel({
+    required this.id,
+    required this.roleId,
+    required this.roleName,
+    required this.name,
+    required this.email,
+  });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
+    final user = json['user'] as Map<String, dynamic>;
+    final role = json['role'] as Map<String, dynamic>;
     return UserModel(
-      role_name: json['role_name'],
-      name: json['customer_name'],
-      email: json['user_name'],
+      id: json['id'] as String,
+      roleId: role['id'] as String,
+      roleName: role['name'] as String,
+      name: '${user['firstName']} ${user['lastName']}'.trim(),
+      email: (user['email'] as String?) ?? (user['userName'] as String),
     );
   }
 }
@@ -47,7 +63,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
 
   List<UserModel> filteredUsers = [];
 
-  String user_email_fetched = "";
+  String userIdToDelete = "";
 
   final List<UserModel> users = [];
 
@@ -73,7 +89,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
         filteredUsers = users.where((user) {
           return user.name.toLowerCase().contains(query.toLowerCase()) ||
               user.email.toLowerCase().contains(query.toLowerCase()) ||
-              user.role_name.toLowerCase().contains(query.toLowerCase());
+              user.roleName.toLowerCase().contains(query.toLowerCase());
         }).toList();
       }
     });
@@ -106,7 +122,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
         isUserVisible = false;
       }
     });
-    fetchUsers(serial_no!);
+    fetchUsers();
   }
 
   Future<void> _showConfirmationDialogAndNavigate(BuildContext context) async {
@@ -215,7 +231,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                         child: ElevatedButton(
                           onPressed: () async {
                             Navigator.of(context).pop();
-                            userdelete(serial_no!, user_email_fetched);
+                            userdelete(userIdToDelete);
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.redAccent,
@@ -245,44 +261,26 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> userdelete(String selectedserial, String email) async {
+  Future<void> userdelete(String companyUserId) async {
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse('$BASE_URL_config/api/login/deleteUser');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({'serialno': selectedserial, 'username': email});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final responsee = response.body;
-      showAppMessage(context, responsee);
+    try {
+      await IdentityRepository.instance.deleteCompanyUser(companyUserId);
+      showAppMessage(context, 'User deleted', isError: false);
+      await fetchUsers();
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
-        _isLoading = true;
-        fetchUsers(serial_no!);
+        _isLoading = false;
       });
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = "Something went wrong!!!";
-      }
-      showAppMessage(context, error);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isLoading = false;
+      });
     }
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   Widget _buildSkeletonList() {
@@ -353,43 +351,28 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> fetchUsers(String selectedserial) async {
+  /// Company scoping now comes from the company-user session's token (see
+  /// company-user.controller.ts's `findAll`), not a `serialno` in the
+  /// request body - no param needed here anymore.
+  Future<void> fetchUsers() async {
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse('$BASE_URL_config/api/login/getRole');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
+    try {
+      final result = await IdentityRepository.instance.listCompanyUsers(limit: 100);
+      final items = (result.data as List).cast<Map<String, dynamic>>();
 
-    var body = jsonEncode({'serialno': selectedserial});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
       users.clear();
-      try {
-        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
+      users.addAll(items.map(UserModel.fromJson));
+      filteredUsers = List.from(users);
 
-        isVisibleNoUserFound = false;
-
-        users.addAll(jsonList.map((json) => UserModel.fromJson(json)).toList());
-        filteredUsers = List.from(users);
-
-        users.sort(compareDataObjects);
-        filteredUsers.sort(compareDataObjects);
-
-        setState(() {
-          if (users.isEmpty) {
-            isVisibleNoUserFound = true;
-          }
-          _isLoading = false;
-        });
-      } catch (e) {
-        print(e);
-      }
+      users.sort(compareDataObjects);
+      filteredUsers.sort(compareDataObjects);
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
     }
 
     setState(() {
@@ -408,7 +391,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
 
   Future<void> _refresh() async {
     setState(() {
-      fetchUsers(serial_no!);
+      fetchUsers();
     });
   }
 
@@ -449,12 +432,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
               },
             ),
             title: GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => SerialSelect()),
-                );
-              },
+              onTap: () => navigateToCompanySwitch(context),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -693,7 +671,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
-                                              card.role_name,
+                                              card.roleName,
                                               style: GoogleFonts.poppins(
                                                 fontSize: 14,
                                                 color: Theme.of(
@@ -719,9 +697,9 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) => ModifyUser(
-                                                email_address: card.email,
-                                                user_name: card.name,
-                                                rolename: card.role_name,
+                                                companyUserId: card.id,
+                                                userName: card.name,
+                                                currentRoleId: card.roleId,
                                               ),
                                             ),
                                           );
@@ -750,7 +728,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                                       const SizedBox(height: 15),
                                       GestureDetector(
                                         onTap: () {
-                                          user_email_fetched = card.email;
+                                          userIdToDelete = card.id;
                                           _showConfirmationDialogAndNavigate(
                                             context,
                                           );

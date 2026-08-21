@@ -16,6 +16,8 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
+import 'api/voucher_drilldown_helper.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 
 class _Crumb {
   final IconData icon;
@@ -104,6 +106,7 @@ class _DrillCostCenter {
 ///   [lockedVchname]    – voucher-type filter already applied
 class ItemsDrillDown extends StatefulWidget {
   final String startdate_string, enddate_string, type, item_name, total;
+  final int? stockItemMasterId;
   final String? lockedLedger;
   final String? lockedCostcenter;
   final String? lockedVchname;
@@ -117,6 +120,7 @@ class ItemsDrillDown extends StatefulWidget {
     required this.type,
     required this.item_name,
     required this.total,
+    this.stockItemMasterId,
     this.lockedLedger,
     this.lockedCostcenter,
     this.lockedVchname,
@@ -259,39 +263,30 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
     _clearLists();
 
     try {
-      final response = await http.post(
-        Uri.parse(HttpURL),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(_buildBody(groupby, orderby)),
-      );
-
-      if (response.statusCode == 200) {
-        final List<dynamic> raw = jsonDecode(utf8.decode(response.bodyBytes));
-        if (raw.isNotEmpty) {
-          isVisibleNoDataFound = false;
-          switch (group) {
-            case 'Ledger':
-              ledger_list.addAll(raw.map((j) => _DrillLedger.fromJson(j)));
-              filteredLedger = List.from(ledger_list);
-              break;
-            case 'Bills':
-              bills_list.addAll(raw.map((j) => _DrillBill.fromJson(j)));
-              filteredBills = List.from(bills_list);
-              break;
-            case 'Voucher Type':
-              vchtype_list.addAll(raw.map((j) => _DrillVchType.fromJson(j)));
-              filteredVchtype = List.from(vchtype_list);
-              break;
-            case 'Cost Center':
-              costcenter_list.addAll(
-                raw.map((j) => _DrillCostCenter.fromJson(j)),
-              );
-              filteredCostcenter = List.from(costcenter_list);
-              break;
-          }
+      final List<dynamic> raw = widget.stockItemMasterId != null
+          ? await _fetchGroupTallyApi(group)
+          : await _fetchGroupLegacy(groupby, orderby);
+      if (raw.isNotEmpty) {
+        isVisibleNoDataFound = false;
+        switch (group) {
+          case 'Ledger':
+            ledger_list.addAll(raw.map((j) => _DrillLedger.fromJson(j)));
+            filteredLedger = List.from(ledger_list);
+            break;
+          case 'Bills':
+            bills_list.addAll(raw.map((j) => _DrillBill.fromJson(j)));
+            filteredBills = List.from(bills_list);
+            break;
+          case 'Voucher Type':
+            vchtype_list.addAll(raw.map((j) => _DrillVchType.fromJson(j)));
+            filteredVchtype = List.from(vchtype_list);
+            break;
+          case 'Cost Center':
+            costcenter_list.addAll(
+              raw.map((j) => _DrillCostCenter.fromJson(j)),
+            );
+            filteredCostcenter = List.from(costcenter_list);
+            break;
         }
       }
     } catch (e) {
@@ -309,6 +304,164 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
       isSortVisible = !empty;
       _applySortOption(selectedSortOption);
     });
+  }
+
+  Future<List<dynamic>> _fetchGroupLegacy(
+    String groupby,
+    String orderby,
+  ) async {
+    final response = await http.post(
+      Uri.parse(HttpURL),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(_buildBody(groupby, orderby)),
+    );
+
+    if (response.statusCode != 200) return const [];
+    return jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+  }
+
+  /// This item's contribution to [voucher] - summed for "Bills"/"Voucher
+  /// Type" groupings (mirrors `PartyDrillDown._voucherAmount`, item-scoped
+  /// instead of ledger-scoped since this screen locks the item, not the
+  /// party).
+  double _voucherAmount(Map<String, dynamic> voucher) {
+    final inventoryEntries =
+        (voucher['inventoryEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+        const [];
+    return inventoryEntries
+        .where((e) => e['stockItemName'] == widget.item_name)
+        .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+  }
+
+  /// tally-api path - see `PartyDrillDown._fetchGroupTallyApi`'s doc
+  /// comment for the shared approach/simplifications. Item-scoped mirror:
+  /// 'Ledger' groups by each voucher's counterparty ledger name (summing
+  /// this item's own qty/amount per ledger) instead of 'Items'.
+  Future<List<Map<String, dynamic>>> _fetchGroupTallyApi(String group) async {
+    final from = parseCompactDate(widget.startdate_string);
+    final to = parseCompactDate(widget.enddate_string);
+    final vouchers = await fetchDrilldownVouchers(
+      from: from,
+      to: to,
+      partyLedgerName: widget.lockedLedger,
+      itemName: widget.item_name,
+      voucherTypeName: widget.lockedVchname ?? widget.type,
+      costCentreName: widget.lockedCostcenter,
+    );
+
+    switch (group) {
+      case 'Ledger':
+        final totals = <String, Map<String, double>>{};
+        for (final voucher in vouchers) {
+          final ledgerEntries =
+              (voucher['ledgerEntries'] as List?)
+                  ?.cast<Map<String, dynamic>>() ??
+              const [];
+          final inventoryEntries =
+              (voucher['inventoryEntries'] as List?)
+                  ?.cast<Map<String, dynamic>>() ??
+              const [];
+          final itemQtyAmount = inventoryEntries
+              .where((e) => e['stockItemName'] == widget.item_name)
+              .fold<Map<String, double>>(
+                {'qty': 0, 'amount': 0},
+                (acc, e) => {
+                  'qty': acc['qty']! + parseMoneyField(e['quantity']),
+                  'amount': acc['amount']! + parseMoneyField(e['amount']),
+                },
+              );
+          for (final entry in ledgerEntries) {
+            final name = (entry['ledgerName'] ?? '').toString();
+            final bucket = totals.putIfAbsent(
+              name,
+              () => {'qty': 0, 'amount': 0},
+            );
+            bucket['qty'] = bucket['qty']! + itemQtyAmount['qty']!;
+            bucket['amount'] = bucket['amount']! + itemQtyAmount['amount']!;
+          }
+        }
+        return [
+          for (final entry in totals.entries)
+            {
+              'Partyledger': entry.key,
+              'qty': entry.value['qty'],
+              'amount': entry.value['amount'],
+            },
+        ];
+
+      case 'Bills':
+        return [
+          for (final voucher in vouchers)
+            {
+              'vchno': voucher['number'] ?? '',
+              'Partyledger': widget.lockedLedger ?? '',
+              'vchdate': voucher['date'] ?? '',
+              'amount': _voucherAmount(voucher),
+            },
+        ];
+
+      case 'Voucher Type':
+        final totals = <String, Map<String, num>>{};
+        for (final voucher in vouchers) {
+          final name = (voucher['voucherTypeName'] ?? '').toString();
+          final bucket = totals.putIfAbsent(
+            name,
+            () => {'count': 0, 'amount': 0.0},
+          );
+          bucket['count'] = bucket['count']! + 1;
+          bucket['amount'] = bucket['amount']! + _voucherAmount(voucher);
+        }
+        return [
+          for (final entry in totals.entries)
+            {
+              'vchname': entry.key,
+              'qty': entry.value['count'].toString(),
+              'amount': entry.value['amount'],
+            },
+        ];
+
+      case 'Cost Center':
+        final totals = <String, Map<String, num>>{};
+        for (final voucher in vouchers) {
+          final costCentreEntries =
+              (voucher['costCentreAllocations'] as List?)
+                  ?.cast<Map<String, dynamic>>() ??
+              const [];
+          if (costCentreEntries.isEmpty) {
+            final bucket = totals.putIfAbsent(
+              'null',
+              () => {'count': 0, 'amount': 0.0},
+            );
+            bucket['count'] = bucket['count']! + 1;
+            bucket['amount'] = bucket['amount']! + _voucherAmount(voucher);
+          } else {
+            for (final entry in costCentreEntries) {
+              final name = (entry['costCentreName'] ?? 'null').toString();
+              final bucket = totals.putIfAbsent(
+                name,
+                () => {'count': 0, 'amount': 0.0},
+              );
+              bucket['count'] = bucket['count']! + 1;
+              bucket['amount'] =
+                  bucket['amount']! + parseMoneyField(entry['amount']);
+            }
+          }
+        }
+        return [
+          for (final entry in totals.entries)
+            {
+              'costcentre': entry.key,
+              'qty': entry.value['count'].toString(),
+              'amount': entry.value['amount'],
+            },
+        ];
+
+      default:
+        return const [];
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -720,7 +873,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
       isRolesVisible = isUserVisible = SecuritybtnAcessHolder == 'True';
       HttpURL =
@@ -822,6 +975,17 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                 });
               },
               icon: const Icon(Icons.search, color: Colors.white, size: 22),
+            ),
+            // Sort in the app bar, matching standard Material/iOS
+            // placement - see PartyDrillDown.dart's identical fix for why
+            // the floating pill it replaces was a poor pattern.
+            IconButton(
+              onPressed: isSortVisible ? _showSortSheet : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible ? Colors.white : Colors.white38,
+                size: 22,
+              ),
             ),
             IconButton(
               onPressed: () {
@@ -1146,69 +1310,6 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
               ),
             ),
 
-          if (isSortVisible)
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: _showSortSheet,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [app_color, app_color],
-                      ),
-                      borderRadius: BorderRadius.circular(50),
-                      boxShadow: [
-                        BoxShadow(
-                          color: app_color.withOpacity(0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.tune_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Sort',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          if (isVisibleNoDataFound)
-            SizedBox(
-              height: MediaQuery.of(context).size.height * 0.5,
-              child: Center(
-                child: Text(
-                  'No data found',
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ),
           ScrollFab(controller: _scrollFabController),
         ],
       ),
@@ -1421,7 +1522,40 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
   // List section
   // ---------------------------------------------------------------------------
 
+  // Matches the "No Records Found" empty state used elsewhere in the app
+  // (PartyClicked.dart, Transactions.dart) - rendered inline where the
+  // list would otherwise go, instead of floating as an unpositioned Stack
+  // overlay (which left a large dead white area between the message and
+  // the bottom nav).
+  Widget _buildEmptyState() {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.4,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'No Records Found',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildListSection() {
+    if (isVisibleNoDataFound) return _buildEmptyState();
     switch (_selectedgroup) {
       case 'Ledger':
         return ListView.builder(
@@ -1445,6 +1579,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     type: widget.type,
                     total: item.amount.toString(),
                     item_name: widget.item_name,
+                    stockItemMasterId: widget.stockItemMasterId,
                     lockedLedger: item.Partyledger,
                     lockedCostcenter: widget.lockedCostcenter,
                     lockedVchname: widget.lockedVchname,
@@ -1499,6 +1634,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     type: widget.type,
                     total: item.amount.toString(),
                     item_name: widget.item_name,
+                    stockItemMasterId: widget.stockItemMasterId,
                     lockedLedger: widget.lockedLedger,
                     lockedCostcenter: widget.lockedCostcenter,
                     lockedVchname: item.vchname,
@@ -1535,6 +1671,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
                     type: widget.type,
                     total: item.amount.toString(),
                     item_name: widget.item_name,
+                    stockItemMasterId: widget.stockItemMasterId,
                     lockedLedger: widget.lockedLedger,
                     lockedCostcenter: item.costcentre,
                     lockedVchname: widget.lockedVchname,

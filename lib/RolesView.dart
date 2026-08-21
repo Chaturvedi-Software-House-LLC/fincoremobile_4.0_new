@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:FincoreGo/AddRole.dart';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:flutter/material.dart';
@@ -6,18 +5,35 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'ModifyRole.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
-import 'package:http/http.dart' as http;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/api_exception.dart';
+import 'api/identity_repository.dart';
 
+/// A tally-oauth CompanyRole - `id`/`name` plus how many permissions are
+/// granted (shown as a subtitle; the full set is only needed once you open
+/// AddRole/ModifyRole to edit it, not for this list).
 class RoleModel {
-  final String role_name;
+  final String id;
+  final String name;
+  final int permissionCount;
 
-  RoleModel({required this.role_name});
+  RoleModel({
+    required this.id,
+    required this.name,
+    required this.permissionCount,
+  });
+
   factory RoleModel.fromJson(Map<String, dynamic> json) {
-    return RoleModel(role_name: json['role_name']);
+    final permissions = json['permissions'] as List? ?? const [];
+    return RoleModel(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      permissionCount: permissions.length,
+    );
   }
 }
 
@@ -41,7 +57,8 @@ class _RolesViewPageState extends State<RolesView>
 
   List<RoleModel> filteredRoles = [];
 
-  String rolename_fetched = "";
+  String roleIdToDelete = "";
+  String roleNameToDelete = "";
 
   final List<RoleModel> roles = [];
 
@@ -67,7 +84,7 @@ class _RolesViewPageState extends State<RolesView>
         filteredRoles = List.from(roles);
       } else {
         filteredRoles = roles.where((role) {
-          return role.role_name.toLowerCase().contains(query.toLowerCase());
+          return role.name.toLowerCase().contains(query.toLowerCase());
         }).toList();
       }
     });
@@ -99,7 +116,7 @@ class _RolesViewPageState extends State<RolesView>
         isUserVisible = false;
       }
     });
-    fetchRoles(serial_no!);
+    fetchRoles();
   }
 
   Future<void> _showConfirmationDialogAndNavigate(BuildContext context) async {
@@ -208,7 +225,7 @@ class _RolesViewPageState extends State<RolesView>
                         child: ElevatedButton(
                           onPressed: () async {
                             Navigator.of(context).pop();
-                            roledelete(serial_no!, rolename_fetched);
+                            roledelete(roleIdToDelete, roleNameToDelete);
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.redAccent,
@@ -238,54 +255,26 @@ class _RolesViewPageState extends State<RolesView>
     );
   }
 
-  Future<void> roledelete(String selectedserial, String rolename) async {
+  Future<void> roledelete(String roleId, String roleName) async {
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse('$BASE_URL_config/api/roles/delete');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({'serialno': selectedserial, 'rolename': rolename});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final responsee = response.body;
-      if (responsee != null) {
-        showAppMessage(context, responsee);
-        if (responsee == "Unable to Delete! User Exists Against This Role.") {
-          setState(() {
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _isLoading = true;
-            fetchRoles(serial_no!);
-          });
-        }
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-      showAppMessage(context, error);
+    try {
+      await IdentityRepository.instance.deleteRole(roleId);
+      showAppMessage(context, "Role '$roleName' deleted", isError: false);
+      await fetchRoles();
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isLoading = false;
+      });
     }
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   Widget _buildSkeletonList() {
@@ -356,50 +345,29 @@ class _RolesViewPageState extends State<RolesView>
     );
   }
 
-  Future<void> fetchRoles(String selectedserial) async {
+  /// The role's own company scoping now comes from the company-user
+  /// session's token (see company-role.controller.ts's `findAll`), not a
+  /// `serialno` in the request body - no param needed here anymore.
+  Future<void> fetchRoles() async {
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse('$BASE_URL_config/api/roles/get');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
+    try {
+      final result = await IdentityRepository.instance.listRoles(limit: 100);
+      final items = (result.data as List).cast<Map<String, dynamic>>();
 
-    var body = jsonEncode({'serialno': selectedserial});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
       roles.clear();
-
-      try {
-        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
-
-        if (jsonList != null) {
-          isVisibleNoRoleFound = false;
-          roles.addAll(
-            jsonList.map((json) => RoleModel.fromJson(json)).toList(),
-          );
-          filteredRoles = List.from(roles);
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          if (roles.isEmpty) {
-            isVisibleNoRoleFound = true;
-          }
-          _isLoading = false;
-        });
-      } catch (e) {
-        print(e);
-      }
+      roles.addAll(items.map(RoleModel.fromJson));
+      filteredRoles = List.from(roles);
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
     }
+
     setState(() {
-      if (roles.isEmpty) {
-        isVisibleNoRoleFound = true;
-      }
+      isVisibleNoRoleFound = roles.isEmpty;
       _isLoading = false;
     });
   }
@@ -413,7 +381,7 @@ class _RolesViewPageState extends State<RolesView>
 
   Future<void> _refresh() async {
     setState(() {
-      fetchRoles(serial_no!);
+      fetchRoles();
     });
   }
 
@@ -450,12 +418,7 @@ class _RolesViewPageState extends State<RolesView>
               },
             ),
             title: GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => SerialSelect()),
-                );
-              },
+              onTap: () => navigateToCompanySwitch(context),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -616,11 +579,18 @@ class _RolesViewPageState extends State<RolesView>
                               ),
                             ),
                             title: Text(
-                              card.role_name,
+                              card.name,
                               style: GoogleFonts.poppins(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
                                 color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${card.permissionCount} permission${card.permissionCount == 1 ? '' : 's'}',
+                              style: GoogleFonts.poppins(
+                                fontSize: 12.5,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                             ),
 
@@ -629,12 +599,11 @@ class _RolesViewPageState extends State<RolesView>
                               children: [
                                 GestureDetector(
                                   onTap: () {
-                                    String rolename = card.role_name;
                                     Navigator.pushReplacement(
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) =>
-                                            ModifyRole(role_name: rolename),
+                                            ModifyRole(roleId: card.id),
                                       ),
                                     );
                                   },
@@ -658,7 +627,8 @@ class _RolesViewPageState extends State<RolesView>
                                 ),
                                 GestureDetector(
                                   onTap: () {
-                                    rolename_fetched = card.role_name;
+                                    roleIdToDelete = card.id;
+                                    roleNameToDelete = card.name;
                                     _showConfirmationDialogAndNavigate(context);
                                   },
                                   child: Tooltip(

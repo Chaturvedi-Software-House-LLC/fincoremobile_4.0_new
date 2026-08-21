@@ -10,6 +10,7 @@ import 'package:open_file/open_file.dart';
 import 'package:flutter/services.dart';
 import 'Help.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'package:flutter/material.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
@@ -21,6 +22,8 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'widgets/entry_widgets.dart';
 import 'services/biometric_auth_service.dart';
+import 'api/api_exception.dart';
+import 'api/auth_repository.dart';
 // import 'package:firebase_messaging/firebase_messaging.dart';
 
 class Login extends StatefulWidget {
@@ -75,7 +78,21 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   bool isVisibleLoginForm = true,
       isVisibleResetPassForm = false,
-      isVisibleOTPForm = false;
+      isVisibleOTPForm = false,
+      isVisibleResetOtpForm = false;
+
+  // tally-oauth's password-reset flow (see AuthRepository.requestPasswordResetOtp/
+  // changePassword) - "Forgot Password?" used to only call the legacy
+  // backend, which doesn't exist for a tally-oauth-only account. Reuses
+  // the same OTP-then-new-password flow already built for
+  // ChangePassword.dart's tally-oauth path.
+  String? _passwordResetToken;
+  bool _isConfirmingPasswordReset = false;
+  final resetOtpController = TextEditingController();
+  final newPasswordController = TextEditingController();
+  final confirmNewPasswordController = TextEditingController();
+  bool _isNewPasswordVisible = false;
+  bool _isConfirmNewPasswordVisible = false;
 
   late String usernamee = '', resetemail = '';
   late final Color backgroundColor; // declare backgroundColor as non-nullable
@@ -767,64 +784,94 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     }
   }
 
+  /// tally-oauth is now the sole login backend (Phase 6), so this used to
+  /// call the legacy `/api/login/forgotPassword` endpoint unconditionally -
+  /// unreachable/broken for every account now, since nothing else in the
+  /// app talks to that backend anymore. Replaced with tally-oauth's own
+  /// OTP-based reset flow (same AuthRepository methods ChangePassword.dart
+  /// already uses): this step just requests the OTP; [_confirmPasswordReset]
+  /// (triggered from [_buildResetOtpForm]) completes it.
   Future<void> _resetpass() async {
-    setState(() {
-      _isLoadingResetPass = true;
-    });
+    setState(() => _isLoadingResetPass = true);
     _showProcessingDialog();
 
-    String enteredemail = resetemailController.text;
+    final enteredemail = resetemailController.text;
     try {
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $authTokenBase',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'email': enteredemail});
-
-      response_resetpass = await http.post(
-        Uri.parse('$BASE_URL_config/api/login/forgotPassword'),
-        body: body,
-        headers: headers,
+      final token = await AuthRepository.instance.requestPasswordResetOtp(
+        username: enteredemail,
       );
-
-      final decodedBody = jsonDecode(response_resetpass.body);
-
-      if (response_resetpass.statusCode == 200) {
-        final token = decodedBody['token'];
-        final name = decodedBody['name'];
-
-        // Send password reset email
-        await _sendPasswordResetEmail(enteredemail, token, name);
-
-        // Show success message
-        showAppMessage(
-          context,
-          'Password reset email sent successfully',
-          isError: false,
-        );
-        setState(() {
-          usernameController.text = resetemailController.text;
-          resetemailController.clear();
-          isVisibleResetPassForm = false;
-          isVisibleLoginForm = true;
-        });
-      } else {
-        final error = decodedBody['error'];
-        /*print(error);*/
-        showAppMessage(context, '$error');
-      }
+      if (!mounted) return;
+      setState(() {
+        _passwordResetToken = token;
+        isVisibleResetPassForm = false;
+        isVisibleResetOtpForm = true;
+        resetOtpController.clear();
+        newPasswordController.clear();
+        confirmNewPasswordController.clear();
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
     } catch (e) {
-      showAppMessage(context, e.toString());
+      showAppMessage(context, 'Could not reach the server. Please try again.');
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoadingResetPass = false;
-        });
+        setState(() => _isLoadingResetPass = false);
         if (Navigator.canPop(context)) {
           Navigator.pop(context);
         }
       }
+    }
+  }
+
+  /// Step 2 of the tally-oauth reset flow - the OTP + new password form's
+  /// submit handler.
+  Future<void> _confirmPasswordReset() async {
+    final resetToken = _passwordResetToken;
+    if (resetToken == null) return;
+
+    if (resetOtpController.text.trim().length != 4) {
+      showAppMessage(context, 'Please enter the 4-digit code');
+      return;
+    }
+    if (newPasswordController.text.length < 8) {
+      showAppMessage(context, 'Password must be at least 8 characters');
+      return;
+    }
+    if (newPasswordController.text != confirmNewPasswordController.text) {
+      showAppMessage(context, 'Passwords do not match');
+      return;
+    }
+
+    setState(() => _isConfirmingPasswordReset = true);
+    try {
+      await AuthRepository.instance.changePassword(
+        resetToken: resetToken,
+        otp: resetOtpController.text.trim(),
+        password: newPasswordController.text,
+      );
+      if (!mounted) return;
+      showAppMessage(
+        context,
+        'Password changed successfully. Please sign in.',
+        isError: false,
+      );
+      setState(() {
+        _passwordResetToken = null;
+        _isConfirmingPasswordReset = false;
+        isVisibleResetOtpForm = false;
+        isVisibleLoginForm = true;
+        usernameController.text = resetemailController.text;
+        resetemailController.clear();
+        resetOtpController.clear();
+        newPasswordController.clear();
+        confirmNewPasswordController.clear();
+      });
+    } on ApiException catch (e) {
+      setState(() => _isConfirmingPasswordReset = false);
+      showAppMessage(context, e.message);
+    } catch (e) {
+      setState(() => _isConfirmingPasswordReset = false);
+      showAppMessage(context, 'Network error. Please try again.');
     }
   }
 
@@ -997,6 +1044,134 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     }
   }
 
+  /// `POST /auth/user/login` against tally-oauth, run before the legacy
+  /// `/api/login/getusers` call below in both _directlogin and _otplogin.
+  /// Most of the app now depends on this session, so a failure here blocks
+  /// login entirely rather than silently proceeding legacy-only - a
+  /// half-authed session is worse than a clear error up front.
+  Future<bool> _loginToTallyOauth() async {
+    try {
+      await AuthRepository.instance.loginToTallyOauth(
+        userName: usernamee,
+        password: passwordd,
+      );
+      return true;
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      return false;
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      return false;
+    }
+  }
+
+  /// tally-oauth is now the sole driver of login (Phase 6) - no legacy
+  /// `/api/login/getusers` call, no OTP/device-approval socket flow. Goes
+  /// straight to [CompanySelectTallyOauth] once the tally-oauth session is
+  /// established. This means Sales/Receipt/Sales-Order/Delivery-Note entry
+  /// screens, Van Allocation, and the AI Assistant - which depend on the
+  /// legacy `hostname`/`token` prefs this used to populate - no longer work
+  /// for accounts that log in this way. That's an accepted, deliberate
+  /// trade-off (see the migration plan's "Phase 6"), not a bug.
+  void _proceedToCompanySelection() {
+    if (mounted) setState(() => _isLoading = false);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const CompanySelectTallyOauth()),
+    );
+  }
+
+  /// Fetches the account's licenses and blocks login right here - before
+  /// OTP for an email login, before company selection for a direct login -
+  /// if none is currently usable (expired/suspended/inactive), rather than
+  /// letting the user proceed a screen further only to hit the same error
+  /// in [CompanySelectTallyOauth]. Shows the modern blocked-license dialog
+  /// and resets the loading state itself on failure, so callers can just
+  /// `return` when this returns false.
+  Future<bool> _isLicenseUsable() async {
+    try {
+      final result = await AuthRepository.instance.checkAnyLicenseUsable();
+      if (result == null) return true;
+      if (mounted) setState(() => _isLoading = false);
+      await _showLicenseBlockedDialog(result.$1, result.$2);
+      return false;
+    } catch (e) {
+      // A failure of this pre-flight check itself (network hiccup, etc.)
+      // shouldn't block login - company-user login already enforces
+      // validity server-side, so worst case the user sees the same
+      // message one screen later instead of here.
+      return true;
+    }
+  }
+
+  Future<void> _showLicenseBlockedDialog(String title, String message) {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.lock_clock_rounded,
+                  size: 38,
+                  color: Colors.red.shade600,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: app_color,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: Text(
+                    'OK',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _directlogin() async {
     setState(() {
       _isLoading = true;
@@ -1005,63 +1180,17 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       response_getusers = null;
     });
 
-    try {
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $authTokenBase',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'username': usernamee, 'password': passwordd});
-
-      response_getusers = await http.post(
-        Uri.parse('$BASE_URL_config/api/login/getusers'),
-        body: body,
-        headers: headers,
-      );
-      print('response login -> ${response_getusers.body}');
-
-      if (response_getusers.statusCode == 200) {
-        String expectedBody = "Invalid Username or Password Please Try Again";
-
-        String responsee = response_getusers.body;
-        responsee = responsee.trim();
-
-        if (responsee == expectedBody) {
-          showAppMessage(context, responsee);
-          _usernameFocusNode.unfocus();
-          _passwordFocusNode.unfocus();
-        } else {
-          try {
-            jsonPayload = {
-              'username': usernamee,
-              'password': passwordd,
-              'macId': deviceIdentifier,
-            };
-            /*print('emitting');*/
-            socket.emit('myId', jsonPayload);
-          } catch (e) {
-            showAppMessage(context, e.toString());
-          }
-        }
-      } else {
-        final error = jsonDecode(response_getusers.body)['error'];
-        /*print(error);*/
-        showAppMessage(context, '$error');
-      }
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      showAppMessage(context, e.toString());
-      print(e.toString());
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+    if (!await _loginToTallyOauth()) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
     }
+
+    // Catch an expired/suspended/inactive license right here, before ever
+    // navigating past Login - _isLicenseUsable() shows the error dialog
+    // and resets loading state itself when it returns false.
+    if (!await _isLicenseUsable()) return;
+
+    _proceedToCompanySelection();
   }
 
   Future<void> _otplogin(String email) async {
@@ -1072,81 +1201,39 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       response_getusers = null;
     });
 
-    try {
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $authTokenBase',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'username': usernamee, 'password': passwordd});
-
-      response_getusers = await http.post(
-        Uri.parse('$BASE_URL_config/api/login/getusers'),
-        body: body,
-        headers: headers,
-      );
-
-      print('response login -> ${response_getusers.body}');
-      /*response_getusers = await http.post(
-        Uri.parse('$BASE_URL_config/api/login/getusers'),
-        body: {
-          'username': usernamee,
-          'password': passwordd,
-        },
-      );*/
-
-      /*int code = response_getusers.statusCode;
-
-      final body = response_getusers.body;
-
-      print('response code : $code');
-
-      print('body : $body');
-*/
-
-      if (response_getusers.statusCode == 200) {
-        String expectedBody = "Invalid Username or Password Please Try Again";
-
-        String responsee = response_getusers.body;
-        responsee = responsee.trim();
-        if (responsee == expectedBody) {
-          showAppMessage(context, responsee);
-
-          _usernameFocusNode.unfocus();
-          _passwordFocusNode.unfocus();
-        } else {
-          try {
-            // Create a JSON object containing username and password
-            jsonPayload = {
-              'username': usernamee,
-              'password': passwordd,
-              'macId': deviceIdentifier,
-            };
-            /*print('emitting');*/
-
-            socket.emit('myId', jsonPayload);
-          } catch (e) {
-            showAppMessage(context, e.toString());
-          }
-        }
-      } else {
-        final error = jsonDecode(response_getusers.body)['error'];
-        /*print(error);*/
-        showAppMessage(context, error);
-      }
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      showAppMessage(context, e.toString());
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+    if (!await _loginToTallyOauth()) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
     }
+
+    // Same license check as _directlogin, but here it must run before the
+    // OTP screen is ever shown - not just before company selection.
+    if (!await _isLicenseUsable()) return;
+
+    // Phase 6 (making tally-oauth the sole login driver) dropped this step
+    // by mistake while removing the legacy device-approval socket flow it
+    // used to sit next to - restored on request. tally-oauth auth is
+    // already confirmed above; this is an additional emailed-OTP
+    // verification layer before company selection.
+    // _verifyOtpAndProceed already calls _directlogin() on success, which
+    // re-runs the (already-succeeded, idempotent) tally-oauth login and
+    // proceeds to CompanySelectTallyOauth - unchanged.
+    sendOTP(email);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      isVisibleLoginForm = false;
+      isVisibleResetPassForm = false;
+      _isButtonEnabled = false;
+      isVisibleTimer = true;
+      _isOtpVerifyingProgress = false;
+      _isVerifyingOtp = false;
+      otpController.clear();
+      currentText = '';
+      isVisibleOTPForm = true;
+      maskedEmail = email;
+    });
+    _startTimer();
   }
 
   final passwordController = TextEditingController();
@@ -1553,11 +1640,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 </div>''';
 
     try {
-       // await send(message, smtpServer);
-
-      /*showAppMessage(context, 'Message sent', isError: false);*/
-
-      /*print('Message sent: ${sendReport.toString()}');*/
+      // Re-enabled - was left commented out mid-migration, which meant the
+      // OTP screen this feeds (see _otplogin) would show a code the user
+      // never actually received by email.
+      await send(message, smtpServer);
     } catch (e) {
       showAppMessage(context, e.toString());
       /*print('$e');*/
@@ -1641,6 +1727,9 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     usernameController.dispose();
     resetemailController.dispose();
     otpController.dispose();
+    resetOtpController.dispose();
+    newPasswordController.dispose();
+    confirmNewPasswordController.dispose();
 
     _usernameFocusNode.dispose();
     _passwordFocusNode.dispose();
@@ -1811,6 +1900,8 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           ? _buildLoginForm(context)
           : isVisibleResetPassForm
           ? _buildResetForm(context)
+          : isVisibleResetOtpForm
+          ? _buildResetOtpForm(context)
           : _buildOtpForm(context),
     );
   }
@@ -1890,6 +1981,124 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         ],
       ),
       child: child,
+    );
+  }
+
+  /// The "Remember Me" switch+label and "Forgot Password?" link sit in a
+  /// row when both genuinely fit on one line, and drop to a left-aligned
+  /// column (instead of a centered/space-between leftover layout) when
+  /// they don't - small phones, or larger accessibility text scale.
+  /// Measures each side's actual rendered width via [TextPainter] rather
+  /// than guessing a breakpoint, so the decision matches reality.
+  Widget _buildRememberMeAndForgotPasswordRow() {
+    final forgotPasswordButton = TextButton(
+      style: TextButton.styleFrom(
+        foregroundColor: app_color,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: GoogleFonts.poppins(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      onPressed: () {
+        setState(() {
+          isVisibleLoginForm = false;
+          resetemailController.text = usernameController.text;
+          passwordController.clear();
+          isVisibleResetPassForm = true;
+        });
+      },
+      child: const Text('Forgot Password?'),
+    );
+
+    if (_biometricEnabled) {
+      // No Remember Me switch to share the row with - always fits, always
+      // right-aligned, same as before.
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [forgotPasswordButton],
+      );
+    }
+
+    final rememberMeRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Transform.scale(
+          scale: 0.9,
+          child: Switch(
+            value: _rememberMeEnabled,
+            activeColor: app_color,
+            activeTrackColor: app_color.withValues(alpha: 0.4),
+            inactiveThumbColor: const Color(0xFF9E9E9E),
+            inactiveTrackColor: const Color(0xFFD8DCE1),
+            trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            onChanged: _isRememberMeAutoLoggingIn
+                ? null
+                : (value) => _onRememberMeChanged(value),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'Remember Me',
+          style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
+        ),
+      ],
+    );
+
+    const switchWidth = 34.0 * 0.9 + 4;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final rememberMeTextWidth =
+        (TextPainter(
+              text: TextSpan(
+                text: 'Remember Me',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              textDirection: TextDirection.ltr,
+              textScaler: textScaler,
+            )..layout())
+            .width;
+    final forgotPasswordTextWidth =
+        (TextPainter(
+              text: TextSpan(
+                text: 'Forgot Password?',
+                style: GoogleFonts.poppins(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              textDirection: TextDirection.ltr,
+              textScaler: textScaler,
+            )..layout())
+            .width;
+
+    final rememberMeWidth = switchWidth + 4 + rememberMeTextWidth;
+    final forgotPasswordWidth = forgotPasswordTextWidth + 8;
+    const minGap = 16.0;
+    final neededWidth = rememberMeWidth + minGap + forgotPasswordWidth;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= neededWidth) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [rememberMeRow, forgotPasswordButton],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            rememberMeRow,
+            const SizedBox(height: 4),
+            forgotPasswordButton,
+          ],
+        );
+      },
     );
   }
 
@@ -2056,57 +2265,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
               onSaved: (v) => passwordd = v!,
             ),
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (!_biometricEnabled)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Switch(
-                        value: _rememberMeEnabled,
-                        activeColor: app_color,
-                        activeTrackColor: app_color.withValues(alpha: 0.4),
-                        inactiveThumbColor: const Color(0xFF9E9E9E),
-                        inactiveTrackColor: const Color(0xFFD8DCE1),
-                        trackOutlineColor: WidgetStateProperty.all(
-                          Colors.transparent,
-                        ),
-                        onChanged: _isRememberMeAutoLoggingIn
-                            ? null
-                            : (value) => _onRememberMeChanged(value),
-                      ),
-                      Text(
-                        'Remember Me',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  const SizedBox.shrink(),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: app_color,
-                    textStyle: GoogleFonts.poppins(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      isVisibleLoginForm = false;
-                      resetemailController.text = usernameController.text;
-                      passwordController.clear();
-                      isVisibleResetPassForm = true;
-                    });
-                  },
-                  child: const Text('Forgot Password?'),
-                ),
-              ],
-            ),
+            _buildRememberMeAndForgotPasswordRow(),
             const SizedBox(height: 14),
             _isLoading
                 ? SizedBox(
@@ -2231,6 +2390,114 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Step 2 of the tally-oauth password reset flow - OTP + new password,
+  /// shown after [_resetpass] successfully requests the code. Mirrors
+  /// ChangePassword.dart's OTP step UI-wise, adapted to this file's
+  /// existing `_buildAuthCard`/`_inputDecoration`/button-style helpers.
+  Widget _buildResetOtpForm(BuildContext context) {
+    return _buildAuthCard(
+      key: const ValueKey('resetOtpForm'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildFormHeader(
+            icon: Icons.mark_email_read_rounded,
+            title: 'Reset your password',
+            subtitle:
+                'Enter the 4-digit code sent to ${resetemailController.text}, then choose a new password.',
+          ),
+          const SizedBox(height: 26),
+          TextFormField(
+            controller: resetOtpController,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 20,
+              letterSpacing: 8,
+              fontWeight: FontWeight.w700,
+            ),
+            decoration: _inputDecoration(
+              label: 'One-time code',
+              icon: Icons.pin_outlined,
+            ).copyWith(counterText: ''),
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: newPasswordController,
+            obscureText: !_isNewPasswordVisible,
+            decoration: _inputDecoration(
+              label: 'New password',
+              icon: Icons.lock_reset_rounded,
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _isNewPasswordVisible
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                ),
+                onPressed: () => setState(
+                  () => _isNewPasswordVisible = !_isNewPasswordVisible,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: confirmNewPasswordController,
+            obscureText: !_isConfirmNewPasswordVisible,
+            decoration: _inputDecoration(
+              label: 'Confirm new password',
+              icon: Icons.check_circle_outline_rounded,
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _isConfirmNewPasswordVisible
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                ),
+                onPressed: () => setState(
+                  () => _isConfirmNewPasswordVisible =
+                      !_isConfirmNewPasswordVisible,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          _isConfirmingPasswordReset
+              ? SizedBox(
+                  height: 52,
+                  child: Center(
+                    child: CupertinoActivityIndicator(color: app_color),
+                  ),
+                )
+              : ElevatedButton.icon(
+                  style: _primaryButtonStyle(),
+                  onPressed: _confirmPasswordReset,
+                  icon: const Icon(Icons.verified_rounded),
+                  label: const Text('Change password'),
+                ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: _secondaryButtonStyle(),
+            onPressed: () {
+              setState(() {
+                _passwordResetToken = null;
+                isVisibleResetOtpForm = false;
+                isVisibleLoginForm = true;
+                usernameController.text = resetemailController.text;
+                resetemailController.clear();
+                resetOtpController.clear();
+                newPasswordController.clear();
+                confirmNewPasswordController.clear();
+              });
+            },
+            icon: const Icon(Icons.arrow_back_rounded),
+            label: const Text('Back to login'),
+          ),
+        ],
       ),
     );
   }

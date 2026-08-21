@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SerialSelect.dart';
+import 'CompanySelectTallyOauth.dart';
 import 'package:http/http.dart' as http;
 import 'TransactionClicked.dart';
 import 'package:pdf/pdf.dart';
@@ -25,6 +26,11 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/voucher_repository.dart';
+import 'api/tally_api_client.dart';
+import 'api/pagination_helper.dart';
+import 'api/api_exception.dart';
+import 'api/monthly_bucket_helper.dart' show parseCompactDate, parseMoneyField;
 
 class transactions {
   final String ledger;
@@ -84,6 +90,11 @@ class _TransactionsPageState extends State<Transactions>
   late String startdate_text = "", enddate_text = "";
 
   String selectedSortOption = '', token = '';
+
+  // True for a tally-oauth-only session (no legacy serial_no) - drives
+  // fetchParentData()/fetchall_transactions()'s dispatch to the tally-api
+  // path, same pattern as DashboardClicked.dart.
+  bool _useTallyApi = false;
 
   int counter = 0;
 
@@ -1010,6 +1021,52 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Future<void> fetchParentData(final String ledGroups) async {
+    if (_useTallyApi) {
+      return _fetchParentDataTallyApi();
+    }
+    return _fetchParentDataLegacy(ledGroups);
+  }
+
+  /// tally-api path: populates [spinner_list] from `/voucher-types` (the
+  /// same master list `DashboardClicked`'s filter dropdown already uses),
+  /// appended after the existing "All Transactions" entry so that stays
+  /// the default selection, matching legacy's behavior of always defaulting
+  /// to `spinner_list[0]`.
+  Future<void> _fetchParentDataTallyApi() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final voucherTypes = await fetchAllPages(
+        (page) => TallyApiClient().getForCompany(
+          '/voucher-types?page=$page&limit=100',
+        ),
+      );
+      for (final row in voucherTypes) {
+        final name = row['name']?.toString();
+        if (name != null && name.isNotEmpty && !spinner_list.contains(name)) {
+          spinner_list.add(name);
+        }
+      }
+      setState(() {
+        _selectedtransaction = spinner_list[0];
+      });
+      fetchtransactionsData();
+    } on ApiException catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      showAppMessage(context, e.message);
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      print(e);
+    }
+  }
+
+  Future<void> _fetchParentDataLegacy(final String ledGroups) async {
     setState(() {
       _isLoading = true;
     });
@@ -1400,63 +1457,10 @@ class _TransactionsPageState extends State<Transactions>
     transactions_list.clear();
 
     try {
-      final url = Uri.parse(HttpURL_transaction!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'startdate': startdate,
-        'enddate': enddate,
-        'vchname': vchname,
-        'orderby': orderby,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          transactions_list.addAll(
-            values_list.map((json) => transactions.fromJson(json)).toList(),
-          );
-
-          filterPostDatedTransactions();
-
-          filteredItems_transactions = transactions_list;
-
-          setState(() {
-            transactions_count = filteredItems_transactions.length.toString();
-            _isAllList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
+      if (_useTallyApi) {
+        await _fetchAllTransactionsTallyApi(startdate, enddate, vchname);
       } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
-        }
-
-        showAppMessage(context, error);
-
-        setState(() {
-          transactions_count = filteredItems_transactions.length.toString();
-          _isAllList = false;
-          _isLoading = false;
-        });
+        await _fetchAllTransactionsLegacy(startdate, enddate, vchname, orderby);
       }
     } catch (e) {
       setState(() {
@@ -1502,6 +1506,140 @@ class _TransactionsPageState extends State<Transactions>
     });
   }
 
+  /// Legacy collection-based fetch - unchanged behavior, split out of
+  /// [fetchall_transactions] so that function can dispatch between this and
+  /// [_fetchAllTransactionsTallyApi] while sharing the same setup/sort tail.
+  Future<void> _fetchAllTransactionsLegacy(
+    final String startdate,
+    final String enddate,
+    final String vchname,
+    final String orderby,
+  ) async {
+    final url = Uri.parse(HttpURL_transaction!);
+
+    Map<String, String> headers = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body = jsonEncode({
+      'startdate': startdate,
+      'enddate': enddate,
+      'vchname': vchname,
+      'orderby': orderby,
+    });
+
+    final response = await http.post(url, body: body, headers: headers);
+
+    if (response.statusCode == 200) {
+      final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
+
+      if (values_list != null) {
+        isVisibleNoDataFound = false;
+
+        transactions_list.addAll(
+          values_list.map((json) => transactions.fromJson(json)).toList(),
+        );
+
+        filterPostDatedTransactions();
+
+        filteredItems_transactions = transactions_list;
+
+        setState(() {
+          transactions_count = filteredItems_transactions.length.toString();
+          _isAllList = true;
+          _isLoading = false;
+        });
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+    } else {
+      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+      String error = '';
+
+      if (data.containsKey('error')) {
+        setState(() {
+          error = data['error'];
+        });
+      } else {
+        error = 'Something went wrong!!!';
+      }
+
+      showAppMessage(context, error);
+
+      setState(() {
+        transactions_count = filteredItems_transactions.length.toString();
+        _isAllList = false;
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// tally-api path: [VoucherRepository.listInRange] over the date range,
+  /// filtered client-side to [vchname] ("All Transactions" or one voucher
+  /// type name from [spinner_list]) - same simplification as
+  /// `DashboardClicked`'s equivalent functions: the displayed "ledger" is
+  /// the voucher's first ledger entry, and `amount` is the sum of its
+  /// debit-side entries (see `_fetchSalesPurchaseCashTallyApi`'s doc
+  /// comment for why), kept consistent with how that screen already
+  /// renders tally-api vouchers.
+  Future<void> _fetchAllTransactionsTallyApi(
+    final String startdate,
+    final String enddate,
+    final String vchname,
+  ) async {
+    final from = parseCompactDate(startdate);
+    final to = parseCompactDate(enddate);
+    final vouchers = await VoucherRepository.instance.listInRange(
+      from: from,
+      to: to,
+    );
+
+    final rows = <transactions>[];
+    for (final voucher in vouchers) {
+      if (vchname.isNotEmpty &&
+          vchname != 'All Transactions' &&
+          voucher['voucherTypeName'] != vchname) {
+        continue;
+      }
+
+      final entries =
+          (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+          const [];
+      if (entries.isEmpty) continue;
+
+      final debitTotal = entries
+          .where((e) => e['isDebit'] == true)
+          .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+
+      rows.add(
+        transactions.fromJson({
+          'ledger': entries.first['ledgerName'] ?? '',
+          'vchname': voucher['voucherTypeName'] ?? '',
+          'vchno': voucher['number'] ?? '',
+          'amount': debitTotal,
+          'vchdate': voucher['date'] ?? '',
+          'isoptional': voucher['isOptional'] ?? false,
+          'ispostdated': voucher['isPostDated'] ?? false,
+          'refno': voucher['reference'] ?? '',
+          'refdate': voucher['referenceDate'] ?? '',
+          'masterid': voucher['masterId'] ?? '',
+        }),
+      );
+    }
+
+    isVisibleNoDataFound = false;
+    transactions_list.addAll(rows);
+    filterPostDatedTransactions();
+    filteredItems_transactions = transactions_list;
+
+    setState(() {
+      transactions_count = filteredItems_transactions.length.toString();
+      _isAllList = true;
+      _isLoading = false;
+    });
+  }
+
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -1512,6 +1650,7 @@ class _TransactionsPageState extends State<Transactions>
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
       token = prefs.getString('token') ?? '';
+      _useTallyApi = serial_no == null || serial_no!.isEmpty;
       datetype = prefs.getString('datetype') ?? date_range.first;
       decimal = prefs?.getInt('decimalplace') ?? 2;
 
@@ -1695,12 +1834,7 @@ class _TransactionsPageState extends State<Transactions>
                   MediaQuery.of(context).size.width - (kToolbarHeight * 2.4),
             ),
             child: GestureDetector(
-              onTap: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => SerialSelect()),
-                );
-              },
+              onTap: () => navigateToCompanySwitch(context),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

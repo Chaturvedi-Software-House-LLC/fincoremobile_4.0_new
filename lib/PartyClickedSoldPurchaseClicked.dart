@@ -15,6 +15,8 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'widgets/scroll_fab.dart';
+import 'api/voucher_drilldown_helper.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 
 class Data {
   final String vchno;
@@ -55,6 +57,7 @@ String _stripUnitSuffix(String value) {
 
 class PartyClickedSoldPurchaseClicked extends StatefulWidget {
   final String startdate_string, enddate_string, type, ledger, item, unit;
+  final int? ledgerMasterId;
 
   const PartyClickedSoldPurchaseClicked({
     required this.startdate_string,
@@ -63,6 +66,7 @@ class PartyClickedSoldPurchaseClicked extends StatefulWidget {
     required this.ledger,
     required this.item,
     required this.unit,
+    this.ledgerMasterId,
   });
   @override
   _PartyClickedSoldPurchaseClickedPageState createState() =>
@@ -73,6 +77,7 @@ class PartyClickedSoldPurchaseClicked extends StatefulWidget {
         item: item,
         ledger: ledger,
         unit: unit,
+        ledgerMasterId: ledgerMasterId,
       );
 }
 
@@ -86,6 +91,7 @@ class _PartyClickedSoldPurchaseClickedPageState
       ledger = "",
       item = "",
       unit = "";
+  final int? ledgerMasterId;
 
   int counter = 0;
   double total_double = 0;
@@ -106,6 +112,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     required this.ledger,
     required this.item,
     required this.unit,
+    this.ledgerMasterId,
   });
 
   String? SecuritybtnAcessHolder;
@@ -725,41 +732,10 @@ class _PartyClickedSoldPurchaseClickedPageState
     filteredItems.clear();
 
     try {
-      final url = Uri.parse(HttpURL!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'startdate': startdate,
-        'enddate': enddate,
-        'party': ledger,
-        'vchtype': type,
-        'select': select,
-        'orderby': orderby,
-        'item': item,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        print(type);
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          item_list.addAll(
-            values_list.map((json) => Data.fromJson(json)).toList(),
-          );
-          filteredItems = item_list;
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
+      if (ledgerMasterId != null) {
+        await _fetchDataTallyApi(item, ledger, startdate, enddate, type);
+      } else {
+        await _fetchDataLegacy(item, ledger, startdate, enddate, type, select, orderby);
       }
     } catch (e) {
       setState(() {
@@ -796,6 +772,105 @@ class _PartyClickedSoldPurchaseClickedPageState
     });
   }
 
+  Future<void> _fetchDataLegacy(
+    final String item,
+    final String ledger,
+    final String startdate,
+    final String enddate,
+    final String type,
+    final String select,
+    final String orderby,
+  ) async {
+    final url = Uri.parse(HttpURL!);
+
+    Map<String, String> headers = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body = jsonEncode({
+      'startdate': startdate,
+      'enddate': enddate,
+      'party': ledger,
+      'vchtype': type,
+      'select': select,
+      'orderby': orderby,
+      'item': item,
+    });
+
+    final response = await http.post(url, body: body, headers: headers);
+
+    if (response.statusCode == 200) {
+      print(type);
+      final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
+      if (values_list != null) {
+        isVisibleNoDataFound = false;
+
+        item_list.addAll(
+          values_list.map((json) => Data.fromJson(json)).toList(),
+        );
+        filteredItems = item_list;
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// tally-api path: filters [VoucherRepository]-backed vouchers to this
+  /// ledger + item + voucher type via [fetchDrilldownVouchers], then reads
+  /// the matching inventory entry's qty/rate straight off each voucher -
+  /// this is exactly the per-invoice history legacy's `getTotalAmount`
+  /// (`select: 'true'`) returned.
+  Future<void> _fetchDataTallyApi(
+    final String item,
+    final String ledger,
+    final String startdate,
+    final String enddate,
+    final String type,
+  ) async {
+    final from = parseCompactDate(startdate);
+    final to = parseCompactDate(enddate);
+    final vouchers = await fetchDrilldownVouchers(
+      from: from,
+      to: to,
+      partyLedgerName: ledger,
+      itemName: item,
+      voucherTypeName: type,
+    );
+
+    final rows = <Data>[];
+    for (final voucher in vouchers) {
+      final inventoryEntries =
+          (voucher['inventoryEntries'] as List?)
+              ?.cast<Map<String, dynamic>>() ??
+          const [];
+      final matching = inventoryEntries.where(
+        (e) => e['stockItemName'] == item,
+      );
+      for (final entry in matching) {
+        rows.add(
+          Data.fromJson({
+            'vchno': voucher['number'] ?? '',
+            'vchdate': voucher['date'] ?? '',
+            'rate': parseMoneyField(entry['rate']),
+            'qty': parseMoneyField(entry['quantity']),
+          }),
+        );
+      }
+    }
+
+    isVisibleNoDataFound = false;
+    item_list.addAll(rows);
+    filteredItems = item_list;
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -805,7 +880,7 @@ class _PartyClickedSoldPurchaseClickedPageState
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
 
     String? currencyCode = '';

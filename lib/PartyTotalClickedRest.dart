@@ -16,6 +16,8 @@ import 'dart:io';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'api/voucher_drilldown_helper.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 
 class Data {
   final String vchno;
@@ -45,6 +47,7 @@ class Data {
 
 class PartyTotalClickedRest extends StatefulWidget {
   final String startdate_string, enddate_string, type, ledger, total;
+  final int? ledgerMasterId;
 
   const PartyTotalClickedRest({
     required this.startdate_string,
@@ -52,6 +55,7 @@ class PartyTotalClickedRest extends StatefulWidget {
     required this.type,
     required this.ledger,
     required this.total,
+    this.ledgerMasterId,
   });
   @override
   _PartyTotalClickedRestPageState createState() =>
@@ -61,6 +65,7 @@ class PartyTotalClickedRest extends StatefulWidget {
         type: type,
         total: total,
         ledger: ledger,
+        ledgerMasterId: ledgerMasterId,
       );
 }
 
@@ -74,6 +79,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
       ledger = "",
       total = "",
       token = '';
+  final int? ledgerMasterId;
 
   int counter = 0;
 
@@ -90,6 +96,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     required this.type,
     required this.ledger,
     required this.total,
+    this.ledgerMasterId,
   });
 
   String? SecuritybtnAcessHolder;
@@ -564,38 +571,10 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     filteredItems.clear();
 
     try {
-      final url = Uri.parse(HttpURL!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'startdate': startdate,
-        'enddate': enddate,
-        'ledger': ledger,
-        'vchtypes': vchtype,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        print(response.body);
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          item_list.addAll(
-            values_list.map((json) => Data.fromJson(json)).toList(),
-          );
-          filteredItems = item_list;
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
+      if (ledgerMasterId != null) {
+        await _fetchDataTallyApi(startdate, enddate, vchtype);
+      } else {
+        await _fetchDataLegacy(ledger, startdate, enddate, vchtype);
       }
     } catch (e) {
       setState(() {
@@ -638,6 +617,93 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     });
   }
 
+  Future<void> _fetchDataLegacy(
+    final String ledger,
+    final String startdate,
+    final String enddate,
+    final String vchtype,
+  ) async {
+    final url = Uri.parse(HttpURL!);
+
+    Map<String, String> headers = {
+      'Authorization': 'Bearer $token',
+      "Content-Type": "application/json",
+    };
+
+    var body = jsonEncode({
+      'startdate': startdate,
+      'enddate': enddate,
+      'ledger': ledger,
+      'vchtypes': vchtype,
+    });
+
+    final response = await http.post(url, body: body, headers: headers);
+
+    if (response.statusCode == 200) {
+      print(response.body);
+      final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
+      if (values_list != null) {
+        isVisibleNoDataFound = false;
+
+        item_list.addAll(
+          values_list.map((json) => Data.fromJson(json)).toList(),
+        );
+        filteredItems = item_list;
+      } else {
+        throw Exception('Failed to fetch data');
+      }
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// tally-api path: filters [VoucherRepository]-backed vouchers to this
+  /// ledger + voucher type via [fetchDrilldownVouchers], then maps directly
+  /// into the same JSON shape `Data.fromJson` already expects - amount is
+  /// this ledger's own entry in the voucher (falls back to the first entry
+  /// if this ledger's name isn't found, same simplification used elsewhere
+  /// in this migration).
+  Future<void> _fetchDataTallyApi(
+    final String startdate,
+    final String enddate,
+    final String vchtype,
+  ) async {
+    final from = parseCompactDate(startdate);
+    final to = parseCompactDate(enddate);
+    final vouchers = await fetchDrilldownVouchers(
+      from: from,
+      to: to,
+      partyLedgerName: ledger,
+      voucherTypeName: vchtype,
+    );
+
+    final rows = vouchers.map((voucher) {
+      final entries =
+          (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+          const [];
+      final ledgerEntry = entries.firstWhere(
+        (e) => e['ledgerName'] == ledger,
+        orElse: () => entries.isNotEmpty ? entries.first : const {},
+      );
+      return Data.fromJson({
+        'vchno': voucher['number'] ?? '',
+        'vchdate': voucher['date'] ?? '',
+        'amount': parseMoneyField(ledgerEntry['amount']),
+        'ispostdated': voucher['isPostDated'] ?? false,
+        'isoptional': voucher['isOptional'] ?? false,
+      });
+    }).toList();
+
+    isVisibleNoDataFound = false;
+    item_list.addAll(rows);
+    filteredItems = item_list;
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
@@ -647,7 +713,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
 
     try {
@@ -771,6 +837,19 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                 }
               },
               icon: Icon(Icons.search, color: Colors.white, size: 30),
+            ),
+            // Sort in the app bar, matching standard Material/iOS
+            // placement - see PartyDrillDown.dart's identical fix for why
+            // the floating pill it replaces was a poor pattern.
+            IconButton(
+              onPressed: isSortVisible
+                  ? () => _showSelectionWindow(context)
+                  : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible ? Colors.white : Colors.white38,
+                size: 22,
+              ),
             ),
             IconButton(
               onPressed: () {
@@ -1313,61 +1392,6 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
             ],
           ),
 
-          // Sort Button
-          if (isSortVisible)
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    _showSelectionWindow(context);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [app_color, app_color],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(50),
-                      boxShadow: [
-                        BoxShadow(
-                          color: app_color.withOpacity(0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.tune_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Sort',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
 
           // Loading Indicator
           if (_isLoading)

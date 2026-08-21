@@ -9,6 +9,8 @@ import 'constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/auth_repository.dart';
+import 'api/api_exception.dart';
 
 class ChangePassword extends StatefulWidget {
   @override
@@ -19,6 +21,7 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
   final oldPassController = TextEditingController();
   final newPassController = TextEditingController();
   final confirmPassController = TextEditingController();
+  final otpController = TextEditingController();
   bool showNewPassValidation = false;
   bool showConfirmValidation = false;
 
@@ -33,6 +36,34 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
   bool isOldPassVisible = false;
   bool isNewPassVisible = false;
   bool isConfirmPassVisible = false;
+  bool isOtpVisible = false;
+
+  // True for a tally-oauth-only session (no legacy serial_no) - tally-oauth
+  // has no "change password with your current password" endpoint, only the
+  // OTP-based reset flow below, so this screen switches to a 2-step OTP UI
+  // instead of the legacy old/new/confirm form for these sessions.
+  bool _useTallyApi = false;
+  String _username = '';
+  // Set once step 1 (send OTP) succeeds - the short-lived token from
+  // `reset-password` that authorizes the actual `change-password` call.
+  String? _resetToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSession();
+  }
+
+  Future<void> _loadSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final serialNo = prefs.getString('serial_no');
+    final username = prefs.getString('username') ?? '';
+    if (!mounted) return;
+    setState(() {
+      _useTallyApi = serialNo == null || serialNo.isEmpty;
+      _username = username;
+    });
+  }
 
   void validateNewPassword(String value) {
     setState(() {
@@ -118,6 +149,77 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
   }
 
   Future<void> handleChangePassword() async {
+    if (_useTallyApi) {
+      return _handleConfirmReset();
+    }
+    return _handleChangePasswordLegacy();
+  }
+
+  /// Step 1 of the tally-oauth OTP flow - sends an OTP to the account's
+  /// email and stashes the short-lived reset token step 2 needs.
+  Future<void> _handleSendOtp() async {
+    setState(() => isLoading = true);
+    try {
+      final token = await AuthRepository.instance.requestPasswordResetOtp(
+        username: _username,
+      );
+      if (!mounted) return;
+      setState(() {
+        _resetToken = token;
+        isLoading = false;
+      });
+      _showMessage('OTP sent to your registered email.');
+    } on ApiException catch (e) {
+      setState(() => isLoading = false);
+      _showMessage(e.message);
+    } catch (e) {
+      setState(() => isLoading = false);
+      _showMessage('Network error. Please try again.');
+    }
+  }
+
+  /// Step 2 of the tally-oauth OTP flow - the "Update Password" button's
+  /// tally-oauth path once an OTP has been requested.
+  Future<void> _handleConfirmReset() async {
+    if (!_formKey.currentState!.validate()) return;
+    final resetToken = _resetToken;
+    if (resetToken == null) return;
+
+    setState(() => isLoading = true);
+    try {
+      await AuthRepository.instance.changePassword(
+        resetToken: resetToken,
+        otp: otpController.text,
+        password: newPassController.text,
+      );
+      if (!mounted) return;
+      _showMessage('Password changed successfully.');
+      FocusScope.of(context).unfocus();
+      _formKey.currentState?.reset();
+      setState(() {
+        _formKey = GlobalKey<FormState>();
+        _resetToken = null;
+        otpController.clear();
+        newPassController.clear();
+        confirmPassController.clear();
+        showNewPassValidation = false;
+        showConfirmValidation = false;
+        hasLower = false;
+        hasUpper = false;
+        hasNumber = false;
+        isMatch = false;
+        isLoading = false;
+      });
+    } on ApiException catch (e) {
+      setState(() => isLoading = false);
+      _showMessage(e.message);
+    } catch (e) {
+      setState(() => isLoading = false);
+      _showMessage('Network error. Please try again.');
+    }
+  }
+
+  Future<void> _handleChangePasswordLegacy() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => isLoading = true);
@@ -319,6 +421,7 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
                           child: SingleChildScrollView(
                             child: Column(
                               children: [
+                                if (!_useTallyApi) ...[
                                 _modernField(
                                   "Old Password",
                                   oldPassController,
@@ -338,7 +441,49 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
                                 ),
 
                                 SizedBox(height: 15),
+                                ],
 
+                                // tally-oauth has no "change with current
+                                // password" endpoint - only this OTP-based
+                                // reset flow. Step 1: request an OTP; the
+                                // rest of the form (OTP + new/confirm
+                                // password) only appears once it's sent.
+                                if (_useTallyApi && _resetToken == null) ...[
+                                  Text(
+                                    "We'll send a one-time code to $_username to verify it's you.",
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  SizedBox(height: 15),
+                                ],
+
+                                if (_useTallyApi && _resetToken != null) ...[
+                                  _modernField(
+                                    "One-Time Code",
+                                    otpController,
+                                    Icons.pin_outlined,
+                                    isOtpVisible,
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return "OTP required";
+                                      }
+                                      return null;
+                                    },
+                                    () {
+                                      setState(() {
+                                        isOtpVisible = !isOtpVisible;
+                                      });
+                                    },
+                                  ),
+                                  SizedBox(height: 15),
+                                ],
+
+                                if (!_useTallyApi || _resetToken != null) ...[
                                 _modernField(
                                   "New Password",
                                   newPassController,
@@ -453,6 +598,7 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
                                     ],
                                   ),
                                 ],
+                                ], // end !_useTallyApi || _resetToken != null
 
                                 SizedBox(height: 15),
 
@@ -462,7 +608,9 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
                                   child: GestureDetector(
                                     onTap: isLoading
                                         ? null
-                                        : handleChangePassword,
+                                        : (_useTallyApi && _resetToken == null)
+                                            ? _handleSendOtp
+                                            : handleChangePassword,
                                     child: Container(
                                       margin: EdgeInsets.only(top: 20),
                                       padding: EdgeInsets.symmetric(
@@ -512,7 +660,10 @@ class _ChangePasswordScreenState extends State<ChangePassword> {
                                                       ),
                                               )
                                             : Text(
-                                                "Update Password",
+                                                (_useTallyApi &&
+                                                        _resetToken == null)
+                                                    ? "Send OTP"
+                                                    : "Update Password",
                                                 style: GoogleFonts.poppins(
                                                   color: Colors.white,
                                                   fontWeight: FontWeight.w600,

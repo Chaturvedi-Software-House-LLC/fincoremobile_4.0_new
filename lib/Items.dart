@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:FincoreGo/utils/currency_helper.dart';
@@ -11,7 +10,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ItemsClicked.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'constants.dart';
@@ -20,8 +18,11 @@ import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'widgets/searchable_selector.dart';
 import 'widgets/entry_widgets.dart';
+import 'api/api_exception.dart';
+import 'api/stock_repository.dart';
 
 class items {
+  final int masterId;
   final String itemname;
   final String alias;
   final String unit;
@@ -37,6 +38,7 @@ class items {
   final String alternate_unit;
   final String denominator;
   items({
+    required this.masterId,
     required this.itemname,
     required this.alias,
     required this.unit,
@@ -53,22 +55,36 @@ class items {
     required this.denominator,
   });
 
+  /// Maps a tally-api stock-items row (base `/stock-items` list, or
+  /// `reports/stock-items/movement-analysis` for the fast/slow/inactive
+  /// lists) - no legacy `getitem`/`getMoving` shape survives here.
+  ///
+  /// `standardprice` maps to tally-api's `stardardPrice` (its own literal
+  /// field name, misspelled server-side - not a typo introduced here) -
+  /// Tally's "Standard Selling Price", not "standardCost" (a separate
+  /// field this repo doesn't currently surface). Movement-analysis rows
+  /// don't carry contact-style detail fields at all (only
+  /// masterId/name/closingQuantity/totalQuantitySold/totalAmountSold), so
+  /// every field below is null/'null' for those - matching how the legacy
+  /// `items` model already tolerates missing fields via `.toString()`.
   factory items.fromJson(Map<String, dynamic> json) {
+    final alias = (json['alias'] as List?)?.cast<String>() ?? const [];
     return items(
-      itemname: json['name'].toString(),
-      alias: json['alias'].toString(),
-      unit: json['unit'].toString(),
-      saleprice: json['saleprice'].toString(),
-      c_qty: json['c_qty'].toString(),
-      c_rate: json['c_rate'].toString(),
-      c_amount: json['c_amount'].toString(),
-      description: json['description'].toString(),
-      lastsale: json['lastsale'].toString(),
-      lastpurc: json['lastpurc'].toString(),
-      purcprice: json['purcprice'].toString(),
-      standardprice: json['standardprice'].toString(),
-      alternate_unit: json['alternateUnit'].toString(),
-      denominator: json['denominator'].toString(),
+      masterId: json['masterId'] as int,
+      itemname: (json['name'] ?? '').toString(),
+      alias: alias.isEmpty ? 'null' : alias.join(', '),
+      unit: (json['baseUnitSymbol'] ?? 'null').toString(),
+      saleprice: (json['lastSalePrice'] ?? 'null').toString(),
+      c_qty: (json['closingQuantity'] ?? 'null').toString(),
+      c_rate: (json['closingRate'] ?? 'null').toString(),
+      c_amount: (json['closingAmount'] ?? 'null').toString(),
+      description: (json['description'] ?? 'null').toString(),
+      lastsale: (json['lastSaleDate'] ?? 'null').toString(),
+      lastpurc: (json['lastPurchaseDate'] ?? 'null').toString(),
+      purcprice: (json['lastPurchaseCost'] ?? 'null').toString(),
+      standardprice: (json['stardardPrice'] ?? 'null').toString(),
+      alternate_unit: (json['additionalUnitSymbol'] ?? 'null').toString(),
+      denominator: (json['denominator'] ?? 'null').toString(),
     );
   }
 }
@@ -183,7 +199,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   ItemAgeingBucket? _selectedItemAgeingBucket;
   List<items> _itemAgeingFilteredDrilldown = [];
 
-  String item_count = "0", token = '';
+  String item_count = "0";
 
   String fastmovingdays = '',
       fastmovingqty = '',
@@ -257,10 +273,10 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       username = "";
   bool _isLoading = false;
 
-  String? HttpURL_Parent, HttpURL_allitems, HttpURL_active_inactive_items;
 
   dynamic _selecteditem = "";
   List<String> spinner_list = [];
+  final Map<String, int> _groupMasterIdByName = {};
 
   List<items> all_items_list = [];
   List<items> inactive_items_list = [];
@@ -1241,40 +1257,32 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     spinner_list.clear();
 
     try {
-      final url = Uri.parse(HttpURL_Parent!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      final response = await http.post(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        spinner_list.add(allitems);
-
-        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        for (var item in data) {
-          String itemname = item['parent'];
-          spinner_list.add(itemname);
-        }
-        setState(() {
-          _selecteditem = spinner_list[0];
-        });
-
-        if (allitems_visibility) {
-          fetchItemData('All Items', _selecteditem);
-        } else if (fastmovingitems_visibility) {
-          fetchMovingSummary(_selecteditem);
-        } else if (inactiveitems_visibility) {
-          fetchItemData('InactiveItems', _selecteditem);
-        }
+      final groups = await StockRepository.instance.listStockGroups();
+      spinner_list.add(allitems);
+      _groupMasterIdByName.clear();
+      for (final group in groups) {
+        final name = group['name'] as String;
+        _groupMasterIdByName[name] = group['masterId'] as int;
+        spinner_list.add(name);
       }
-    } catch (e) {
+
       setState(() {
-        _isLoading = false;
+        _selecteditem = spinner_list[0];
       });
-      print(e);
+
+      if (allitems_visibility) {
+        fetchItemData('All Items', _selecteditem);
+      } else if (fastmovingitems_visibility) {
+        fetchMovingSummary(_selecteditem);
+      } else if (inactiveitems_visibility) {
+        fetchItemData('InactiveItems', _selecteditem);
+      }
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() => _isLoading = false);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() => _isLoading = false);
     }
   }
 
@@ -1291,6 +1299,17 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     } else if (item_type == "InactiveItems") {
       fetchinactive_items(item);
     }
+  }
+
+  /// Shared by fetchall_items/fetchStockValuation/fetchItemAgeing - all
+  /// three read the exact same underlying list, just process it
+  /// differently (raw / sorted-by-amount / bucketed-by-date).
+  Future<List<items>> _fetchStockItemsList(String parent) async {
+    final groupMasterId = parent.isEmpty ? null : _groupMasterIdByName[parent];
+    final rows = await StockRepository.instance.listStockItems(
+      stockGroupMasterId: groupMasterId,
+    );
+    return rows.map(items.fromJson).toList();
   }
 
   Future<void> fetchall_items(final String parent) async {
@@ -1315,37 +1334,26 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     all_items_list.clear();
 
     try {
-      final url = Uri.parse(HttpURL_allitems!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'parent': parent});
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          all_items_list.addAll(
-            values_list.map((json) => items.fromJson(json)).toList(),
-          );
-          filteredItems_all_items = all_items_list;
-        }
-      }
-    } catch (e) {
+      final parsed = await _fetchStockItemsList(parent);
+      isVisibleNoDataFound = false;
+      all_items_list.addAll(parsed);
+      filteredItems_all_items = all_items_list;
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
         _isInactiveList = false;
         _isAllList = false;
         _isActiveList = false;
         _isLoading = false;
       });
-      print(e);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isInactiveList = false;
+        _isAllList = false;
+        _isActiveList = false;
+        _isLoading = false;
+      });
     }
 
     setState(() {
@@ -1369,21 +1377,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     final String parent,
     final String filter,
   ) async {
-    String qty = '';
-    String value = '';
-
-    if (filter == 'qty') {
-      qty = fastmovingqty;
-    }
-    if (filter == 'value') {
-      value = fastmovingvalue;
-    }
-
-    int fastdays = int.tryParse(fastmovingdays) ?? 0;
-    DateTime currentDate = DateTime.now();
-    DateTime newDate = currentDate.subtract(Duration(days: fastdays));
-    String formattedDate = DateFormat('yyyyMMdd').format(newDate);
-
     setState(() {
       item_count = "0";
       isClicked_allitems = false;
@@ -1405,82 +1398,26 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     active_items_list.clear();
 
     try {
-      final url = Uri.parse(HttpURL_active_inactive_items!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        "date": formattedDate,
-        "status": "FAST",
-        "qty": qty,
-        "value": value,
-        "parent": parent,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-
-      final prettyJson = const JsonEncoder.withIndent('  ').convert(decoded);
-      print(prettyJson);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          for (var entry in values_list.asMap().entries) {
-            int index = entry.key;
-            dynamic item = entry.value;
-
-            /*String lastpurchdate = item['lastpurc'].toString();
-            String lastsaledate = item['lastsale'].toString();
-
-            DateTime lastsale_date;
-            DateTime lastpurc_date;
-
-            Duration difference_lastsaledate = Duration(days: 181) ;
-            Duration difference_lastpurcdate = Duration(days: 181);
-            DateTime current_date = DateTime.now();
-
-            bool diff_sale = false;
-            bool diff_purchase = false;
-
-            if(lastsaledate != 'null' && lastsaledate != '')
-            {
-              lastsale_date = DateTime.parse(lastsaledate);
-              difference_lastsaledate = current_date.difference(lastsale_date);
-
-              diff_sale = difference_lastsaledate.inDays <=190;
-            }
-
-            if (lastpurchdate != 'null'&& lastpurchdate != '')
-            {
-              lastpurc_date = DateTime.parse(lastpurchdate);
-              difference_lastpurcdate = current_date.difference(lastpurc_date);
-              diff_purchase = difference_lastpurcdate.inDays <=190;
-            }
-
-            if(diff_sale || diff_purchase )
-              {
-                active_items_list.add(items.fromJson(values_list[index]));
-              }*/
-
-            active_items_list.add(items.fromJson(values_list[index]));
-          }
-          filteredItems_active_items = active_items_list;
-        }
-      }
-    } catch (e) {
+      final parsed = await _fetchMovingList(parent, filter, 'FAST');
+      isVisibleNoDataFound = false;
+      active_items_list.addAll(parsed);
+      filteredItems_active_items = active_items_list;
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
         _isInactiveList = false;
         _isAllList = false;
         _isActiveList = false;
         _isLoading = false;
       });
-      print(e);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isInactiveList = false;
+        _isAllList = false;
+        _isActiveList = false;
+        _isLoading = false;
+      });
     }
 
     setState(() {
@@ -1502,21 +1439,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   Future<void> fetchslow_items(final String parent, final String filter) async {
-    String qty = '';
-    String value = '';
-
-    if (filter == 'qty') {
-      qty = slowmovingqty;
-    }
-    if (filter == 'value') {
-      value = slowmovingvalue;
-    }
-
-    int slowdays = int.tryParse(slowmovingdays) ?? 0;
-    DateTime currentDate = DateTime.now();
-    DateTime newDate = currentDate.subtract(Duration(days: slowdays));
-    String formattedDate = DateFormat('yyyyMMdd').format(newDate);
-
     setState(() {
       item_count = "0";
       isClicked_allitems = false;
@@ -1538,79 +1460,26 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     active_items_list.clear();
 
     try {
-      final url = Uri.parse(HttpURL_active_inactive_items!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        "date": formattedDate,
-        "status": "SLOW",
-        "qty": qty,
-        "value": value,
-        "parent": parent,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          for (var entry in values_list.asMap().entries) {
-            int index = entry.key;
-            dynamic item = entry.value;
-
-            /*String lastpurchdate = item['lastpurc'].toString();
-            String lastsaledate = item['lastsale'].toString();
-
-            DateTime lastsale_date;
-            DateTime lastpurc_date;
-
-            Duration difference_lastsaledate = Duration(days: 181) ;
-            Duration difference_lastpurcdate = Duration(days: 181);
-            DateTime current_date = DateTime.now();
-
-            bool diff_sale = false;
-            bool diff_purchase = false;
-
-            if(lastsaledate != 'null' && lastsaledate != '')
-            {
-              lastsale_date = DateTime.parse(lastsaledate);
-              difference_lastsaledate = current_date.difference(lastsale_date);
-
-              diff_sale = difference_lastsaledate.inDays <=190;
-
-            }
-
-            if (lastpurchdate != 'null'&& lastpurchdate != '')
-            {
-              lastpurc_date = DateTime.parse(lastpurchdate);
-              difference_lastpurcdate = current_date.difference(lastpurc_date);
-              diff_purchase = difference_lastpurcdate.inDays <=190;
-
-            }
-
-            if(diff_sale || diff_purchase )
-              {
-                active_items_list.add(items.fromJson(values_list[index]));
-              }*/
-            active_items_list.add(items.fromJson(values_list[index]));
-          }
-          filteredItems_active_items = active_items_list;
-        }
-      }
-    } catch (e) {
+      final parsed = await _fetchMovingList(parent, filter, 'SLOW');
+      isVisibleNoDataFound = false;
+      active_items_list.addAll(parsed);
+      filteredItems_active_items = active_items_list;
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
         _isInactiveList = false;
         _isAllList = false;
         _isActiveList = false;
         _isLoading = false;
       });
-      print(e);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isInactiveList = false;
+        _isAllList = false;
+        _isActiveList = false;
+        _isLoading = false;
+      });
     }
 
     setState(() {
@@ -1631,46 +1500,42 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     });
   }
 
+  /// `reports/stock-items/movement-analysis` only accepts a single
+  /// quantity threshold (compares against `totalQuantitySold`, per
+  /// stock-reports.service.ts) - legacy's "value" filter mode (a monetary
+  /// threshold) has no server-side equivalent, so it's passed through as
+  /// no threshold at all (unfiltered) rather than silently misapplying a
+  /// currency amount as a quantity.
   Future<List<items>> _fetchMovingList(
     final String parent,
     final String filter,
     final String status,
   ) async {
-    String qty = '';
-    String value = '';
-
-    if (status == 'FAST') {
-      if (filter == 'qty') qty = fastmovingqty;
-      if (filter == 'value') value = fastmovingvalue;
-    } else {
-      if (filter == 'qty') qty = slowmovingqty;
-      if (filter == 'value') value = slowmovingvalue;
+    String qtyStr = '';
+    int days = 0;
+    switch (status) {
+      case 'FAST':
+        qtyStr = filter == 'qty' ? fastmovingqty : '';
+        days = int.tryParse(fastmovingdays) ?? 0;
+        break;
+      case 'SLOW':
+        qtyStr = filter == 'qty' ? slowmovingqty : '';
+        days = int.tryParse(slowmovingdays) ?? 0;
+        break;
+      default: // INACTIVE
+        days = int.tryParse(inactivedays) ?? 0;
     }
 
-    final days = int.tryParse(status == 'FAST' ? fastmovingdays : slowmovingdays) ?? 0;
-    final cutoffDate = DateTime.now().subtract(Duration(days: days));
-    final formattedDate = DateFormat('yyyyMMdd').format(cutoffDate);
+    final asOf = DateTime.now().subtract(Duration(days: days));
+    final groupMasterId = parent.isEmpty ? null : _groupMasterIdByName[parent];
 
-    final url = Uri.parse(HttpURL_active_inactive_items!);
-    final headers = <String, String>{
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-    final body = jsonEncode({
-      "date": formattedDate,
-      "status": status,
-      "qty": qty,
-      "value": value,
-      "parent": parent,
-    });
-
-    final response = await http.post(url, body: body, headers: headers);
-    if (response.statusCode != 200) return [];
-
-    final List<dynamic> valuesList = jsonDecode(utf8.decode(response.bodyBytes));
-    return valuesList
-        .map((e) => items.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final rows = await StockRepository.instance.movementAnalysis(
+      status: status,
+      asOf: asOf,
+      threshold: double.tryParse(qtyStr),
+      stockGroupMasterId: groupMasterId,
+    );
+    return rows.map(items.fromJson).toList();
   }
 
   Future<void> fetchMovingSummary(final String parent) async {
@@ -1797,42 +1662,30 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     final resolvedParent = parent == "All Items" ? "" : parent;
 
     try {
-      final url = Uri.parse(HttpURL_allitems!);
-      final headers = <String, String>{
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-      final body = jsonEncode({'parent': resolvedParent});
-
-      final response = await http.post(url, body: body, headers: headers);
+      final parsed = await _fetchStockItemsList(resolvedParent)
+        ..sort(
+          (a, b) => (double.tryParse(b.c_amount) ?? 0.0).compareTo(
+            double.tryParse(a.c_amount) ?? 0.0,
+          ),
+        );
 
       if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final List<dynamic> valuesList = jsonDecode(utf8.decode(response.bodyBytes));
-        final parsed = valuesList
-            .map((e) => items.fromJson(e as Map<String, dynamic>))
-            .toList()
-          ..sort(
-            (a, b) => (double.tryParse(b.c_amount) ?? 0.0).compareTo(
-              double.tryParse(a.c_amount) ?? 0.0,
-            ),
-          );
-
-        setState(() {
-          stockValuationList = parsed;
-          item_count = parsed.length.toString();
-          isVisibleNoDataFound = parsed.isEmpty;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          isVisibleNoDataFound = true;
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        stockValuationList = parsed;
+        item_count = parsed.length.toString();
+        isVisibleNoDataFound = parsed.isEmpty;
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      if (!mounted) return;
+      setState(() {
+        stockValuationList = [];
+        isVisibleNoDataFound = true;
+        _isLoading = false;
+      });
     } catch (e) {
-      print(e);
+      showAppMessage(context, 'Could not reach the server. Please try again.');
       if (!mounted) return;
       setState(() {
         stockValuationList = [];
@@ -1886,114 +1739,102 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     final resolvedParent = parent == "All Items" ? "" : parent;
 
     try {
-      final url = Uri.parse(HttpURL_allitems!);
-      final headers = <String, String>{
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-      final body = jsonEncode({'parent': resolvedParent});
-
-      final response = await http.post(url, body: body, headers: headers);
-
+      final parsedItems = await _fetchStockItemsList(resolvedParent);
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
-        final List<dynamic> valuesList = jsonDecode(utf8.decode(response.bodyBytes));
-        final parsedItems = valuesList
-            .map((e) => items.fromJson(e as Map<String, dynamic>))
-            .toList();
+      // Same configurable thresholds as the voucher Ageing Report
+      // (AgeingConfig.dart), so both reports stay in sync from one
+      // settings screen.
+      final ageingPrefs = await SharedPreferences.getInstance();
+      final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
+      final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
+      final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
+      final h4 =
+          int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
+      final h5 =
+          int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
 
-        // Same configurable thresholds as the voucher Ageing Report
-        // (AgeingConfig.dart), so both reports stay in sync from one
-        // settings screen.
-        final ageingPrefs = await SharedPreferences.getInstance();
-        final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
-        final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
-        final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
-        final h4 =
-            int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
-        final h5 =
-            int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
+      final b1 = ItemAgeingBucket('0-$h1 Days');
+      final b2 = ItemAgeingBucket('$h1-$h2 Days');
+      final b3 = ItemAgeingBucket('$h2-$h3 Days');
+      final b4 = ItemAgeingBucket('$h3-$h4 Days');
+      final b5 = ItemAgeingBucket('$h4-$h5 Days');
+      final b6 = ItemAgeingBucket('$h5+ Days');
+      final noMovement = ItemAgeingBucket('No Sales/Purchase Data');
 
-        final b1 = ItemAgeingBucket('0-$h1 Days');
-        final b2 = ItemAgeingBucket('$h1-$h2 Days');
-        final b3 = ItemAgeingBucket('$h2-$h3 Days');
-        final b4 = ItemAgeingBucket('$h3-$h4 Days');
-        final b5 = ItemAgeingBucket('$h4-$h5 Days');
-        final b6 = ItemAgeingBucket('$h5+ Days');
-        final noMovement = ItemAgeingBucket('No Sales/Purchase Data');
+      final today = DateTime.now();
+      final todayDate = DateTime(today.year, today.month, today.day);
 
-        final today = DateTime.now();
-        final todayDate = DateTime(today.year, today.month, today.day);
+      for (final item in parsedItems) {
+        final saleDate = _parseItemDateSafe(item.lastsale);
+        final purcDate = _parseItemDateSafe(item.lastpurc);
 
-        for (final item in parsedItems) {
-          final saleDate = _parseItemDateSafe(item.lastsale);
-          final purcDate = _parseItemDateSafe(item.lastpurc);
-
-          DateTime? lastMovement;
-          if (saleDate != null && purcDate != null) {
-            lastMovement = saleDate.isAfter(purcDate) ? saleDate : purcDate;
-          } else {
-            lastMovement = saleDate ?? purcDate;
-          }
-
-          final amount = double.tryParse(item.c_amount)?.abs() ?? 0.0;
-
-          if (lastMovement == null) {
-            noMovement.count++;
-            noMovement.value += amount;
-            noMovement.itemsList.add(item);
-            continue;
-          }
-
-          final daysSince = todayDate
-              .difference(
-                DateTime(
-                  lastMovement.year,
-                  lastMovement.month,
-                  lastMovement.day,
-                ),
-              )
-              .inDays;
-
-          ItemAgeingBucket bucket;
-          if (daysSince <= h1) {
-            bucket = b1;
-          } else if (daysSince <= h2) {
-            bucket = b2;
-          } else if (daysSince <= h3) {
-            bucket = b3;
-          } else if (daysSince <= h4) {
-            bucket = b4;
-          } else if (daysSince <= h5) {
-            bucket = b5;
-          } else {
-            bucket = b6;
-          }
-
-          bucket.count++;
-          bucket.value += amount;
-          bucket.itemsList.add(item);
+        DateTime? lastMovement;
+        if (saleDate != null && purcDate != null) {
+          lastMovement = saleDate.isAfter(purcDate) ? saleDate : purcDate;
+        } else {
+          lastMovement = saleDate ?? purcDate;
         }
 
-        final buckets = [b1, b2, b3, b4, b5, b6, noMovement]
-            .where((b) => b.count > 0)
-            .toList();
+        final amount = double.tryParse(item.c_amount)?.abs() ?? 0.0;
 
-        setState(() {
-          itemAgeingBuckets = buckets;
-          item_count = parsedItems.length.toString();
-          isVisibleNoDataFound = parsedItems.isEmpty;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          isVisibleNoDataFound = true;
-          _isLoading = false;
-        });
+        if (lastMovement == null) {
+          noMovement.count++;
+          noMovement.value += amount;
+          noMovement.itemsList.add(item);
+          continue;
+        }
+
+        final daysSince = todayDate
+            .difference(
+              DateTime(
+                lastMovement.year,
+                lastMovement.month,
+                lastMovement.day,
+              ),
+            )
+            .inDays;
+
+        ItemAgeingBucket bucket;
+        if (daysSince <= h1) {
+          bucket = b1;
+        } else if (daysSince <= h2) {
+          bucket = b2;
+        } else if (daysSince <= h3) {
+          bucket = b3;
+        } else if (daysSince <= h4) {
+          bucket = b4;
+        } else if (daysSince <= h5) {
+          bucket = b5;
+        } else {
+          bucket = b6;
+        }
+
+        bucket.count++;
+        bucket.value += amount;
+        bucket.itemsList.add(item);
       }
+
+      final buckets = [b1, b2, b3, b4, b5, b6, noMovement]
+          .where((b) => b.count > 0)
+          .toList();
+
+      setState(() {
+        itemAgeingBuckets = buckets;
+        item_count = parsedItems.length.toString();
+        isVisibleNoDataFound = parsedItems.isEmpty;
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      if (!mounted) return;
+      setState(() {
+        itemAgeingBuckets = [];
+        isVisibleNoDataFound = true;
+        _isLoading = false;
+      });
     } catch (e) {
-      print(e);
+      showAppMessage(context, 'Could not reach the server. Please try again.');
       if (!mounted) return;
       setState(() {
         itemAgeingBuckets = [];
@@ -2025,49 +1866,27 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     filteredItems_inactive_items.clear();
     inactive_items_list.clear();
 
-    int inactivedayss = int.tryParse(inactivedays) ?? 0;
-    DateTime currentDate = DateTime.now();
-    DateTime newDate = currentDate.subtract(Duration(days: inactivedayss));
-    String formattedDate = DateFormat('yyyyMMdd').format(newDate);
-
     try {
-      final url = Uri.parse(HttpURL_active_inactive_items!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        "date": formattedDate,
-        "status": "INACTIVE",
-        "parent": parent,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          for (var entry in values_list.asMap().entries) {
-            int index = entry.key;
-            dynamic item = entry.value;
-            inactive_items_list.add(items.fromJson(values_list[index]));
-          }
-          filteredItems_inactive_items = inactive_items_list;
-        }
-      }
-    } catch (e) {
+      final parsed = await _fetchMovingList(parent, 'qty', 'INACTIVE');
+      isVisibleNoDataFound = false;
+      inactive_items_list.addAll(parsed);
+      filteredItems_inactive_items = inactive_items_list;
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
       setState(() {
         _isInactiveList = false;
         _isAllList = false;
         _isActiveList = false;
         _isLoading = false;
       });
-      print(e);
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isInactiveList = false;
+        _isAllList = false;
+        _isActiveList = false;
+        _isLoading = false;
+      });
     }
 
     setState(() {
@@ -2133,7 +1952,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     company_lowercase = company!.replaceAll(' ', '').toLowerCase();
     serial_no = prefs.getString('serial_no');
     username = prefs.getString('username');
-    token = prefs.getString('token')!;
 
     fastmovingdays = prefs.getString('fastmovingdays') ?? '180';
     fastmovingqty = prefs.getString('fastmovingqty') ?? '1000';
@@ -2176,13 +1994,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     } else {
       amount_visibility = false;
     }
-
-    HttpURL_Parent =
-        '$hostname/api/item/getParent/$company_lowercase/$serial_no';
-    HttpURL_allitems =
-        '$hostname/api/item/getitem/$company_lowercase/$serial_no';
-    HttpURL_active_inactive_items =
-        '$hostname/api/item/getMoving/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -3214,6 +3025,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 inventory_closing: item.c_qty,
                 lastpurcrate: item.purcprice,
                 alias: item.alias,
+                stockItemMasterId: item.masterId,
               ),
             ),
           );
@@ -3620,6 +3432,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 inventory_closing: card.c_qty,
                 lastpurcrate: card.purcprice,
                 alias: card.alias,
+                stockItemMasterId: card.masterId,
               ),
             ),
           );

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../CompanySelectTallyOauth.dart';
 import '../SerialSelect.dart';
 import '../constants.dart';
 
@@ -76,6 +77,22 @@ Future<List<String>> _fetchCompaniesDirect(SharedPreferences prefs) async {
 /// list to find and tap the company themselves.
 Future<void> showQuickCompanySwitcher(BuildContext context) async {
   final prefs = await SharedPreferences.getInstance();
+
+  // This whole function (cached-company quick-switch list, legacy
+  // /api/roles/allowed_companies + /api/admin/getCompany fetch, and its
+  // SerialSelect() fallback) only has data for a legacy-paired login - a
+  // tally-oauth-only session (Phase 6+) never populates `serial_no`, so
+  // falling through to SerialSelect() here showed an empty "No matching
+  // serial numbers" screen instead of switching companies at all.
+  // navigateToCompanySwitch already has the correct legacy-vs-tally-oauth
+  // routing (used by app_bottom_nav.dart's own "Companies" quick action) -
+  // reuse it here too rather than duplicating that check.
+  final serialNo = prefs.getString('serial_no');
+  if (serialNo == null || serialNo.isEmpty) {
+    await navigateToCompanySwitch(context);
+    return;
+  }
+
   final currentCompany = prefs.getString('company_name') ?? '';
   final cachedJson = prefs.getString('quick_switch_companies');
 
