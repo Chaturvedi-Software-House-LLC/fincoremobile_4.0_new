@@ -33,6 +33,17 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Without this, canLaunchUrl() returns false for these schemes even
+	     when a handling app (Mail, Phone, Maps) is installed, causing
+	     "Could not open email app" / phone / maps launch failures on the
+	     Help screen. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>mailto</string>
+		<string>tel</string>
+		<string>maps</string>
+		<string>comgooglemaps</string>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

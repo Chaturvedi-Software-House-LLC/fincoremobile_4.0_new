@@ -1,5 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:mailer/mailer.dart';
+import 'package:mailer/smtp_server.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +14,7 @@ import 'package:FincoreGo/AssistantChat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'utils/support_email_template.dart';
 
 class Help extends StatefulWidget {
   final bool showBottomNavigation;
@@ -70,6 +76,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
   final TextEditingController _textEditingController = TextEditingController();
 
   bool isLengthErrorVisible = false;
+  bool _isSendingSupportMessage = false;
 
   String name = "", email = "";
 
@@ -81,6 +88,7 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
       company = "",
       company_lowercase = "",
       serial_no = "",
+      license_expiry,
       username = "",
       HttpURL = "",
       SecuritybtnAcessHolder = "";
@@ -107,6 +115,22 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
       name = name_nav;
       email = email_nav;
     }
+
+    serial_no = prefs.getString('serial_no');
+    license_expiry = prefs.getString('license_expiry');
+  }
+
+  /// Formats the raw "YYYYMMDD" license_expiry string the same way
+  /// Dashboard.dart does, for display in the support email. Falls back to
+  /// the raw value if it isn't in the expected format rather than throwing.
+  String _formattedLicenseExpiry() {
+    final raw = license_expiry;
+    if (raw == null || raw.isEmpty) return 'Not available';
+    try {
+      return DateFormat('dd-MMM-yyyy').format(DateTime.parse(raw));
+    } catch (_) {
+      return raw;
+    }
   }
 
   _launchPhone(String phoneNumber) async {
@@ -119,43 +143,88 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
     }
   }
 
+  static const String _supportEmailAddress = 'saadan@ca-eim.com';
+
   Future<void> launchSupportEmail() async {
     final Uri emailUri = Uri(
       scheme: 'mailto',
-      path: 'saadan@ca-eim.com',
+      path: _supportEmailAddress,
       queryParameters: {'subject': 'Fincore Go App Support'},
     );
 
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
     } else {
-      showAppMessage(context, 'Could not open email app');
+      // No mailto handler available (e.g. no Mail account configured on
+      // this device) - falling back to a dead-end error isn't useful here,
+      // since (unlike the message form above) there's no message content to
+      // send on the user's behalf. Copy the address instead so they can
+      // paste it into whatever email app they actually use. This is a
+      // successful outcome for the user, not a failure - shown as such
+      // (green, not red) rather than framed as an error.
+      await Clipboard.setData(const ClipboardData(text: _supportEmailAddress));
+      if (!mounted) return;
+      showAppMessage(
+        context,
+        'Copied $_supportEmailAddress to your clipboard.',
+        isError: false,
+      );
     }
   }
 
-  void sendEmail() async {
-    final String subject =
-        'Fincore Go App Support'; // Replace with your desired subject
-    final String recipientEmail =
-        'saadan@ca-eim.com'; // Replace with your desired recipient email
-    // final List<String> ccEmails = ["praveen@ca-eim.com"];
-    final String nameAndEmail = 'Name: $name\nEmail: $email\n\n';
+  // Sends the support message directly via SMTP (same pattern used by the
+  // AI Assistant's "Contact Support Team" card and the password-reset email
+  // in Login.dart) rather than handing off to a mailto: link. Relying on the
+  // device's Mail app was unreliable in practice - canLaunchUrl(mailto:) can
+  // return false on real devices with no Mail account configured, which is
+  // outside the app's control and not something a plist/manifest fix can
+  // work around. Sending the email ourselves removes that dependency
+  // entirely.
+  Future<void> sendEmail() async {
     final String additionalText = _textEditingController.text;
 
-    final Uri emailUri = Uri(
-      scheme: 'mailto',
-      path: recipientEmail,
-      queryParameters: {
-        'subject': subject,
-        'body': '$nameAndEmail$additionalText',
-        //'cc': ccEmails.join(','),
-      },
-    );
+    setState(() => _isSendingSupportMessage = true);
+    try {
+      final smtpServer = SmtpServer(
+        'smtp.hostinger.com',
+        username: 'noreply@fincoreerp.com',
+        password: '^QLNlsU8m',
+        port: 465,
+        ssl: true,
+      );
 
-    if (await canLaunchUrl(emailUri)) {
-      await launchUrl(emailUri);
-    } else {
-      showAppMessage(context, 'Could not open email app');
+      final message = Message()
+        ..from = Address('noreply@fincoreerp.com', 'Fincore Go App')
+        ..recipients.add('saadan@ca-eim.com')
+        ..subject = 'Fincore Go App Support'
+        ..html = buildSupportEmailHtml(
+          title: 'New Support Request',
+          subtitle: "Submitted from the Fincore Go app's Help screen",
+          details: [
+            MapEntry('Name', name),
+            MapEntry('Email', email),
+            MapEntry(
+              'Serial No',
+              serial_no?.isNotEmpty == true ? serial_no! : 'Not available',
+            ),
+            MapEntry('License Expiry', _formattedLicenseExpiry()),
+          ],
+          message: additionalText,
+        );
+
+      await send(message, smtpServer);
+      if (!mounted) return;
+      _textEditingController.clear();
+      showAppMessage(
+        context,
+        'Message sent - our team will get back to you shortly.',
+        isError: false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppMessage(context, 'Could not send your message. Please try again.');
+    } finally {
+      if (mounted) setState(() => _isSendingSupportMessage = false);
     }
   }
 
@@ -668,23 +737,27 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
                       ),
                       elevation: 4,
                     ),
-                    icon: const Icon(Icons.send_rounded),
+                    icon: _isSendingSupportMessage
+                        ? const _LineSpinner(size: 18, color: Colors.white)
+                        : const Icon(Icons.send_rounded),
                     label: Text(
-                      'Send Message',
+                      _isSendingSupportMessage ? 'Sending...' : 'Send Message',
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                     ),
-                    onPressed: () {
-                      if (_textEditingController.text.length <= 10) {
-                        setState(() {
-                          isLengthErrorVisible = true;
-                        });
-                      } else {
-                        setState(() {
-                          isLengthErrorVisible = false;
-                        });
-                        sendEmail();
-                      }
-                    },
+                    onPressed: _isSendingSupportMessage
+                        ? null
+                        : () {
+                            if (_textEditingController.text.length <= 10) {
+                              setState(() {
+                                isLengthErrorVisible = true;
+                              });
+                            } else {
+                              setState(() {
+                                isLengthErrorVisible = false;
+                              });
+                              sendEmail();
+                            }
+                          },
                   ),
                 ),
 
@@ -695,5 +768,105 @@ class _HelpPageState extends State<Help> with TickerProviderStateMixin {
         ],
       ),
     );
+  }
+}
+
+/// A small rotating "activity indicator" style spinner - a ring of short
+/// radiating lines that fade around in a circle (the classic iOS/macOS
+/// spinner look), rather than a single solid rotating arc. Used in place of
+/// a plain `CircularProgressIndicator` for the Send button's loading state.
+class _LineSpinner extends StatefulWidget {
+  const _LineSpinner({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  State<_LineSpinner> createState() => _LineSpinnerState();
+}
+
+class _LineSpinnerState extends State<_LineSpinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  static const int _lineCount = 12;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          return CustomPaint(
+            painter: _LineSpinnerPainter(
+              progress: _controller.value,
+              color: widget.color,
+              lineCount: _lineCount,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _LineSpinnerPainter extends CustomPainter {
+  _LineSpinnerPainter({
+    required this.progress,
+    required this.color,
+    required this.lineCount,
+  });
+
+  final double progress;
+  final Color color;
+  final int lineCount;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final outerRadius = size.width / 2;
+    final innerRadius = outerRadius * 0.45;
+    final lineWidth = size.width * 0.11;
+
+    for (int i = 0; i < lineCount; i++) {
+      // Each line's opacity is offset by its position around the circle and
+      // the current animation progress, so the faded "tail" appears to
+      // chase around continuously.
+      final fraction = ((i / lineCount) - progress) % 1.0;
+      final opacity = (0.15 + 0.85 * fraction).clamp(0.15, 1.0);
+
+      final angle = (i / lineCount) * 2 * math.pi;
+      final paint = Paint()
+        ..color = color.withOpacity(opacity)
+        ..strokeWidth = lineWidth
+        ..strokeCap = StrokeCap.round;
+
+      final start = center + Offset(math.cos(angle), math.sin(angle)) * innerRadius;
+      final end = center + Offset(math.cos(angle), math.sin(angle)) * outerRadius;
+      canvas.drawLine(start, end, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LineSpinnerPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.color != color ||
+        oldDelegate.lineCount != lineCount;
   }
 }

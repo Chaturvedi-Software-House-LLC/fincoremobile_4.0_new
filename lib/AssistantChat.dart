@@ -9,6 +9,8 @@ import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'utils/support_email_template.dart';
+
 // Matches the brand gradient used elsewhere in the app (see the "Live Chat"
 // card in Help.dart).
 const _kBrandStart = Color(0xFF6D5BFF);
@@ -558,18 +560,19 @@ class _AssistantChatState extends State<AssistantChat> {
       ..from = Address('noreply@fincoreerp.com', 'Fincore Go Assistant')
       ..recipients.add('saadan@ca-eim.com')
       ..subject = 'Fincore Go Assistant - Support Request'
-      ..html =
-      '''
-          <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
-            <p><b>Name:</b> $name</p>
-            <p><b>Email:</b> $email</p>
-            <p><b>Contact Number:</b> ${phone.trim().isEmpty ? 'Not provided' : phone}</p>
-            <p><b>Message:</b></p>
-            <p>${details.replaceAll('\n', '<br>')}</p>
-            <hr>
-            <p style="color:#888;font-size:12px;">Sent from the Fincore Go in-app AI assistant.</p>
-          </div>
-          ''';
+      ..html = buildSupportEmailHtml(
+        title: 'New Support Request',
+        subtitle: 'Submitted from the Fincore Go in-app AI assistant',
+        details: [
+          MapEntry('Name', name),
+          MapEntry('Email', email),
+          MapEntry(
+            'Contact Number',
+            phone.trim().isEmpty ? 'Not provided' : phone,
+          ),
+        ],
+        message: details,
+      );
 
     await send(message, smtpServer);
   }
