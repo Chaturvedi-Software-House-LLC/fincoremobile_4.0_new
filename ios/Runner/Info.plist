@@ -7,6 +7,15 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Fincore Go uses Face ID to let you sign in quickly and securely.</string>
+	<!-- Required by Apple even though the app's own file-attach feature only
+	     picks PDF documents (see file_picker usage in AssistantChat.dart) -
+	     the file_picker plugin's iOS implementation transitively links
+	     DKImagePickerController/DKPhotoGallery, which reference photo-library
+	     APIs regardless of whether the app actually invokes that code path.
+	     Apple's static analysis flags the linked API surface, not just
+	     actual runtime calls (rejection: ITMS-90683, missing purpose string). -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Fincore Go may use your photo library to let you attach an image when contacting support.</string>
 	<key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>

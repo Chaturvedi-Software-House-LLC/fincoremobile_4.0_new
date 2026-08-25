@@ -551,7 +551,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
                   const SizedBox(height: 24),
 
                   Text(
-                    '© CSH LLC 2023-2026 • Version 5.0.1',
+                    '© CSH LLC 2023-2026 • Version 5.0.2',
                     style: GoogleFonts.poppins(
                       fontSize: 11.5,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,

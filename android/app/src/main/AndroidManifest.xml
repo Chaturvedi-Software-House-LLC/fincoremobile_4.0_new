@@ -6,7 +6,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.CALL_PHONE"/>
+    <!-- CALL_PHONE removed: Help.dart's phone button uses url_launcher's
+         tel: scheme (ACTION_DIAL, opens the dialer for the user to confirm),
+         which needs no permission. CALL_PHONE is only required for
+         ACTION_CALL (silent, programmatic calling), which this app never
+         does - the permission was declared but unused. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
