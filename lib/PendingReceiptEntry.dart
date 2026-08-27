@@ -8,13 +8,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'widgets/entry_widgets.dart';
 import 'ModifyReceiptEntry.dart';
-import 'package:http/http.dart' as http;
-import 'currencyFormat.dart';
+import 'api/api_exception.dart';
+import 'api/voucher_entry_repository.dart';
+import 'api/voucher_type_repository.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 
+/// A row from tally-api's `VoucherEntry` family (see
+/// `voucher_entry_repository.dart`), reshaped to the same
+/// id/data/type/isSynced/message shape this screen already used for the
+/// legacy backend so the rest of the widget tree (search, date filters,
+/// card rendering, edit/delete) needed no changes.
+///
+/// **"Pending" mapping**: the legacy `getEntries` endpoint returned only
+/// this company/serial's not-yet-synced receipt entries. tally-api's
+/// `VoucherEntry` table has no outbound-push-to-Tally job yet (see this
+/// repo's `voucher_entry_repository.dart` doc-comment), so every
+/// `VoucherEntry` is, by definition, still pending - there is no
+/// `syncedAt`/`syncError` filter to apply here. [isSynced] is therefore
+/// always `0` (unsynced) and [message] always `null`; every entry stays
+/// actionable (edit/delete), matching "pending == not yet pushed to
+/// Tally" for this backend.
 class ReceiptModel {
-  final int id;
+  final String id;
   final Map<String, dynamic> data;
   final String type;
   final int isSynced;
@@ -27,16 +43,6 @@ class ReceiptModel {
     required this.isSynced,
     this.message,
   });
-
-  factory ReceiptModel.fromJson(Map<String, dynamic> json) {
-    return ReceiptModel(
-      id: json['id'],
-      data: json['data'],
-      type: json['type'],
-      isSynced: json['isSynced'],
-      message: json['message'],
-    );
-  }
 }
 
 class PendingReceiptEntry extends StatefulWidget {
@@ -56,9 +62,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       _isLoading = false,
       isVisibleNoReceiptEntryFound = false;
 
-  final Set<int> expandedCards = {};
-
-  String? HttpURL_loadData, HttpURL_deleteEntry, token = '';
+  final Set<String> expandedCards = {};
 
   String rolename_fetched = "";
 
@@ -93,7 +97,6 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
 
       print("serial_no: $serial_no");
       print("isVanSalesSerial: $isVanSalesSerial");
@@ -104,10 +107,6 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       String? email_nav = prefs.getString('email_nav');
       String? name_nav = prefs.getString('name_nav');
 
-      HttpURL_loadData =
-          '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=receipt';
-      HttpURL_deleteEntry =
-          '$hostname/api/entry/deleteEntry/$company_lowercase/$serial_no';
       if (email_nav != null && name_nav != null) {
         name = name_nav;
         email = email_nav;
@@ -126,7 +125,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
 
   Future<void> _showConfirmationDialogAndNavigate(
     BuildContext context,
-    int id,
+    String id,
   ) async {
     await showGeneralDialog(
       context: context,
@@ -248,59 +247,36 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
     );
   }
 
-  Future<void> entrydelete(int id) async {
+  Future<void> entrydelete(String id) async {
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse(HttpURL_deleteEntry!);
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({'id': id.toString()});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final responsee = response.body;
-      if (responsee != null) {
-        /*showAppMessage(context, responsee);*/
-        if (responsee == "Entry deleted successfully") {
-          setState(() {
-            _isLoading = true;
-            fetchReceiptEntries();
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-      showAppMessage(context, error);
+    try {
+      await VoucherEntryRepository.instance.remove(id);
+      await fetchReceiptEntries();
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
       setState(() {
         _isLoading = false;
       });
     }
   }
 
+  /// tally-api has no per-voucher-type "getEntries" query - it returns
+  /// every `VoucherEntry` for the active company (see
+  /// [VoucherEntryRepository.listAll]), so the receipt-only filtering the
+  /// legacy `?type=receipt` query param did server-side is reproduced here
+  /// client-side: only entries whose `voucherTypeMasterId` matches one of
+  /// Tally's own `'Receipt'`-reservedName voucher types are kept. The
+  /// optional `spectra_allocations.receipt_voucher_type` preference
+  /// (legacy's `&vchName=` param) narrows that further to a single named
+  /// voucher type, same as before.
   Future<void> fetchReceiptEntries() async {
     setState(() {
       _isLoading = true;
@@ -324,84 +300,91 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
         voucherTypeName = spectraAllocations.first['receipt_voucher_type'];
       }
     }
-    dynamic url;
-    if (voucherTypeName != null && voucherTypeName.trim().isNotEmpty) {
-      url = Uri.parse(
-        '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=receipt&vchName=$voucherTypeName',
-      );
-    } else {
-      url = Uri.parse(
-        '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=receipt',
-      );
-    }
+
     print('receipt voucher type -> $voucherTypeName');
-    print('getting receipts from url -> $url');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
+    try {
+      final receiptVoucherTypes = await VoucherTypeRepository.instance
+          .byReservedName('RECEIPT');
 
-    final response = await http.post(url, headers: headers);
+      Set<int> allowedVoucherTypeMasterIds = receiptVoucherTypes
+          .map((v) => v['masterId'] as int)
+          .toSet();
 
-    if (response.statusCode == 200) {
+      if (voucherTypeName != null && voucherTypeName.trim().isNotEmpty) {
+        final named = receiptVoucherTypes
+            .where((v) => v['name'] == voucherTypeName)
+            .map((v) => v['masterId'] as int)
+            .toSet();
+        if (named.isNotEmpty) {
+          allowedVoucherTypeMasterIds = named;
+        }
+      }
+
+      final allEntries = await VoucherEntryRepository.instance.listAll();
+
+      final receiptEntries = allEntries.where((e) {
+        final masterId = e['voucherTypeMasterId'];
+        return masterId is int && allowedVoucherTypeMasterIds.contains(masterId);
+      }).toList();
+
       receiptentries.clear();
       filteredReceiptEntries.clear();
 
-      /*print(response.body);*/
+      isVisibleNoReceiptEntryFound = false;
 
-      try {
-        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
+      receiptentries.addAll(
+        receiptEntries.map(
+          (e) => ReceiptModel(
+            id: e['id'].toString(),
+            data: e,
+            type: (e['voucherTypeName'] ?? 'Receipt').toString(),
+            // tally-api's VoucherEntry has no outbound-push-to-Tally job
+            // yet, so every entry is still pending/unsynced.
+            isSynced: 0,
+            message: null,
+          ),
+        ),
+      );
 
-        if (jsonList != null) {
-          isVisibleNoReceiptEntryFound = false;
+      receiptentries.sort((a, b) {
+        DateTime dateA = DateTime.parse(a.data['date']);
+        DateTime dateB = DateTime.parse(b.data['date']);
+        if (dateA != dateB) return dateB.compareTo(dateA);
+        final vchA =
+            int.tryParse((a.data['voucherNumber'] ?? '').toString()) ?? 0;
+        final vchB =
+            int.tryParse((b.data['voucherNumber'] ?? '').toString()) ?? 0;
+        return vchB.compareTo(vchA);
+      });
+      filteredReceiptEntries = List.from(receiptentries);
 
-          receiptentries.addAll(
-            jsonList.map((json) => ReceiptModel.fromJson(json)).toList(),
-          );
-          receiptentries.sort((a, b) {
-            DateTime dateA = DateTime.parse(a.data['DATE']);
-            DateTime dateB = DateTime.parse(b.data['DATE']);
-            if (dateA != dateB) return dateB.compareTo(dateA);
-            final vchA =
-                int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-            final vchB =
-                int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-            return vchB.compareTo(vchA);
-          });
-          filteredReceiptEntries = List.from(receiptentries);
+      setState(() {
+        FocusManager.instance.primaryFocus?.unfocus();
+        _searchController.clear();
+        selectedSingleDate = null;
+        selectedDateRange = null;
+      });
 
-          setState(() {
-            FocusManager.instance.primaryFocus?.unfocus();
-            _searchController.clear();
-            selectedSingleDate = null;
-            selectedDateRange = null;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
+      setState(() {
+        if (filteredReceiptEntries.isEmpty) {
+          isVisibleNoReceiptEntryFound = true;
         }
-        setState(() {
-          if (filteredReceiptEntries.isEmpty) {
-            isVisibleNoReceiptEntryFound = true;
-          }
-          _isLoading = false;
-        });
-      } catch (e) {
-        print(e);
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-      showAppMessage(context, error);
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      print(e);
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        _isLoading = false;
+      });
     }
+
     setState(() {
       if (filteredReceiptEntries.isEmpty) {
         isVisibleNoReceiptEntryFound = true;
@@ -414,19 +397,38 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
     _applyFilters();
   }
 
+  /// The party ledger entry among a voucher entry's `ledgerEntries` -
+  /// tally-api's `isPartyLedger` flag identifies it directly, replacing
+  /// legacy's implicit "first `ALLLEDGERENTRIES.LIST` row" convention.
+  Map<String, dynamic>? _partyLedgerEntry(Map<String, dynamic> data) {
+    final List<dynamic> ledgerEntries =
+        (data['ledgerEntries'] as List<dynamic>?) ?? const [];
+    for (final entry in ledgerEntries) {
+      if (entry is Map<String, dynamic> && entry['isPartyLedger'] == true) {
+        return entry;
+      }
+    }
+    return ledgerEntries.isNotEmpty
+        ? ledgerEntries.first as Map<String, dynamic>
+        : null;
+  }
+
   void _applyFilters() {
     final query = _searchController.text.trim().toLowerCase();
 
     setState(() {
       filteredReceiptEntries = receiptentries.where((entry) {
         final data = entry.data;
+        final partyEntry = _partyLedgerEntry(data);
 
-        final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
-        final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
-        final vchtype = (data['VOUCHERTYPENAME'] ?? '')
+        final party = (partyEntry?['ledgerName'] ?? '')
             .toString()
             .toLowerCase();
-        final amount = (data['totalAmount'] ?? '').toString().toLowerCase();
+        final vchno = (data['voucherNumber'] ?? '').toString().toLowerCase();
+        final vchtype = (data['voucherTypeName'] ?? '')
+            .toString()
+            .toLowerCase();
+        final amount = (partyEntry?['amount'] ?? '').toString().toLowerCase();
 
         final bool matchesSearch =
             query.isEmpty ||
@@ -596,7 +598,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
   }
 
   bool _matchesDateFilter(ReceiptModel entry) {
-    final dateValue = entry.data['DATE'];
+    final dateValue = entry.data['date'];
 
     if (dateValue == null) return false;
 
@@ -886,13 +888,13 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
                         itemCount: filteredReceiptEntries.length,
                         itemBuilder: (context, index) {
                           final card = filteredReceiptEntries[index];
-                          final partyLedger = card.data['PARTYLEDGERNAME'];
-                          final dateStr = card.data['DATE'];
-                          var firstEntry =
-                              card.data['ALLLEDGERENTRIES.LIST'][0];
-                          final vchno = card.data['VOUCHERNUMBER'];
-                          final vchtype = card.data['VOUCHERTYPENAME'] ?? 'N/A';
-                          final totalAmount = firstEntry['AMOUNT'];
+                          final partyEntry = _partyLedgerEntry(card.data);
+                          final partyLedger = partyEntry?['ledgerName'];
+                          final dateStr = card.data['date'];
+                          final vchno = card.data['voucherNumber'];
+                          final vchtype =
+                              card.data['voucherTypeName'] ?? 'N/A';
+                          final totalAmount = partyEntry?['amount'];
                           final bool isExpanded = expandedCards.contains(
                             card.id,
                           );
@@ -931,9 +933,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
                                       MaterialPageRoute(
                                         builder: (context) =>
                                             ModifyReceiptEntry(
-                                              type: card.type,
-                                              id: card.id,
-                                              isSynced: card.isSynced,
+                                              voucherEntryId: card.id,
                                               data: card.data,
                                             ),
                                       ),

@@ -1031,6 +1031,22 @@ class _PartyClickedSoldPurchaseClickedPageState
               },
               icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
+            // Sort now lives in the app bar (standard Material/iOS
+            // placement) instead of a floating pill hovering over the
+            // list - that pattern covered content, was easy to miss, and
+            // isn't how sort controls are usually surfaced. Disabled
+            // (greyed out) rather than hidden when there's nothing to sort,
+            // so its position doesn't jump around as data loads.
+            IconButton(
+              onPressed: isSortVisible
+                  ? () => _showSelectionWindow(context)
+                  : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible ? Colors.white : Colors.white38,
+                size: 22,
+              ),
+            ),
             IconButton(
               onPressed: () {
                 final RenderBox button =
@@ -1628,49 +1644,6 @@ class _PartyClickedSoldPurchaseClickedPageState
                   ),
                 ),
             ],
-          ),
-
-          Visibility(
-            visible: isSortVisible,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 50),
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: GestureDetector(
-                  onTap: () => _showSelectionWindow(context),
-                  child: Container(
-                    width: 100,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: app_color, // soft teal background
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.teal.withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.sort, size: 18, color: Colors.white),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Sort',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ),
 
           if (_isLoading)

@@ -125,6 +125,20 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
   List<party> parties_list = [];
 
+  // --- Incremental (infinite-scroll) paging state for the "All Parties"
+  // tab. tally-api's `/ledgers` list has no "in a set of group ids" filter
+  // (only a single `groupMasterId` equality filter), so "All Parties"
+  // (every party-like group at once) pages through each relevant group's
+  // ids in turn - fully exhausting one group's pages before starting the
+  // next - rather than requesting every group in one call. A single
+  // selected group in the dropdown is just a one-element queue.
+  static const int _partyPageLimit = 30;
+  List<int> _pagingGroupIds = [];
+  int _pagingGroupIndex = 0;
+  int _pagingPage = 1;
+  bool _pagingHasMore = false;
+  bool _isLoadingMoreParties = false;
+
   String formatEmail(String email) {
     if (email == 'null') {
       email = '-';
@@ -139,7 +153,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     return contact;
   }
 
-  Future<void> generateAndSharePDF_Party() async {
+  Future<void> generateAndSharePDF_Party(List<party> items) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -150,16 +164,14 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     final headersRow3 = ['Party Name', 'Alias', 'Email Address', 'Contact No'];
 
     final itemsPerPage = 10;
-    final pageCount = (filteredItems_parties.length / itemsPerPage).ceil();
+    final pageCount = (items.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = filteredItems_parties.sublist(
+      final itemsSubset = items.sublist(
         startIndex,
-        endIndex > filteredItems_parties.length
-            ? filteredItems_parties.length
-            : endIndex,
+        endIndex > items.length ? items.length : endIndex,
       );
 
       final tableSubsetRows = itemsSubset.map((item) {
@@ -228,7 +240,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     ], text: 'Sharing Parties Report of $companyName');
   }
 
-  Future<void> generateAndSharePDF_PartyCustom() async {
+  Future<void> generateAndSharePDF_PartyCustom(List<party> items) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -240,16 +252,14 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     final headersRow3 = ['Party Name', 'Alias', 'Email Address', 'Contact No'];
 
     final itemsPerPage = 10;
-    final pageCount = (filteredItems_parties.length / itemsPerPage).ceil();
+    final pageCount = (items.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = filteredItems_parties.sublist(
+      final itemsSubset = items.sublist(
         startIndex,
-        endIndex > filteredItems_parties.length
-            ? filteredItems_parties.length
-            : endIndex,
+        endIndex > items.length ? items.length : endIndex,
       );
 
       final tableSubsetRows = itemsSubset.map((item) {
@@ -333,12 +343,12 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     ], text: 'Sharing Parties Report of $companyName');
   }
 
-  Future<void> generateAndShareCSV_Party() async {
+  Future<void> generateAndShareCSV_Party(List<party> items) async {
     final List<List<dynamic>> csvData = [];
     final headersRow = ['Party Name', 'Alias', 'Email Address', 'Contact No'];
     csvData.add(headersRow);
 
-    for (final item in filteredItems_parties) {
+    for (final item in items) {
       final rowData = [
         item.partyname,
         formatAlias_Report(item.alias),
@@ -413,7 +423,12 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   }
 
   void fetchPartyData(String party) {
-    fetchParties(party == "All Parties" ? null : _groupMasterIdByName[party]);
+    final groupIds = party == "All Parties"
+        ? _groupMasterIdByName.values.toList()
+        : (_groupMasterIdByName[party] == null
+              ? <int>[]
+              : [_groupMasterIdByName[party]!]);
+    _startPartyPaging(groupIds);
   }
 
   void fetchInactivePartyData(String party, String date) {
@@ -423,7 +438,26 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> fetchParties(int? groupMasterId) async {
+  /// Re-applies the search box's filter over whatever has been loaded so
+  /// far. **Narrower than the old full-list search**: tally-api's `/ledgers`
+  /// list has no server-side name-search query param, so this only
+  /// searches the pages already fetched by infinite scroll, not the whole
+  /// company's parties - matching more of them as the user scrolls further
+  /// (or searches after scrolling down) rather than all at once.
+  void _applyPartySearchFilter() {
+    final value = searchController.text.toLowerCase();
+    filteredItems_parties = value.isEmpty
+        ? parties_list
+        : parties_list
+              .where((item) => item.partyname.toLowerCase().contains(value))
+              .toList();
+    party_count = filteredItems_parties.length.toString();
+    party_text = filteredItems_parties.length == 1 ? "Party" : "Parties";
+  }
+
+  /// Resets and starts (or restarts) the "All Parties" tab's incremental
+  /// paging queue over [groupIds], then loads the first page.
+  Future<void> _startPartyPaging(List<int> groupIds) async {
     setState(() {
       party_count = "0";
       party_text = "Party";
@@ -431,47 +465,122 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       _isAllList = false;
       isClicked_parties = true;
       isVisibleNoDataFound = false;
+      searchController.clear();
     });
 
-    filteredItems_parties.clear();
     parties_list.clear();
+    filteredItems_parties = parties_list;
+    _pagingGroupIds = groupIds;
+    _pagingGroupIndex = 0;
+    _pagingPage = 1;
+    _pagingHasMore = groupIds.isNotEmpty;
+
+    await _loadNextPartyPage();
+  }
+
+  /// Loads one more page of parties (30 rows) into [parties_list], moving
+  /// on to the next group in [_pagingGroupIds] once the current one is
+  /// exhausted. Called for the first page by [_startPartyPaging] and for
+  /// every subsequent page by the scroll-near-bottom listener.
+  ///
+  /// Auto-chains through any number of consecutive EMPTY groups (bounded by
+  /// [_pagingGroupIds]'s length) rather than stopping after the first one -
+  /// real party ledgers are often nested under a sub-group ("Local
+  /// Customers" under "Sundry Debtors") rather than sitting directly in the
+  /// top-level reserved group, so the very first group in the queue coming
+  /// back empty is a normal, expected case, not "no data" - without this,
+  /// the screen would show "No matching parties" and never get a chance to
+  /// try the next group, since there'd be no scrollable content left to
+  /// trigger the next page load.
+  Future<void> _loadNextPartyPage() async {
+    if (_isLoadingMoreParties || !_pagingHasMore) return;
+    if (_pagingGroupIndex >= _pagingGroupIds.length) {
+      setState(() => _pagingHasMore = false);
+      return;
+    }
+
+    setState(() => _isLoadingMoreParties = true);
 
     try {
-      final rows = await LedgerRepository.instance.listLedgers(
-        groupMasterId: groupMasterId,
-      );
-      parties_list.addAll(rows.map(party.fromJson));
-      filteredItems_parties = parties_list;
+      while (_pagingGroupIndex < _pagingGroupIds.length) {
+        final groupId = _pagingGroupIds[_pagingGroupIndex];
+        final result = await LedgerRepository.instance.listLedgersPage(
+          page: _pagingPage,
+          limit: _partyPageLimit,
+          groupMasterId: groupId,
+        );
+        parties_list.addAll(result.items.map(party.fromJson));
 
+        if (result.hasMore) {
+          _pagingPage++;
+          break;
+        } else {
+          _pagingGroupIndex++;
+          _pagingPage = 1;
+          if (result.items.isNotEmpty) break;
+          // Empty page from this group - keep walking the queue instead of
+          // stopping here, so a party-less top-level group doesn't hide
+          // every other group's parties.
+        }
+      }
+      _pagingHasMore = _pagingGroupIndex < _pagingGroupIds.length;
+
+      _applyPartySearchFilter();
       setState(() {
-        party_count = filteredItems_parties.length.toString();
-        party_text = filteredItems_parties.length == 1 ? "Party" : "Parties";
         _isAllList = true;
         _isLoading = false;
+        _isLoadingMoreParties = false;
+        isVisibleNoDataFound = parties_list.isEmpty;
       });
     } on ApiException catch (e) {
       showAppMessage(context, e.message);
       setState(() {
-        _isAllList = false;
+        _isAllList = parties_list.isNotEmpty;
         _isLoading = false;
+        _isLoadingMoreParties = false;
       });
     } catch (e) {
       showAppMessage(context, 'Could not reach the server. Please try again.');
       setState(() {
-        _isAllList = false;
+        _isAllList = parties_list.isNotEmpty;
         _isLoading = false;
+        _isLoadingMoreParties = false;
       });
     }
+  }
 
-    setState(() {
-      if (parties_list.isEmpty) {
-        party_count = "0";
-        party_text = "Party";
-        _isAllList = false;
-        isVisibleNoDataFound = true;
-      }
-      _isLoading = false;
-    });
+  void _onPartyScroll() {
+    if (!isClicked_allparties) return;
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      _loadNextPartyPage();
+    }
+  }
+
+  /// Fetches the full, unpaginated party list on demand for PDF/CSV export
+  /// - export is an occasional explicit action (not the initial screen
+  /// render infinite-scroll is optimizing), so it's fine for it to fetch
+  /// everything rather than being limited to whatever's been scrolled into
+  /// view so far.
+  Future<List<party>> _fullPartiesForExport() async {
+    if (isClicked_inactiveparties) {
+      // Inactive Parties never uses incremental paging (see
+      // fetchInactiveParties) - filteredItems_parties already holds its
+      // full, sorted result set.
+      return filteredItems_parties;
+    }
+    final groupMasterId = _selectedparty == "All Parties"
+        ? null
+        : _groupMasterIdByName[_selectedparty];
+    final rows = await LedgerRepository.instance.listLedgers(
+      groupMasterId: groupMasterId,
+    );
+    final all = rows.map(party.fromJson).toList();
+    final value = searchController.text.toLowerCase();
+    return value.isEmpty
+        ? all
+        : all.where((item) => item.partyname.toLowerCase().contains(value)).toList();
   }
 
   Future<void> fetchInactiveParties(int? groupMasterId, String date) async {
@@ -582,11 +691,13 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+    _scrollFabController.addListener(_onPartyScroll);
     _initSharedPreferences();
   }
 
   @override
   void dispose() {
+    _scrollFabController.removeListener(_onPartyScroll);
     _scrollFabController.dispose();
     super.dispose();
   }
@@ -698,14 +809,15 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                   items: <PopupMenuEntry<String>>[
                     PopupMenuItem<String>(
                       child: GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(context);
-                          if (!parties_list.isEmpty) {
-                            if (_selectedparty == 'All Parties') {
-                              generateAndSharePDF_Party();
-                            } else {
-                              generateAndSharePDF_PartyCustom();
-                            }
+                          if (parties_list.isEmpty) return;
+                          final items = await _fullPartiesForExport();
+                          if (items.isEmpty) return;
+                          if (_selectedparty == 'All Parties') {
+                            generateAndSharePDF_Party(items);
+                          } else {
+                            generateAndSharePDF_PartyCustom(items);
                           }
                         },
                         child: Row(
@@ -732,12 +844,13 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
 
                     PopupMenuItem<String>(
                       child: GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(context);
 
-                          if (!parties_list.isEmpty) {
-                            generateAndShareCSV_Party();
-                          }
+                          if (parties_list.isEmpty) return;
+                          final items = await _fullPartiesForExport();
+                          if (items.isEmpty) return;
+                          generateAndShareCSV_Party(items);
                         },
                         child: Row(
                           children: [
@@ -919,24 +1032,14 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                             controller: searchController,
                             style: GoogleFonts.poppins(fontSize: 13.5),
                             onChanged: (value) {
-                              value = value.toLowerCase();
-                              setState(() {
-                                filteredItems_parties = value.isEmpty
-                                    ? parties_list
-                                    : parties_list.where((item) {
-                                        return item.partyname
-                                            .toLowerCase()
-                                            .contains(value);
-                                      }).toList();
-
-                                party_count = filteredItems_parties.length
-                                    .toString();
-                                if ((int.tryParse(party_count) ?? 0) < 2) {
-                                  party_text = "Party";
-                                } else {
-                                  party_text = "Parties";
-                                }
-                              });
+                              // See _applyPartySearchFilter's doc comment:
+                              // on the "All Parties"/group tabs this only
+                              // searches pages already loaded by infinite
+                              // scroll (no server-side name-search param on
+                              // tally-api's /ledgers), not the whole
+                              // company's parties. Inactive Parties still
+                              // searches its full (non-paged) result set.
+                              setState(() => _applyPartySearchFilter());
                             },
                             decoration: InputDecoration(
                               isDense: true,
@@ -1228,6 +1331,26 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
                               ),
                             );
                       }, childCount: filteredItems_parties.length),
+                    ),
+                  ),
+
+                // Bottom-of-list spinner while the next page of the "All
+                // Parties" tab loads - never shown for Inactive Parties,
+                // which always loads its full result set in one go.
+                if (isClicked_allparties && _isLoadingMoreParties)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: app_color,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
               ],

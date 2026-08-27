@@ -282,11 +282,22 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   List<items> inactive_items_list = [];
   List<items> active_items_list = [];
 
+  // --- Incremental (infinite-scroll) paging state for the "All Items" tab
+  // only - Fast/Slow Moving, Inactive Items, Moving Summary, Stock
+  // Valuation, and Item Ageing all classify/sort/bucket their whole result
+  // set (movement classification, ageing buckets, valuation ranking), which
+  // needs the full list up front - those keep using the existing
+  // fetch-every-page-up-front repository calls, documented per call site.
+  static const int _itemsPageLimit = 30;
+  int _itemsPage = 1;
+  int _itemsTotalPages = 1;
+  bool _isLoadingMoreItems = false;
+
   late NumberFormat currencyFormat;
 
   bool isVisibleFilterby = false;
 
-  Future<void> generateAndShareCSV_AllItems() async {
+  Future<void> generateAndShareCSV_AllItems(List<items> items) async {
     final List<List<dynamic>> csvData = [];
     csvData.add([
       'Item Name',
@@ -297,7 +308,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       'Amount',
     ]);
 
-    for (final item in filteredItems_all_items) {
+    for (final item in items) {
       csvData.add([
         item.itemname,
         item.c_qty,
@@ -888,7 +899,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> generateAndSharePDF_AllItems() async {
+  Future<void> generateAndSharePDF_AllItems(List<items> items) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -907,16 +918,14 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     ];
 
     final itemsPerPage = 8;
-    final pageCount = (filteredItems_all_items.length / itemsPerPage).ceil();
+    final pageCount = (items.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = filteredItems_all_items.sublist(
+      final itemsSubset = items.sublist(
         startIndex,
-        endIndex > filteredItems_all_items.length
-            ? filteredItems_all_items.length
-            : endIndex,
+        endIndex > items.length ? items.length : endIndex,
       );
 
       final tableSubsetRows = itemsSubset.map((item) {
@@ -1312,6 +1321,23 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     return rows.map(items.fromJson).toList();
   }
 
+  /// Fetches the full, unpaginated "All Items" list on demand for PDF/CSV
+  /// export - export is an occasional explicit action (not the initial
+  /// screen render infinite scroll is optimizing), so it's fine for it to
+  /// fetch everything rather than being limited to whatever's been
+  /// scrolled into view so far (`all_items_list`, once infinite scroll is
+  /// wired up below, only holds the pages loaded so far).
+  Future<List<items>> _fullAllItemsForExport() async {
+    final parent = _selecteditem == "All Items" ? "" : (_selecteditem ?? "");
+    final all = await _fetchStockItemsList(parent);
+    final query = searchController.text.toLowerCase();
+    return query.isEmpty
+        ? all
+        : all.where((e) => e.itemname.toLowerCase().contains(query)).toList();
+  }
+
+  /// Starts (or restarts, e.g. on parent-group change) incremental paging
+  /// of the "All Items" tab and loads its first page.
   Future<void> fetchall_items(final String parent) async {
     setState(() {
       item_count = "0";
@@ -1328,49 +1354,81 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       isClicked_itemageing = false;
       isVisibleNoDataFound = false;
       isVisibleFilterby = false;
+      searchController.clear();
     });
 
     filteredItems_all_items.clear();
     all_items_list.clear();
+    _itemsPage = 1;
+    _itemsTotalPages = 1;
+
+    await _loadNextItemsPage(parent: parent);
+  }
+
+  /// Loads one more page (30 rows) of the "All Items" tab into
+  /// `all_items_list`. [parent] only needs to be passed by [fetchall_items]
+  /// for the first page - subsequent calls (from the scroll listener) reuse
+  /// whichever parent group is currently selected.
+  Future<void> _loadNextItemsPage({String? parent}) async {
+    if (_isLoadingMoreItems) return;
+    if (parent == null && _itemsPage > _itemsTotalPages) return;
+
+    setState(() => _isLoadingMoreItems = true);
 
     try {
-      final parsed = await _fetchStockItemsList(parent);
-      isVisibleNoDataFound = false;
-      all_items_list.addAll(parsed);
-      filteredItems_all_items = all_items_list;
+      final resolvedParent =
+          parent ?? (_selecteditem == "All Items" ? "" : (_selecteditem ?? ""));
+      final groupMasterId = resolvedParent.isEmpty
+          ? null
+          : _groupMasterIdByName[resolvedParent];
+      final result = await StockRepository.instance.listStockItemsPage(
+        page: _itemsPage,
+        limit: _itemsPageLimit,
+        stockGroupMasterId: groupMasterId,
+      );
+      all_items_list.addAll(result.items.map(items.fromJson));
+      _itemsTotalPages = result.totalPages;
+      _itemsPage++;
+
+      _onSearchChanged(searchController.text);
+      setState(() {
+        _isInactiveList = false;
+        _isActiveList = false;
+        _isAllList = true;
+        _isLoadingMoreItems = false;
+        _isLoading = false;
+        isVisibleNoDataFound = all_items_list.isEmpty;
+        item_count = filteredItems_all_items.length.toString();
+      });
     } on ApiException catch (e) {
       showAppMessage(context, e.message);
       setState(() {
         _isInactiveList = false;
-        _isAllList = false;
+        _isAllList = all_items_list.isNotEmpty;
         _isActiveList = false;
         _isLoading = false;
+        _isLoadingMoreItems = false;
       });
     } catch (e) {
       showAppMessage(context, 'Could not reach the server. Please try again.');
       setState(() {
         _isInactiveList = false;
-        _isAllList = false;
+        _isAllList = all_items_list.isNotEmpty;
         _isActiveList = false;
         _isLoading = false;
+        _isLoadingMoreItems = false;
       });
     }
+  }
 
-    setState(() {
-      if (filteredItems_all_items.isEmpty) {
-        item_count = "0";
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        isVisibleNoDataFound = true;
-      } else {
-        item_count = filteredItems_all_items.length.toString();
-        _isInactiveList = false;
-        _isAllList = true;
-        _isActiveList = false;
-      }
-      _isLoading = false;
-    });
+  void _onItemsScroll() {
+    if (!isClicked_allitems || !_isAllList) return;
+    if (_isLoadingMoreItems || _itemsPage > _itemsTotalPages) return;
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      _loadNextItemsPage();
+    }
   }
 
   Future<void> fetchactive_items(
@@ -2063,6 +2121,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _scrollFabController.removeListener(_onItemsScroll);
     _scrollFabController.dispose();
     super.dispose();
   }
@@ -2071,6 +2130,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+    _scrollFabController.addListener(_onItemsScroll);
     _initSharedPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
@@ -2189,7 +2249,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                             }
                           } else if (_isAllList) {
                             if (!all_items_list.isEmpty) {
-                              generateAndSharePDF_AllItems();
+                              _fullAllItemsForExport().then(
+                                generateAndSharePDF_AllItems,
+                              );
                             } else {
                               showToast('Data Not Found');
                             }
@@ -2257,7 +2319,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                             }
                           } else if (_isAllList) {
                             if (!all_items_list.isEmpty) {
-                              generateAndShareCSV_AllItems();
+                              _fullAllItemsForExport().then(
+                                generateAndShareCSV_AllItems,
+                              );
                             } else {
                               showToast('Data Not Found');
                             }
@@ -2457,6 +2521,26 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                       child: _buildItemCard(card),
                     );
                   }, childCount: _getVisibleList().length),
+                ),
+
+              // Bottom-of-list spinner while the next page of the "All
+              // Items" tab loads - never shown for the other tabs, which
+              // always load their full result set in one go.
+              if (isClicked_allitems && _isAllList && _isLoadingMoreItems)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: app_color,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -3922,6 +4006,12 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     return filteredItems_inactive_items;
   }
 
+  /// Narrower than before on the "All Items" tab: tally-api's
+  /// `/stock-items` list has no server-side name-search query param, so
+  /// this only searches pages already loaded by infinite scroll
+  /// (`all_items_list`), not the whole company's items - matching more as
+  /// the user scrolls further. Fast/Slow Moving and Inactive Items are
+  /// unaffected - those still load their full result set up front.
   void _onSearchChanged(String value) {
     final query = value.toLowerCase();
     setState(() {

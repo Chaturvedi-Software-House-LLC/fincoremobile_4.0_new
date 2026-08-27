@@ -8,13 +8,27 @@ import 'constants.dart';
 import 'widgets/entry_widgets.dart';
 import 'ModifySalesOrderEntry.dart';
 import 'SalesOrderRegistration.dart';
-import 'package:http/http.dart' as http;
 import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'api/voucher_entry_repository.dart';
+import 'api/voucher_type_repository.dart';
+import 'api/api_exception.dart';
 
+/// Wraps one tally-api `VoucherEntry` (see `VoucherEntryRepository`) for this
+/// screen's list/card UI. [data] is populated with the same legacy field
+/// names (`DATE`, `VOUCHERNUMBER`, `VOUCHERTYPENAME`, `PARTYLEDGERNAME`,
+/// `totalAmount`) the widget tree below already reads, so none of the
+/// existing card-rendering/sort/search/date-filter code needed to change -
+/// only how that map gets populated. [id] stays a locally-assigned sequence
+/// number (matching `ModifySalesOrderEntry`'s still-`int` `id` parameter,
+/// which hasn't been migrated to the tally-api string id yet); the real
+/// tally-api id lives in [entryId] (used for delete) and is also embedded
+/// into `data['_voucherEntryId']` for whenever `ModifySalesOrderEntry` is
+/// migrated and needs it.
 class SalesOrderModel {
   final int id;
+  final String entryId;
   final Map<String, dynamic> data;
   final String type;
   final int isSynced;
@@ -22,26 +36,71 @@ class SalesOrderModel {
 
   SalesOrderModel({
     required this.id,
+    required this.entryId,
     required this.data,
     required this.type,
     required this.isSynced,
     this.message,
   });
 
-  factory SalesOrderModel.fromJson(Map<String, dynamic> json) {
-    final rawData = json['data'];
+  /// Builds a card model from one `VoucherEntry` as returned by
+  /// `VoucherEntryRepository.listAll()`/`voucher-entries.service.ts`'s
+  /// `shapeRow()` - `id`, `date`, `voucherNumber`, `voucherTypeName`,
+  /// `ledgerEntries` (each with `isPartyLedger`/`ledgerName`/`amount`),
+  /// `syncedAt`, `syncError`.
+  ///
+  /// "Pending" for this screen was never a server-side status filter -
+  /// the legacy `getEntries` endpoint returned every entry of this voucher
+  /// type and the UI only used `isSynced` to grey out edit/delete for
+  /// already-synced ones. tally-api has no outbound push-to-Tally job yet
+  /// (see `VoucherEntryRepository`'s doc-comment), so `syncedAt`/`syncError`
+  /// are always null today and every entry resolves to `isSynced == 0`
+  /// (fully editable) - the same "everything is pending" end state the
+  /// legacy screen showed for freshly-created, not-yet-synced entries.
+  factory SalesOrderModel.fromEntry(Map<String, dynamic> entry, int localId) {
+    final ledgerEntries = (entry['ledgerEntries'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+
+    Map<String, dynamic>? partyEntry;
+    for (final le in ledgerEntries) {
+      if (le['isPartyLedger'] == true) {
+        partyEntry = le;
+        break;
+      }
+    }
+    partyEntry ??= ledgerEntries.isNotEmpty ? ledgerEntries.first : null;
+
+    final partyLedgerName = partyEntry != null
+        ? (partyEntry['ledgerName'] ?? '').toString()
+        : '';
+    final rawAmount = partyEntry != null ? partyEntry['amount'] : null;
+    final amountValue = rawAmount == null
+        ? 0.0
+        : double.tryParse(rawAmount.toString())?.abs() ?? 0.0;
+
+    final syncedAt = entry['syncedAt'];
+    final syncError = entry['syncError'];
+    final isSynced = syncedAt != null
+        ? 1
+        : (syncError != null ? 2 : 0);
+
+    final entryId = (entry['id'] ?? '').toString();
+
     return SalesOrderModel(
-      id: json['id'] is int ? json['id'] : int.tryParse('${json['id']}') ?? 0,
-      data: rawData is Map<String, dynamic>
-          ? rawData
-          : (rawData is String
-                ? jsonDecode(rawData) as Map<String, dynamic>
-                : <String, dynamic>{}),
-      type: (json['type'] ?? '').toString(),
-      isSynced: json['isSynced'] is int
-          ? json['isSynced']
-          : int.tryParse('${json['isSynced']}') ?? 0,
-      message: json['message']?.toString(),
+      id: localId,
+      entryId: entryId,
+      data: {
+        'DATE': entry['date'],
+        'VOUCHERNUMBER': entry['voucherNumber'],
+        'VOUCHERTYPENAME': entry['voucherTypeName'] ?? 'N/A',
+        'PARTYLEDGERNAME': partyLedgerName,
+        'totalAmount': amountValue,
+        '_voucherEntryId': entryId,
+        '_source': entry,
+      },
+      type: 'sales order',
+      isSynced: isSynced,
+      message: syncError?.toString(),
     );
   }
 }
@@ -62,8 +121,6 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
       isRolesEnable = true,
       _isLoading = false,
       isVisibleNoSalesOrderEntryFound = false;
-
-  String? HttpURL_loadData, HttpURL_deleteEntry, token = '';
 
   String rolename_fetched = "";
 
@@ -112,17 +169,12 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
 
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
       String? email_nav = prefs.getString('email_nav');
       String? name_nav = prefs.getString('name_nav');
 
-      HttpURL_loadData =
-          '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales order';
-      HttpURL_deleteEntry =
-          '$hostname/api/entry/deleteEntry/$company_lowercase/$serial_no';
       if (email_nav != null && name_nav != null) {
         name = name_nav;
         email = email_nav;
@@ -267,56 +319,34 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse(HttpURL_deleteEntry!);
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({'id': id.toString()});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final responsee = response.body;
-      if (responsee != null) {
-        showAppMessage(context, responsee);
-        if (responsee == "Entry deleted successfully") {
-          setState(() {
-            _isLoading = true;
-            fetchSalesOrderEntries();
-          });
-        } else {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-
-      showAppMessage(context, error);
+    try {
+      final match = salesorderentries.firstWhere((e) => e.id == id);
+      await VoucherEntryRepository.instance.remove(match.entryId);
+      showAppMessage(context, "Entry deleted successfully");
+      await fetchSalesOrderEntries();
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
       setState(() {
         _isLoading = false;
       });
     }
   }
 
+  /// tally-api's `/voucher-entries` has no `type=`/`vchName=` server-side
+  /// filter (unlike the legacy `getEntries` endpoint), so this narrows the
+  /// full list client-side instead: match `voucherTypeMasterId` against
+  /// whichever voucher type(s) resolve from Tally's own `'Sales Order'`
+  /// `reservedName` (`VoucherTypeRepository.byReservedName`, same
+  /// stability rationale the registration screens already use), and, when
+  /// `spectra_allocations`' `salesorder_voucher_type` names a specific
+  /// custom voucher type, additionally match `voucherTypeName` against it -
+  /// mirroring the legacy `type=sales order&vchName=...` combination.
   Future<void> fetchSalesOrderEntries() async {
     setState(() {
       _isLoading = true;
@@ -339,87 +369,72 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
         voucherTypeName = spectraAllocations.first['salesorder_voucher_type'];
       }
     }
-    dynamic url;
-    if (voucherTypeName != null && voucherTypeName.trim().isNotEmpty) {
-      url = Uri.parse(
-        '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales order&vchName=$voucherTypeName',
-      );
-    } else {
-      url = Uri.parse(
-        '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales order',
-      );
-    }
-    print('sales order voucher type -> $voucherTypeName');
-    print('getting sales order from url -> $url');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
+    try {
+      final salesOrderVoucherTypes = await VoucherTypeRepository.instance
+          .byReservedName('SALES_ORDER');
+      final allowedMasterIds = salesOrderVoucherTypes
+          .map((v) => v['masterId'])
+          .toSet();
 
-    final response = await http.post(url, headers: headers);
+      final entries = await VoucherEntryRepository.instance.listAll();
 
-    if (response.statusCode == 200) {
+      final matching = entries.where((e) {
+        if (!allowedMasterIds.contains(e['voucherTypeMasterId'])) {
+          return false;
+        }
+        if (voucherTypeName != null && voucherTypeName!.trim().isNotEmpty) {
+          return (e['voucherTypeName'] ?? '').toString() == voucherTypeName;
+        }
+        return true;
+      }).toList();
+
       salesorderentries.clear();
       filteredSalesOrderEntries.clear();
-      /*print(response.body);*/
-      try {
-        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
 
-        if (jsonList != null) {
-          isVisibleNoSalesOrderEntryFound = false;
-          salesorderentries.addAll(
-            jsonList.map((json) => SalesOrderModel.fromJson(json)).toList(),
-          );
-          salesorderentries.sort((a, b) {
-            DateTime dateA = DateTime.parse(a.data['DATE']);
-            DateTime dateB = DateTime.parse(b.data['DATE']);
-            if (dateA != dateB) return dateB.compareTo(dateA);
-            final vchA =
-                int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-            final vchB =
-                int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-            return vchB.compareTo(vchA);
-          });
-          filteredSalesOrderEntries = List.from(salesorderentries);
-          setState(() {
-            FocusManager.instance.primaryFocus?.unfocus();
-            _searchController.clear();
-            selectedSingleDate = null;
-            selectedDateRange = null;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
+      int seq = 0;
+      salesorderentries.addAll(
+        matching.map((e) => SalesOrderModel.fromEntry(e, seq++)),
+      );
+
+      salesorderentries.sort((a, b) {
+        DateTime dateA = DateTime.parse(a.data['DATE']);
+        DateTime dateB = DateTime.parse(b.data['DATE']);
+        if (dateA != dateB) return dateB.compareTo(dateA);
+        final vchA =
+            int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+        final vchB =
+            int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+        return vchB.compareTo(vchA);
+      });
+
+      filteredSalesOrderEntries = List.from(salesorderentries);
+
+      setState(() {
+        FocusManager.instance.primaryFocus?.unfocus();
+        _searchController.clear();
+        selectedSingleDate = null;
+        selectedDateRange = null;
+        isVisibleNoSalesOrderEntryFound = filteredSalesOrderEntries.isEmpty;
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() {
+        if (filteredSalesOrderEntries.isEmpty) {
+          isVisibleNoSalesOrderEntryFound = true;
         }
-        setState(() {
-          if (filteredSalesOrderEntries.isEmpty) {
-            isVisibleNoSalesOrderEntryFound = true;
-          }
-          _isLoading = false;
-        });
-      } catch (e) {
-        print(e);
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-      showAppMessage(context, error);
+        _isLoading = false;
+      });
+    } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
+      setState(() {
+        if (filteredSalesOrderEntries.isEmpty) {
+          isVisibleNoSalesOrderEntryFound = true;
+        }
+        _isLoading = false;
+      });
     }
-
-    setState(() {
-      if (filteredSalesOrderEntries.isEmpty) {
-        isVisibleNoSalesOrderEntryFound = true;
-      }
-      _isLoading = false;
-    });
   }
 
   void searchSalesOrder(String query) {
@@ -933,9 +948,11 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
                                         builder: (context) =>
                                             ModifySalesOrderEntry(
                                               type: card.type,
-                                              id: card.id,
+                                              id: card.entryId,
                                               isSynced: card.isSynced,
-                                              data: card.data,
+                                              data:
+                                                  card.data['_source']
+                                                      as Map<String, dynamic>,
                                             ),
                                       ),
                                     );

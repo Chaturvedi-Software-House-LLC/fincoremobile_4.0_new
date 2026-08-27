@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -19,6 +18,12 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/signature_capture.dart';
+import 'api/api_exception.dart';
+import 'api/ledger_repository.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import 'api/pagination_helper.dart';
+import 'api/tally_api_client.dart';
+import 'api/voucher_entry_repository.dart';
 
 class ReceiptRegistration extends StatefulWidget {
   const ReceiptRegistration({Key? key}) : super(key: key);
@@ -269,66 +274,80 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       isOutstandingExpanded = false;
     });
 
-    try {
-      final url = Uri.parse(HttpURL_fetchoutstanding!);
-
-      debugPrint('url oustanding -> $HttpURL_fetchoutstanding');
-      final headers = {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      };
-
-      final body = jsonEncode({
-        "startdate":
-            int.tryParse(prefs.getString('startfrom') ?? '') ??
-            int.parse(_dateFormat.format(yearStartDate)),
-        "enddate": int.parse(receiptdatestring),
-        "orderby": "billdate",
-        "isDebit": true,
-        "ledger": ledgerName,
-        "showPending" : true
+    // tally-api replacement for legacy's
+    // getOutstandingOpening/:company/:serial. That endpoint took a ledger
+    // *name* and returned {opening, values:[...]}; tally-api's equivalent
+    // (LedgerRepository.outstandingBills) is masterId-keyed, so the name
+    // selected in the Party TypeAheadField is resolved via
+    // `_partyLedgerMasterIdByName` (populated in loadData()) first.
+    final int? ledgerMasterId = _partyLedgerMasterIdByName[ledgerName.trim()];
+    if (ledgerMasterId == null) {
+      setState(() {
+        outstandingError = "Unable to load outstanding";
+        isOutstandingLoading = false;
       });
-      debugPrint('outstanding body -> ${body}');
+      return;
+    }
 
+    try {
+      final rawBills = await LedgerRepository.instance.outstandingBills(
+        ledgerMasterId: ledgerMasterId,
+      );
 
-      final response = await http.post(url, headers: headers, body: body);
-      print('outstanding -> ${response.body}');
+      // Adapted onto the same lowercase keys (billno/outstanding/billdate/
+      // duedate/billtype) the rest of this screen's bill-selection UI
+      // already expects (addOutstandingBillToReceipt/buildOutstandingCard/
+      // getBillDueDate), so none of that logic needed to change. The new
+      // endpoint has no "billtype" (New Ref/Agst Ref/On Account) column -
+      // `isAdvance` is the closest equivalent tally-api stores.
+      final values = rawBills.map((row) {
+        final date = row['date']?.toString();
+        final dueDate = row['dueDate']?.toString();
+        return <String, dynamic>{
+          'billno': row['name'],
+          'outstanding': parseMoneyField(row['finalBalance']),
+          'billdate': date != null && date.isNotEmpty
+              ? DateFormat('yyyyMMdd').format(DateTime.parse(date))
+              : '',
+          'duedate': dueDate != null && dueDate.isNotEmpty
+              ? DateFormat('yyyyMMdd').format(DateTime.parse(dueDate))
+              : '',
+          'billtype': row['isAdvance'] == true ? 'Advance' : '',
+        };
+      }).toList();
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
+      double billsOutstanding = 0.0;
 
-        final values = data["values"] ?? [];
+      for (var item in values) {
+        billsOutstanding +=
+            double.tryParse(item["outstanding"].toString()) ?? 0.0;
+      }
 
-        double billsOutstanding = 0.0;
-
-        for (var item in values) {
-          billsOutstanding +=
-              double.tryParse(item["outstanding"].toString()) ?? 0.0;
-        }
-
-        // UniGas only: show the latest bills first - other serials keep
-        // whatever order the backend's "billdate" orderby already returns.
-        if (isUniGasSerial) {
-          values.sort((a, b) {
-            final int dateA = int.tryParse(a["billdate"].toString()) ?? 0;
-            final int dateB = int.tryParse(b["billdate"].toString()) ?? 0;
-            return dateB.compareTo(dateA);
-          });
-        }
-
-        setState(() {
-          openingOutstanding =
-              double.tryParse(data["opening"].toString()) ?? 0.0;
-          outstandingBills = values;
-          // totalOutstanding = openingOutstanding + billsOutstanding;
-          totalOutstanding = billsOutstanding;
-          visibleOutstandingBillCount = 5;
-        });
-      } else {
-        setState(() {
-          outstandingError = "Unable to load outstanding";
+      // UniGas only: show the latest bills first - other serials keep
+      // whatever order the backend's "billdate" orderby already returns.
+      if (isUniGasSerial) {
+        values.sort((a, b) {
+          final int dateA = int.tryParse(a["billdate"].toString()) ?? 0;
+          final int dateB = int.tryParse(b["billdate"].toString()) ?? 0;
+          return dateB.compareTo(dateA);
         });
       }
+
+      // No separate "opening balance" figure comes back from this endpoint
+      // the way legacy's response carried one - `openingOutstanding` was
+      // already dead state though (never rendered, see its own field
+      // comment further up), so it's left at 0 here rather than adding an
+      // extra outstandingTotal() call just to populate an unused value.
+      setState(() {
+        openingOutstanding = 0.0;
+        outstandingBills = values;
+        totalOutstanding = billsOutstanding;
+        visibleOutstandingBillCount = 5;
+      });
+    } on ApiException catch (e) {
+      setState(() {
+        outstandingError = e.message;
+      });
     } catch (e) {
       setState(() {
         outstandingError = "Outstanding fetch failed";
@@ -926,6 +945,22 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   int? decimal = 2;
 
   late List<String> partydata = [];
+
+  // tally-api migration - cached raw master-data lookups -----------------
+  // `partydata`/`bankcashname_data`/`vchtypenamedata` above stay exactly
+  // the shapes the existing UI (TypeAheadFields, dropdowns, allocation
+  // pre-selection) already reads. tally-api's report/voucher-entry
+  // endpoints are all masterId-keyed rather than name-keyed though, so
+  // these maps (populated once in loadData()) resolve a selected name back
+  // onto the masterId fetchPartyOutstanding/fetchvchnos/saveEntry need,
+  // without changing any of those lists' element type or the widgets that
+  // already iterate them.
+  final TallyApiClient _tallyApiClient = TallyApiClient();
+  Map<String, int> _partyLedgerMasterIdByName = {};
+  Map<String, int> _bankCashLedgerMasterIdByName = {};
+  Map<String, int> _voucherTypeMasterIdByName = {};
+  List<Map<String, dynamic>> _partyLedgersRaw = [];
+  int? _currencyMasterId;
 
   List<String> bankname_data = [
     'Not Applicable',
@@ -2528,39 +2563,34 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     }
 
     // Party TRN/address/phone/email aren't preloaded for Receipt (unlike
-    // Sales Invoice's loadLedgerData) - fetched here on demand.
+    // Sales Invoice's loadLedgerData) - resolved here from the party ledger
+    // list already cached by loadData() (tally-api replacement for legacy's
+    // getLedger/:company/:serial - no need for a second round trip since
+    // the full ledger row, including these fields, was already fetched).
     String customerTrn = '';
     String customerAddress = '';
     String customerMobile = '';
     String customerEmail = '';
     try {
-      if (HttpURL_loadLedgerData != null &&
-          _selectedparty != null &&
+      if (_selectedparty != null &&
           _selectedparty.toString().trim().isNotEmpty) {
-        final url = Uri.parse(HttpURL_loadLedgerData!);
-        final headers = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-        final body = jsonEncode({"ledger": _selectedparty});
-        final response = await http.post(url, headers: headers, body: body);
-        if (response.statusCode == 200) {
-          final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-          if (data.isNotEmpty) {
-            final first = Map<String, dynamic>.from(data.first);
-            customerTrn = first['tin']?.toString() ?? '';
-            final address = first['address']?.toString() ?? '';
-            final emirate = first['state']?.toString() ?? '';
-            final country = first['country']?.toString() ?? '';
-            customerAddress = [address, emirate, country]
-                .where(
-                  (p) =>
-                      p.trim().isNotEmpty && p.trim().toLowerCase() != 'null',
-                )
-                .join(', ');
-            customerMobile = first['mobile']?.toString() ?? '';
-            customerEmail = first['email']?.toString() ?? '';
-          }
+        final ledger = _partyLedgersRaw.firstWhere(
+          (l) => l['name'] == _selectedparty,
+          orElse: () => const <String, dynamic>{},
+        );
+        if (ledger.isNotEmpty) {
+          customerTrn = ledger['tinNumber']?.toString() ?? '';
+          final address =
+              (ledger['address'] as List?)?.cast<String>() ?? const [];
+          final emirate = ledger['stateName']?.toString() ?? '';
+          final country = ledger['countryName']?.toString() ?? '';
+          customerAddress = [...address, emirate, country]
+              .where(
+                (p) => p.trim().isNotEmpty && p.trim().toLowerCase() != 'null',
+              )
+              .join(', ');
+          customerMobile = ledger['mobileNumber']?.toString() ?? '';
+          customerEmail = ledger['email']?.toString() ?? '';
         }
       }
     } catch (e) {
@@ -3255,49 +3285,69 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     if (bills.isEmpty) {
       showAppMessage(context, 'Atleast add 1 bill');
     } else {
+      // tally-api's voucher-entries endpoint is masterId-keyed
+      // (voucherTypeMasterId/ledgerMasterId/currencyMasterId), unlike
+      // legacy's create endpoint which took names straight from these same
+      // dropdowns. Resolved from the maps loadData() populates.
+      final int? partyLedgerMasterId =
+          _partyLedgerMasterIdByName[_selectedparty];
+      final int? bankCashLedgerMasterId =
+          _bankCashLedgerMasterIdByName[_selectedbankcashname!['name']];
+      final int? voucherTypeMasterId =
+          _voucherTypeMasterIdByName[_selectedvchtypename];
+
+      if (partyLedgerMasterId == null ||
+          bankCashLedgerMasterId == null ||
+          voucherTypeMasterId == null ||
+          _currencyMasterId == null) {
+        showAppMessage(
+          context,
+          'Master data not loaded yet - please try again',
+        );
+        return;
+      }
+
       setState(() {
         _isLoading = true;
       });
-      jsonEntryData.clear();
-      String narrationValue = controller_narration.text.trim();
-      String vchnoValue = _vchnoController.text;
 
-      jsonEntryData["DATE"] = receiptdatestring;
-      jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
-      jsonEntryData["PARTYLEDGERNAME"] = _selectedparty;
-      jsonEntryData["VOUCHERNUMBER"] = vchnoValue;
-      jsonEntryData["NARRATION"] = narrationValue;
+      final String narrationValue = controller_narration.text.trim();
+      final String vchnoValue = _vchnoController.text;
+      final String isoDate = DateFormat(
+        'yyyy-MM-dd',
+      ).format(parseCompactDate(receiptdatestring));
 
-      final List<Map<String, dynamic>> allLedgerEntriesList = [];
+      double roundedAmount(double amount) =>
+          double.parse(amount.toStringAsFixed(decimal!));
 
       // Get the list of non-"On Account" bills
       final List<Map<String, dynamic>> nonOnAccountBills = bills
           .where((bill) => bill.billName != "On Account")
           .map((bill) {
             final Map<String, dynamic> billData = {
-              "BILLTYPE": bill.billName,
-              // Fixed-decimal string, not a raw double - an "Agst Ref"
+              "billType": bill.billName,
+              "billName": bill.billNo ?? '',
+              // Fixed-decimal amount, not a raw double - an "Agst Ref"
               // amount that doesn't exactly match the outstanding bill's
               // stored amount (floating-point serialization artifacts
-              // like 746.9000000000001) fails Tally's exact-match bill
-              // netting, silently falling back to creating a new "New
-              // Ref" reference instead of clearing the original bill.
-              "AMOUNT": bill.billAmount.toStringAsFixed(decimal!),
+              // like 746.9000000000001) fails an exact-match bill-netting
+              // comparison - kept from legacy's own rationale even though
+              // this VoucherEntry family doesn't reach real Tally today
+              // (see this migration's final report).
+              "amount": roundedAmount(bill.billAmount),
+              "date": isoDate,
             };
 
-            // Conditionally add BILLNO and BILL CREDIT PERIOD if BILLTYPE is not "On Account"
-            if (bill.billName != "On Account") {
-              billData["NAME"] = bill.billNo;
-              // Omit entirely rather than send an empty string when the
-              // backend's outstanding-bill duedate couldn't be parsed
-              // (e.g. Opening Balance bills, which may have no normal
-              // duedate at all) - an empty BILLCREDITPERIOD tag has been
-              // seen going out to the Tally sync, and a malformed/blank
-              // date field is a plausible reason that service's bill
-              // matching fails and falls back to creating a New Ref.
-              if (bill.billDueDate != null && bill.billDueDate!.isNotEmpty) {
-                billData["BILLCREDITPERIOD"] = bill.billDueDate;
-              }
+            // Omit entirely rather than send an empty string when the
+            // backend's outstanding-bill duedate couldn't be parsed (e.g.
+            // Opening Balance bills, which may have no normal duedate at
+            // all) - entryBillAllocationRowSchema's dueDate is an optional
+            // ISO date, not a free-form string, so a blank value must be
+            // omitted rather than sent.
+            if (bill.billDueDate != null && bill.billDueDate!.isNotEmpty) {
+              billData["dueDate"] = DateFormat(
+                'yyyy-MM-dd',
+              ).format(parseCompactDate(bill.billDueDate!));
             }
 
             return billData;
@@ -3307,13 +3357,16 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       // Get the list of "On Account" bills
       final List<Map<String, dynamic>> onAccountBills = bills
           .where((bill) => bill.billName == "On Account")
-          .map((bill) {
-            final Map<String, dynamic> billData = {
-              "BILLTYPE": bill.billName,
-              "AMOUNT": bill.billAmount.toStringAsFixed(decimal!),
-            };
-            return billData;
-          })
+          .map(
+            (bill) => <String, dynamic>{
+              "billType": bill.billName,
+              "billName": (bill.billNo?.isNotEmpty ?? false)
+                  ? bill.billNo!
+                  : "On Account",
+              "amount": roundedAmount(bill.billAmount),
+              "date": isoDate,
+            },
+          )
           .toList();
 
       // Combine the lists, placing "On Account" bills at the end
@@ -3322,94 +3375,82 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         ...onAccountBills,
       ];
 
-      final Map<String, dynamic> allLedgerEntry = {
-        "LEDGERNAME": _selectedparty,
-        "AMOUNT": totalBillAmount,
-        "ISPARTYLEDGER": "Yes",
-        "ISDEEMEDPOSITIVE": "No",
-        "BILLALLOCATIONS.LIST": allBillAllocations,
-      };
-      allLedgerEntriesList.add(allLedgerEntry);
-
-      // Add bank allocation details
-      final Map<String, dynamic> bankAllocation = {
-        "LEDGERNAME":
-            _selectedbankcashname!['name'], // Assuming you're getting bank name dynamically
-        "AMOUNT":
-            -totalBillAmount, // Assuming you have totalBankAmount calculated
-        "ISPARTYLEDGER": "No",
-        "ISDEEMEDPOSITIVE": "Yes",
-        "BANKALLOCATIONS.LIST":
-            [], // Conditionally empty list based on the type of selected bank/cash
-      };
-      allLedgerEntriesList.add(bankAllocation);
-
-      // If the selected bank/cash type is not 'Cash-in-Hand', add cheque details to bank allocation list
-      if (!isSelectedBankCashInHand) {
-        bankAllocation["BANKALLOCATIONS.LIST"] = cheque.map((cheque) {
-          return {
-            "DATE": receiptdatestring,
-            "INSTRUMENTDATE": cheque.instdate ?? receiptdatestring,
-            "TRANSACTIONTYPE": cheque.paymentMode,
-            "BANKNAME": (cheque.bankname != "Not Applicable")
-                ? cheque.bankname
-                : "",
-            "PAYMENTFAVOURING": _selectedparty,
-            "INSTRUMENTNUMBER": cheque.instno,
-            "BANKPARTYNAME": _selectedparty,
-            "AMOUNT": -cheque.chequeAmount,
-          };
-        }).toList();
-      }
-
-      jsonEntryData['ALLLEDGERENTRIES.LIST'] = allLedgerEntriesList;
-
-      Map<String, dynamic> jsonData = {
-        'type': 'receipt',
-        'data': jsonEntryData,
+      // Party ledger entry - credited (money received reduces what the
+      // party owes), matching legacy's ISDEEMEDPOSITIVE=No/positive-AMOUNT
+      // pairing; the new schema separates direction (isDebit) from
+      // magnitude (amount) instead of encoding it in the amount's sign.
+      final Map<String, dynamic> partyLedgerEntry = {
+        "ledgerMasterId": partyLedgerMasterId,
+        "amount": roundedAmount(totalBillAmount),
+        "isDebit": false,
+        "isPartyLedger": true,
+        "billAllocations": allBillAllocations,
       };
 
-      final jsonString = json.encode(jsonData);
+      // If the selected bank/cash type is not 'Cash-in-Hand', attach cheque
+      // details as bank allocations on the bank/cash ledger entry.
+      final List<Map<String, dynamic>> bankAllocations =
+          isSelectedBankCashInHand
+          ? const []
+          : cheque.map((c) {
+              // TRANSACTIONTYPE values match paymentmode_data 1:1
+              // (ATM/Card/Cheque-DD) onto entryBankAllocationRowSchema's
+              // bankTransactionTypeSchema enum (ATM/CARD/CHEQUE).
+              final String transactionType = switch (c.paymentMode) {
+                'ATM' => 'ATM',
+                'Card' => 'CARD',
+                _ => 'CHEQUE',
+              };
+              return <String, dynamic>{
+                "date": isoDate,
+                "instrumentDate": DateFormat('yyyy-MM-dd').format(
+                  parseCompactDate(c.instdate ?? receiptdatestring),
+                ),
+                "instrumentNumber": c.instno,
+                // The schema requires a non-empty bankName - legacy sent ""
+                // for "Not Applicable" (ATM/Card), which fails
+                // entryBankAllocationRowSchema's min(1); "N/A" is sent
+                // instead.
+                "bankName":
+                    (c.bankname != null && c.bankname != "Not Applicable")
+                    ? c.bankname!
+                    : "N/A",
+                "transactionType": transactionType,
+                "amount": roundedAmount(c.chequeAmount),
+                "partyLedgerMasterId": partyLedgerMasterId,
+                "favouringLedgerMasterId": partyLedgerMasterId,
+              };
+            }).toList();
 
-      debugPrint(jsonString);
+      // Bank/cash ledger entry - debited (asset increases), matching
+      // legacy's ISDEEMEDPOSITIVE=Yes/negative-AMOUNT pairing.
+      final Map<String, dynamic> bankLedgerEntry = {
+        "ledgerMasterId": bankCashLedgerMasterId,
+        "amount": roundedAmount(totalBillAmount),
+        "isDebit": true,
+        "isPartyLedger": false,
+        "bankAllocations": bankAllocations,
+      };
+
+      final Map<String, dynamic> body = {
+        "voucherTypeMasterId": voucherTypeMasterId,
+        "date": isoDate,
+        "currencyMasterId": _currencyMasterId,
+        "narration": narrationValue,
+        "voucherNumber": vchnoValue,
+        "ledgerEntries": [partyLedgerEntry, bankLedgerEntry],
+      };
+
       try {
-        final url_receiptentry = Uri.parse(HttpURL_receiptEntry!);
-        Map<String, String> headers_receiptentry = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_receiptentry = jsonString;
-
-        final response_receiptentry = await http.post(
-          url_receiptentry,
-          body: body_receiptentry,
-          headers: headers_receiptentry,
-        );
-
-        if (response_receiptentry.statusCode == 200) {
-          if (response_receiptentry.body == 'Entry created successfully') {
-            showReceiptVoucherDialog(context);
-          } else {
-            showAppMessage(context, 'an error occoured');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(response_receiptentry.body);
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = "Error in data fetching!!!";
-          }
-          showAppMessage(context, error);
-        }
+        await VoucherEntryRepository.instance.create(body);
+        showReceiptVoucherDialog(context);
+      } on ApiException catch (e) {
+        showAppMessage(context, e.message);
       } catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
+        showAppMessage(
+          context,
+          'Could not reach the server. Please try again.',
+        );
         print(e);
       }
     }
@@ -3652,140 +3693,177 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     });
 
     try {
-      final url = Uri.parse(HttpURL_loadData!);
+      // tally-api replacement for legacy's getReceiptData/:company/:serial,
+      // which returned {vchTypes, partyLedgers, cashLedgers} in one call.
+      // tally-api has no equivalent bundle endpoint, so the three master
+      // lists are fetched individually: LedgerRepository for party ledgers
+      // (already restricted to party-like groups, matching legacy's
+      // partyLedgers - see LedgerRepository.listLedgers's own doc-comment),
+      // plus direct TallyApiClient calls for groups/voucher-types/
+      // currencies, none of which has a dedicated repository yet (flagged
+      // in this migration's final report).
+      final partyLedgers = await LedgerRepository.instance.listLedgers();
 
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
+      final groups = await fetchAllPages(
+        (page) =>
+            _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
+      );
+      // Same reservedName set tally-api's own dashboard-reports uses to
+      // classify a ledger as "bank/cash" (see dashboard-reports.service.ts)
+      // - Tally's fixed reserved group names, not user-editable group names.
+      // tally-api's GroupReservedName enum (2026-08-21 schema-hardening
+      // migration) uses screaming-snake-case labels, not Tally's own
+      // mixed-case reservedName strings.
+      const bankCashReservedNames = {
+        'CASH',
+        'BANK',
+        'BANK_OD',
       };
+      final groupReservedNameById = <int, String?>{
+        for (final g in groups) g['masterId'] as int: g['reservedName'] as String?,
+      };
+      final bankCashGroupIds = groupReservedNameById.entries
+          .where((e) => bankCashReservedNames.contains(e.value))
+          .map((e) => e.key)
+          .toSet();
 
-      final response = await http.post(url, headers: headers);
+      final allLedgers = await fetchAllPages(
+        (page) =>
+            _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
+      );
+      final bankCashLedgers = allLedgers
+          .where((l) => bankCashGroupIds.contains(l['groupMasterId'] as int?))
+          .toList();
 
-      debugPrint('receipt load data -> ${response.body}');
+      // Van Allocation: fetch RECEIPT voucher types via tally-api's own
+      // reservedName filter (rather than fetching every voucher type and
+      // filtering client-side), so the picker only ever offers
+      // receipt-family types straight from the server.
+      List<Map<String, dynamic>> receiptVoucherTypes = [];
+      try {
+        receiptVoucherTypes = await fetchAllPages(
+          (page) => _tallyApiClient.getForCompany(
+            '/voucher-types?reservedName=RECEIPT&page=$page&limit=100',
+          ),
+        );
+      } catch (e) {
+        debugPrint('receipt voucher-type fetch error -> $e');
+      }
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+      final currencies = await fetchAllPages(
+        (page) =>
+            _tallyApiClient.getForCompany('/currencies?page=$page&limit=100'),
+      );
+      final currencyRow = currencies.firstWhere(
+        (c) =>
+            (c['isoCurrencyCode'] as String?)?.toUpperCase() ==
+            currencycode.toUpperCase(),
+        orElse: () =>
+            currencies.isNotEmpty ? currencies.first : const <String, dynamic>{},
+      );
 
-        final String currentSerialNo = serial_no?.trim() ?? '';
-        final bool isUniGasSerial = vanSalesSerialNo.contains(currentSerialNo);
+      // Van Allocation: cash-ledger soft default is the single ledger under
+      // the CASH-reservedName group(s), when there is exactly one across
+      // the company - reusing the groups/ledgers already fetched above
+      // rather than re-fetching. Deliberately not a master-restriction
+      // (LEDGER restrictions are not applied here - that would hide party
+      // ledgers app-wide), so it's left editable rather than locked.
+      String? tallyAutoCashLedgerName;
+      try {
+        final cashGroupIds = groupReservedNameById.entries
+            .where((e) => e.value == 'CASH')
+            .map((e) => e.key)
+            .toSet();
+        final tallyCashLedgers = allLedgers
+            .where((l) => cashGroupIds.contains(l['groupMasterId'] as int?))
+            .toList();
 
-        String? allocationString = prefs.getString('spectra_allocations');
-        Map<String, dynamic>? allocation;
+        if (tallyCashLedgers.length == 1) {
+          tallyAutoCashLedgerName = tallyCashLedgers.first['name']?.toString();
+        }
+      } catch (e) {
+        debugPrint('receipt cash-ledger fetch error -> $e');
+      }
 
-        if (isUniGasSerial &&
-            allocationString != null &&
-            allocationString.isNotEmpty) {
-          try {
-            final List<dynamic> allocations = jsonDecode(allocationString);
+      String? voucherTypeToFetch;
 
-            if (allocations.isNotEmpty) {
-              allocation = Map<String, dynamic>.from(allocations.first);
-            }
-          } catch (e) {
-            debugPrint('receipt allocation decode error -> $e');
+      setState(() {
+        _partyLedgersRaw = partyLedgers;
+        _partyLedgerMasterIdByName = {
+          for (final l in partyLedgers)
+            l['name'] as String: l['masterId'] as int,
+        };
+        _bankCashLedgerMasterIdByName = {
+          for (final l in bankCashLedgers)
+            l['name'] as String: l['masterId'] as int,
+        };
+        _voucherTypeMasterIdByName = {
+          for (final vt in receiptVoucherTypes)
+            vt['name'] as String: vt['masterId'] as int,
+        };
+        _currencyMasterId = currencyRow['masterId'] as int?;
+
+        vchtypenamedata = receiptVoucherTypes
+            .map((vt) => vt['name']?.toString().trim() ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+
+        isVoucherTypeLocked = vchtypenamedata.length == 1;
+        _selectedvchtypename =
+            vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '';
+        voucherTypeToFetch = _selectedvchtypename;
+
+        partydata = partyLedgers.map((l) => l['name'] as String).toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        partydata.sort();
+
+        bankcashname_data = bankCashLedgers.map((l) {
+          final reservedName =
+              groupReservedNameById[l['groupMasterId'] as int?];
+          return {
+            'name': l['name'] as String,
+            'type': reservedName == 'CASH' ? 'Cash-in-Hand' : 'Bank',
+            'masterId': (l['masterId'] as int).toString(),
+          };
+        }).toList();
+
+        _selectedbankcashname = null;
+        isBankCashLedgerLocked = false;
+
+        if (tallyAutoCashLedgerName != null &&
+            tallyAutoCashLedgerName.isNotEmpty) {
+          final matchedCashLedger = bankcashname_data.where(
+            (ledger) => ledger['name'] == tallyAutoCashLedgerName,
+          );
+
+          if (matchedCashLedger.isNotEmpty) {
+            _selectedbankcashname = matchedCashLedger.first;
           }
         }
 
-        String? voucherTypeToFetch;
+        _bankcashnameController.text = _selectedbankcashname != null
+            ? _selectedbankcashname!['name']!
+            : "";
 
-        setState(() {
-          vchtypenamedata = List<String>.from(
-            (jsonResponse['vchTypes'] ?? [])
-                .where((e) => e != null)
-                .map((e) => e.toString()),
-          );
+        // Only recalculate Payment Mode visibility when a bank/cash
+        // ledger actually got auto-selected above - otherwise leave it
+        // at its default (hidden) instead of falling through to the
+        // "not Cash-in-Hand" else branch for a null ledger.
+        if (_selectedbankcashname != null) {
+          if (isSelectedBankCashInHand) {
+            isPaymentModeVisible = false;
+            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
+            cheque.clear();
+            updateChequeAmount();
 
-          String savedReceiptVoucherType = '';
-
-          if (isUniGasSerial && allocation != null) {
-            final String receiptVoucherType =
-                allocation['receipt_voucher_type']?.toString().trim() ?? '';
-
-            final String commonVoucherType =
-                allocation['voucher_type']?.toString().trim() ?? '';
-
-            savedReceiptVoucherType = receiptVoucherType.isNotEmpty
-                ? receiptVoucherType
-                : commonVoucherType;
-          }
-
-          final bool hasValidSavedVoucherType =
-              savedReceiptVoucherType.isNotEmpty &&
-              savedReceiptVoucherType.toLowerCase() != 'null' &&
-              vchtypenamedata.contains(savedReceiptVoucherType);
-
-          _selectedvchtypename = (hasValidSavedVoucherType
-              ? savedReceiptVoucherType
-              : (vchtypenamedata.isNotEmpty ? vchtypenamedata.first : null))!;
-
-          isVoucherTypeLocked = hasValidSavedVoucherType;
-          voucherTypeToFetch = _selectedvchtypename;
-
-          partydata = List<String>.from(jsonResponse['partyLedgers'])
-            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-          partydata.sort();
-
-          bankcashname_data = List<Map<String, String>>.from(
-            jsonResponse['cashLedgers']?.map(
-                  (cashLedger) => Map<String, String>.from(cashLedger),
-                ) ??
-                [],
-          );
-
-          _selectedbankcashname = null;
-          isBankCashLedgerLocked = false;
-
-          if (isUniGasSerial && allocation != null) {
-            final String savedCashLedger =
-                allocation!['cash_ledger']?.toString().trim() ??
-                allocation!['cashledger']?.toString().trim() ??
-                allocation!['bank_cash_ledger']?.toString().trim() ??
-                '';
-
-            if (savedCashLedger.isNotEmpty) {
-              final matchedCashLedger = bankcashname_data.where(
-                (ledger) => ledger['name'] == savedCashLedger,
-              );
-
-              if (matchedCashLedger.isNotEmpty) {
-                _selectedbankcashname = matchedCashLedger.first;
-                isBankCashLedgerLocked = true;
-              }
-            }
-          }
-
-          _bankcashnameController.text = _selectedbankcashname != null
-              ? _selectedbankcashname!['name']!
-              : "";
-
-          // Only recalculate Payment Mode visibility when a bank/cash
-          // ledger actually got auto-selected above - otherwise leave it
-          // at its default (hidden) instead of falling through to the
-          // "not Cash-in-Hand" else branch for a null ledger.
-          if (_selectedbankcashname != null) {
-            if (isSelectedBankCashInHand) {
-              isPaymentModeVisible = false;
-              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-              cheque.clear();
-              updateChequeAmount();
-
-              isVisibleChequeHeading = false;
-              isChequeVisible = false;
-            } else {
-              if (bills.isNotEmpty) {
-                if (cheque.isNotEmpty) {
-                  isPaymentModeVisible = true;
-                  isChequeVisible = true;
-                  isVisibleChequeHeading = true;
-                } else {
-                  isPaymentModeVisible = true;
-                  _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-                  cheque.clear();
-                  updateChequeAmount();
-
-                  isVisibleChequeHeading = false;
-                  isChequeVisible = true;
-                }
+            isVisibleChequeHeading = false;
+            isChequeVisible = false;
+          } else {
+            if (bills.isNotEmpty) {
+              if (cheque.isNotEmpty) {
+                isPaymentModeVisible = true;
+                isChequeVisible = true;
+                isVisibleChequeHeading = true;
               } else {
                 isPaymentModeVisible = true;
                 _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
@@ -3793,27 +3871,26 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                 updateChequeAmount();
 
                 isVisibleChequeHeading = false;
-                isChequeVisible = false;
+                isChequeVisible = true;
               }
+            } else {
+              isPaymentModeVisible = true;
+              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
+              cheque.clear();
+              updateChequeAmount();
+
+              isVisibleChequeHeading = false;
+              isChequeVisible = false;
             }
           }
-        });
-
-        if (voucherTypeToFetch != null && voucherTypeToFetch!.isNotEmpty) {
-          fetchvchnos(voucherTypeToFetch!);
         }
-      } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
+      });
 
-        if (data.containsKey('error')) {
-          error = data['error'];
-        } else {
-          error = 'Something went wrong!!!';
-        }
-
-        showAppMessage(context, error);
+      if (voucherTypeToFetch != null && voucherTypeToFetch!.isNotEmpty) {
+        fetchvchnos(voucherTypeToFetch!);
       }
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
     } catch (e) {
       /*print(e);*/
     }
@@ -6128,7 +6205,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token')!;
+      token = prefs.getString('token') ?? '';
       currencycode = prefs.getString('currencycode') ?? 'AED';
       bankname_data.sort((a, b) {
         if (a == 'Not Applicable') {
@@ -6168,22 +6245,13 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
       /*print('hostname: $hostname');*/
 
-      HttpURL_fetchvchnos =
-          '$hostname/api/entry/nos/$company_lowercase/$serial_no';
-
-      HttpURL_fetchoutstanding = '$hostname/api/ledger/getOutstandingOpening/$company_lowercase/$serial_no';
-
-      /*HttpURL_fetchvchnos = 'http://192.168.2.110:4999/api/entry/nos/$company_lowercase/$serial_no';*/
-
-      HttpURL_loadData =
-          '$hostname/api/entry/getReceiptData/$company_lowercase/$serial_no';
-      /*HttpURL_loadData = 'http://192.168.2.110:4999/api/entry/getReceiptData/$company_lowercase/$serial_no';*/
-
-      HttpURL_receiptEntry = '$hostname/api/entry/create/$company/$serial_no';
-      /*HttpURL_receiptEntry = 'http://192.168.2.110:4999/api/entry/create/demonewformobilepp/767060064';*/
-
-      HttpURL_loadLedgerData =
-          '$hostname/api/ledger/getLedger/$company_lowercase/$serial_no';
+      // Legacy's HttpURL_fetchvchnos/HttpURL_fetchoutstanding/HttpURL_loadData/
+      // HttpURL_receiptEntry/HttpURL_loadLedgerData (hostname-based URLs)
+      // are gone - every call this screen makes now goes through
+      // LedgerRepository/VoucherEntryRepository/TallyApiClient (see
+      // fetchPartyOutstanding/loadData/fetchvchnos/saveEntry), which
+      // resolve the active company + tally-api base URL themselves via
+      // TokenStore rather than these hostname/company/serial_no strings.
 
       controller_totalamt.text = 0.toString();
 
@@ -6263,73 +6331,60 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       _isLoading = true;
     });
 
-    // vchnos fetching
+    // tally-api has no auto-numbering endpoint for VoucherEntry (it's an
+    // app-originated table, not Tally's own sequence - see this
+    // migration's final report, "Voucher-numbering decision"). Legacy's
+    // GET /api/entry/nos/:company/:serial returned every existing voucher
+    // number for this voucher type/date-range so generateNextVchNo() could
+    // suggest the next one; the same suggestion is reproduced here by
+    // pulling every VoucherEntry already created via this app
+    // (VoucherEntryRepository.listAll()) and filtering client-side to the
+    // same voucher type + date range. The field stays exactly as
+    // user-editable/lockable as before (see canEditVoucherNo further down)
+    // - this only changes where the "existing numbers" list comes from.
     try {
-      final url = Uri.parse(HttpURL_fetchvchnos!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
 
-      Map<String, dynamic> jsonDatabody = {
-        "to": formattedEndDateVchNo,
-        "from": formattedStartDateVchNo,
-        "vchname": vchname,
-      };
+      if (voucherTypeMasterId != null) {
+        final DateTime startDate = parseCompactDate(formattedStartDateVchNo);
+        final DateTime endDate = parseCompactDate(formattedEndDateVchNo);
 
-      String jsonDatabodyString = jsonEncode(jsonDatabody);
+        final entries = await VoucherEntryRepository.instance.listAll();
 
-      var body = jsonDatabodyString;
-      final response = await http.post(url, headers: headers, body: body);
-
-      if (response.statusCode == 200) {
-        /*print(response.body);*/
-        /*setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-
-          final List<dynamic> vchnosJson = jsonResponse['vchnos'];
-          vchnos = vchnosJson.cast<String>();
-          int q = vchnos.length;
-          print('vchno list containes $q nos whos values are $vchnos');
-
-          _vchnoController.clear();
-          checkVchNoExistence(_vchnoController.text);
-
-        });*/
-
-        setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-          final List<dynamic> vchnosJson = jsonResponse['vchnos'];
-
-          print(response.body);
-          vchnos = vchnosJson.cast<String>();
-
-          // SORT first
-          vchnos.sort((a, b) {
-            RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
-            int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
-            int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
-            return numA.compareTo(numB);
-          });
-
-          // GENERATE NEXT
-          String nextVch = generateNextVchNo(vchnos);
-
-          _vchnoController.text = nextVch;
-        });
-      } else {
-        vchnos.clear();
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
-        }
-        showAppMessage(context, error);
+        vchnos = entries
+            .where((e) {
+              if (e['voucherTypeMasterId'] != voucherTypeMasterId) {
+                return false;
+              }
+              final date = DateTime.tryParse(e['date']?.toString() ?? '');
+              if (date == null) return false;
+              return !date.isBefore(startDate) &&
+                  !date.isAfter(
+                    DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59),
+                  );
+            })
+            .map((e) => e['voucherNumber']?.toString() ?? '')
+            .where((v) => v.isNotEmpty)
+            .toList();
       }
+
+      setState(() {
+        // SORT first
+        vchnos.sort((a, b) {
+          RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
+          int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
+          int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
+          return numA.compareTo(numB);
+        });
+
+        // GENERATE NEXT
+        String nextVch = generateNextVchNo(vchnos);
+
+        _vchnoController.text = nextVch;
+      });
+    } on ApiException catch (e) {
+      vchnos.clear();
+      showAppMessage(context, e.message);
     } catch (e) {
       vchnos.clear();
       print(e);

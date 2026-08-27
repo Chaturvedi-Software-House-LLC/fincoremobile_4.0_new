@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'widgets/scroll_fab.dart';
 import 'package:FincoreGo/PartyClickedSalePurcOrderClicked.dart';
 import 'package:FincoreGo/currencyFormat.dart';
@@ -7,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -15,37 +13,44 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
+import 'api/ledger_repository.dart';
+import 'api/monthly_bucket_helper.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 
 class Data {
   final String item;
+  final int stockItemMasterId;
   final String totalQty;
   final double totalAmount;
 
-  Data({required this.item, required this.totalQty, required this.totalAmount});
-
-  factory Data.fromJson(Map<String, dynamic> json) {
-    return Data(
-      item: json['item'].toString(),
-      totalQty: json['totalQty'].toString(),
-      totalAmount: double.tryParse(json['totalAmount'].toString()) ?? 0,
-    );
-  }
+  Data({
+    required this.item,
+    required this.stockItemMasterId,
+    required this.totalQty,
+    required this.totalAmount,
+  });
 }
 
+/// Legacy's "party-switching" dropdown (`getOrderSummary`'s `Partyledger`
+/// grouping) let a user jump to any *other* party with pending orders
+/// without leaving this screen. tally-api's `pending-orders` report is
+/// scoped to one `ledgerMasterId` per call with no bulk "which other
+/// parties have pending orders" equivalent, so that cross-party switch is
+/// not migrated - this class/list is kept only as a single-entry
+/// "no-op" list containing the current party, so the existing
+/// `DropdownButton` widget (and its title-row layout) can stay unchanged
+/// rather than restructuring the AppBar. Selecting the (only) entry just
+/// re-fetches the same party's data.
 class Data_Top {
   final String Partyledger;
 
   Data_Top({required this.Partyledger});
-
-  factory Data_Top.fromJson(Map<String, dynamic> json) {
-    return Data_Top(Partyledger: json['Partyledger'].toString());
-  }
 }
 
 class PartyClickedSalePurcOrder extends StatefulWidget {
   final String startdate_string, enddate_string, type, ledger, vchtype;
+  final int? ledgerMasterId;
 
   const PartyClickedSalePurcOrder({
     required this.startdate_string,
@@ -53,6 +58,7 @@ class PartyClickedSalePurcOrder extends StatefulWidget {
     required this.type,
     required this.ledger,
     required this.vchtype,
+    this.ledgerMasterId,
   });
   @override
   _PartyClickedSalePurcOrderPageState createState() =>
@@ -62,6 +68,7 @@ class PartyClickedSalePurcOrder extends StatefulWidget {
         type: type,
         ledger: ledger,
         vchtype: vchtype,
+        ledgerMasterId: ledgerMasterId,
       );
 }
 
@@ -76,12 +83,13 @@ class _PartyClickedSalePurcOrderPageState
       ledger = "",
       total = "",
       vchtype = "";
+  int? ledgerMasterId;
 
   int counter = 0;
   bool isSortVisible = false;
   double total_double = 0;
 
-  String selectedSortOption = '', token = '';
+  String selectedSortOption = '';
 
   String total_main = "0";
 
@@ -104,6 +112,7 @@ class _PartyClickedSalePurcOrderPageState
     required this.type,
     required this.ledger,
     required this.vchtype,
+    this.ledgerMasterId,
   });
 
   String? SecuritybtnAcessHolder;
@@ -132,13 +141,7 @@ class _PartyClickedSalePurcOrderPageState
 
   late String? startdate_pref, enddate_pref;
 
-  String HttpURL = "", HttpURL_Top = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
 
@@ -536,90 +539,22 @@ class _PartyClickedSalePurcOrderPageState
     return formattedDate;
   }
 
-  Future<void> fetchData_Top(
-    final String ordervchs,
-    final String typee,
-    final String groupby,
-    final String orderby,
-  ) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    /*print (ordervchs + typee);*/
-
-    try {
-      final url = Uri.parse(HttpURL_Top!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'ordervchs': ordervchs,
-        'vchtypes': typee,
-        'groupby': groupby,
-        'orderby': orderby,
+  /// Legacy's `getOrderSummary` (`fetchData_Top`) resolved the party
+  /// dropdown *and* triggered the initial item fetch together. The
+  /// cross-party dropdown itself isn't migrated (see `Data_Top`'s
+  /// doc-comment) - this just seeds `dropdownItems`/`selectedTopValue` with
+  /// the single current party, then fetches this party's pending orders via
+  /// `LedgerRepository.pendingOrdersByItem`.
+  Future<void> _fetchOrders() async {
+    final ledgerMasterId = this.ledgerMasterId;
+    if (ledgerMasterId == null) {
+      setState(() {
+        _isLoading = false;
+        isVisibleNoDataFound = true;
       });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        print('response -> ${response.body}');
-
-        final parsed = jsonDecode(utf8.decode(response.bodyBytes)).cast<Map<String, dynamic>>();
-
-        final List<Data_Top> values_list = parsed
-            .map<Data_Top>((json) => Data_Top.fromJson(json))
-            .toList();
-        if (values_list != null) {
-          String desiredValue = ledger; // Replace with your desired value
-          Data_Top? selectedValue;
-          try {
-            selectedValue = values_list.firstWhere(
-              (item) => item.Partyledger == desiredValue,
-            );
-          } catch (e) {
-            selectedValue = null;
-          }
-          // dropdownItems and selectedTopValue must update together in the
-          // same setState - assigning selectedTopValue outside setState (as
-          // this used to) doesn't trigger a rebuild, so the AppBar's
-          // DropdownButton kept rendering its stale (often null) value
-          // until some unrelated rebuild happened to occur later. Release
-          // builds batch/skip more of those incidental rebuilds than debug
-          // does, which is why this only showed as a blank dropdown title
-          // in release.
-          setState(() {
-            dropdownItems = values_list;
-            selectedTopValue = selectedValue;
-          });
-          fetchData(
-            vchtype,
-            selectedTopValue?.Partyledger ?? '',
-            type,
-            endDateString,
-            "item",
-            "true",
-          );
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
-      print(e);
+      return;
     }
-  }
 
-  Future<void> fetchData(
-    final String vchtype,
-    final String partyname,
-    final String type,
-    final String enddate,
-    final String groupby,
-    final String select,
-  ) async {
     setState(() {
       _isLoading = true;
       _isListVisible = true;
@@ -631,41 +566,31 @@ class _PartyClickedSalePurcOrderPageState
     filteredItems.clear();
 
     try {
-      final url = Uri.parse(HttpURL_Top!);
+      final from = parseCompactDate(startDateString);
+      final to = parseCompactDate(endDateString);
+      final rows = await LedgerRepository.instance.pendingOrdersByItem(
+        ledgerMasterId,
+        isSales: vchtype == 'sales',
+        from: from,
+        to: to,
+      );
 
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final items = [
+        for (final row in rows)
+          Data(
+            item: (row['stockItemName'] ?? '').toString(),
+            stockItemMasterId: row['stockItemMasterId'] as int,
+            totalQty: parseMoneyField(row['pendingQuantity']).toString(),
+            totalAmount: parseMoneyField(row['pendingAmount']),
+          ),
+      ];
 
-      var body = jsonEncode({
-        'vchtypes': vchtype,
-        'ledger': partyname,
-        'ordervchs': type,
-        'enddate': enddate,
-        'groupby': groupby,
-        'select': select,
-        'orderby': 'item',
+      setState(() {
+        item_list.addAll(items);
+        filteredItems = item_list;
+        isVisibleNoDataFound = false;
+        _isLoading = false;
       });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          item_list.addAll(
-            values_list.map((json) => Data.fromJson(json)).toList(),
-          );
-          filteredItems = item_list;
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
-      }
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -707,12 +632,8 @@ class _PartyClickedSalePurcOrderPageState
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
       /*selectedTopValue = dropdownItems.first;
       filteredItems= item_list;
       isVisibleNoDataFound =false;
@@ -730,10 +651,6 @@ class _PartyClickedSalePurcOrderPageState
     } catch (e) {
       selectedSortOption = 'Default';
     }
-
-    HttpURL = '$hostname/api/ledger/getTotal/$company_lowercase/$serial_no';
-    HttpURL_Top =
-        '$hostname/api/ledger/getOrderSummary/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -759,9 +676,14 @@ class _PartyClickedSalePurcOrderPageState
       isUserVisible = false;
     }
 
-    fetchData_Top(type, vchtype, "Partyledger", "Partyledger");
+    // See `Data_Top`'s doc-comment - a single no-op entry for the current
+    // party, replacing legacy's multi-party dropdown fetch.
+    setState(() {
+      dropdownItems = [Data_Top(Partyledger: ledger)];
+      selectedTopValue = dropdownItems.first;
+    });
 
-    /*fetchData(ledger,startDateString, endDateString, type);*/
+    _fetchOrders();
   }
 
   String formatTypeTitle(String type) {
@@ -829,15 +751,8 @@ class _PartyClickedSalePurcOrderPageState
                         onChanged: (newValue) {
                           setState(() {
                             selectedTopValue = newValue!;
-                            fetchData(
-                              vchtype,
-                              newValue?.Partyledger ?? '',
-                              type,
-                              endDateString,
-                              "item",
-                              "true",
-                            );
                           });
+                          _fetchOrders();
                         },
                         items: dropdownItems.map((Data_Top value) {
                           return DropdownMenuItem<Data_Top>(
@@ -879,6 +794,22 @@ class _PartyClickedSalePurcOrderPageState
                 }
               },
               icon: Icon(Icons.search, color: Colors.white, size: 22),
+            ),
+            // Sort now lives in the app bar (standard Material/iOS
+            // placement) instead of a floating pill hovering over the
+            // list - that pattern covered content, was easy to miss, and
+            // isn't how sort controls are usually surfaced. Disabled
+            // (greyed out) rather than hidden when there's nothing to sort,
+            // so its position doesn't jump around as data loads.
+            IconButton(
+              onPressed: isSortVisible
+                  ? () => _showSelectionWindow(context)
+                  : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible ? Colors.white : Colors.white38,
+                size: 22,
+              ),
             ),
             IconButton(
               onPressed: () {
@@ -1130,6 +1061,7 @@ class _PartyClickedSalePurcOrderPageState
                                       return GestureDetector(
                                         onTap: () {
                                           if (selectedTopValue == null) return;
+                                          if (ledgerMasterId == null) return;
                                           String item = card.item;
                                           String party =
                                               selectedTopValue!.Partyledger;
@@ -1148,6 +1080,10 @@ class _PartyClickedSalePurcOrderPageState
                                                     vchtype: vchtype,
                                                     item: item,
                                                     dropdownItems: item_list,
+                                                    ledgerMasterId:
+                                                        ledgerMasterId!,
+                                                    stockItemMasterId:
+                                                        card.stockItemMasterId,
                                                   ),
                                             ),
                                           );
@@ -1344,49 +1280,6 @@ class _PartyClickedSalePurcOrderPageState
                   ),
                 ),
             ],
-          ),
-
-          Visibility(
-            visible: isSortVisible,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 50),
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: GestureDetector(
-                  onTap: () => _showSelectionWindow(context),
-                  child: Container(
-                    width: 100,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: app_color, // soft teal background
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.teal.withOpacity(0.3),
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.sort, size: 18, color: Colors.white),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Sort',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ),
 
           if (_isLoading)

@@ -64,6 +64,12 @@ abstract class BaseApiClient {
     TokenScope scope = TokenScope.companyUser,
   }) => _send('PATCH', path, body: body, scope: scope);
 
+  Future<ApiResult> put(
+    String path, {
+    Object? body,
+    TokenScope scope = TokenScope.companyUser,
+  }) => _send('PUT', path, body: body, scope: scope);
+
   Future<ApiResult> delete(String path, {TokenScope scope = TokenScope.companyUser}) =>
       _send('DELETE', path, scope: scope);
 
@@ -88,6 +94,9 @@ abstract class BaseApiClient {
         break;
       case 'PATCH':
         response = await _http.patch(uri, headers: headers, body: encodedBody);
+        break;
+      case 'PUT':
+        response = await _http.put(uri, headers: headers, body: encodedBody);
         break;
       case 'DELETE':
         response = await _http.delete(uri, headers: headers);

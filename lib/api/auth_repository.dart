@@ -227,6 +227,48 @@ class AuthRepository {
     );
   }
 
+  /// Decodes the `permissions` claim off the just-issued company-user
+  /// access token - no network round trip, since tally-oauth's
+  /// `company-user-auth.service.ts` embeds `permissions: string[]` (the
+  /// resolved role's granted permission-catalog strings) directly in that
+  /// JWT, alongside `token_type`/`company_id`/`license_id`. No
+  /// `jwt_decoder`-style package is in this project's pubspec, so this
+  /// decodes the standard base64url JWT payload segment by hand - a JWT
+  /// needs no signature verification client-side (the app never trusts
+  /// this claim for anything security-sensitive; the backend re-checks
+  /// every permission-gated call itself), it's only used here to drive
+  /// which legacy SharedPreferences screen-visibility flags get set.
+  ///
+  /// Returns null if there's no active company-user session, the token
+  /// can't be parsed, or it carries no `permissions` claim at all (e.g. an
+  /// older tally-oauth build that hasn't rolled the claim out yet) -
+  /// callers must treat null as "unknown", distinct from a real empty
+  /// list (a role with zero permissions granted).
+  Future<List<String>?> currentCompanyUserPermissions() async {
+    final token = await TokenStore.instance.companyUserAccessToken;
+    if (token == null) return null;
+    return _decodeJwtPermissions(token);
+  }
+
+  List<String>? _decodeJwtPermissions(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return null;
+      final payloadJson = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final payload = jsonDecode(payloadJson) as Map<String, dynamic>;
+      final raw = payload['permissions'];
+      if (raw is List) {
+        return raw.map((e) => e.toString()).toList();
+      }
+      return null;
+    } catch (_) {
+      // Malformed/truncated token, or an unexpected payload shape - treat
+      // exactly like "no claim present" rather than crashing company
+      // selection over it.
+      return null;
+    }
+  }
+
   Future<String> _resolveCompanyId(String serialNo, String companyName) async {
     final licenseByTallySerial = <String, dynamic>{};
     // /license/user is paginated (default limit 20); a user with more than

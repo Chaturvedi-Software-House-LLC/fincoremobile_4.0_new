@@ -222,10 +222,10 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
   // never populated for these sessions (see CompanySelectTallyOauth.dart).
   bool _useTallyApi = false;
 
-  // tally-api's vouchers/:masterId has no bill-wise breakdown (bills are a
-  // separate ledger-scoped model, not attached to a voucher) - the Bills
-  // section shows this instead of silently staying empty. Same pattern as
-  // PartyClicked's Pending Order gap.
+  // No longer a real gap - bill allocations are read straight off each
+  // ledger entry's `billAllocations` JSON array (see `_fetchDataTallyApi`).
+  // Kept (always false) only because nothing else in this file reads it;
+  // harmless dead state, not worth a wider refactor to remove.
   bool _billsUnavailable = false;
 
   String handleGodown(String godown) {
@@ -290,8 +290,9 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
 
   /// tally-api path: a single `GET vouchers/:masterId` call already returns
   /// ledger/inventory/cost-centre entries together (see `VoucherRepository`),
-  /// replacing the 4 separate legacy collection calls below. Bills have no
-  /// tally-api equivalent for this endpoint (see `_billsUnavailable`).
+  /// replacing the 5 separate legacy collection calls below - bill
+  /// allocations included, read off each ledger entry's own
+  /// `billAllocations` array rather than a separate bills collection call.
   Future<void> _fetchDataTallyApi(String masterid) async {
     setState(() {
       isVisibleLedgerEntry = false;
@@ -354,11 +355,35 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
           )
           .toList();
 
+      // Bill allocations live as a JSON array directly on each ledger
+      // entry (`voucherLedgerEntryRowSchema.billAllocations`), not as a
+      // separate endpoint - `{billId, billName, billType, amount}` per
+      // entry. No `dueDate`/`billDate` field exists on this blob (that's
+      // only tracked on the standalone `Bill` master, not on the voucher's
+      // own bill-allocation record), so those show as "Not Available"
+      // rather than being fabricated.
+      bills_list = [
+        for (final row in ledgerRows)
+          for (final bill
+              in (row['billAllocations'] as List?)
+                      ?.cast<Map<String, dynamic>>() ??
+                  const [])
+            Bills(
+              billno: (bill['billName'] ?? '').toString(),
+              amount: (bill['amount'] ?? '0').toString(),
+              billtype: (bill['billType'] ?? '').toString(),
+              duedate: 'null',
+              billdate: 'null',
+              ledger: (row['ledgerName'] ?? '').toString(),
+            ),
+      ];
+
       setState(() {
         isVisibleLedgerEntry = ledgerentries_list.isNotEmpty;
+        isVisibleBills = bills_list.isNotEmpty;
         isVisibleInventoryEntry = inventoryentries_list.isNotEmpty;
         isVisibleCostCenter = costcenter_list.isNotEmpty;
-        _billsUnavailable = true;
+        _billsUnavailable = false;
         _isLoading = false;
       });
     } on ApiException catch (e) {

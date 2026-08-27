@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/PendingSalesEntry.dart';
@@ -6,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
@@ -18,6 +16,13 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
+import 'api/api_exception.dart';
+import 'api/ledger_repository.dart';
+import 'api/monthly_bucket_helper.dart';
+import 'api/pagination_helper.dart';
+import 'api/stock_repository.dart';
+import 'api/tally_api_client.dart';
+import 'api/voucher_entry_repository.dart';
 
 class SalesOrderRegistration extends StatefulWidget {
   const SalesOrderRegistration({Key? key}) : super(key: key);
@@ -648,17 +653,6 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     return words.trim();
   }
 
-  Map<String, dynamic> jsonEntryData = {
-    "DATE": "",
-    "VOUCHERTYPENAME": "",
-    "PARTYLEDGERNAME": "",
-    "NARRATION": "",
-    "VOUCHERNUMBER": "",
-    "REFERENCE": "",
-    "INVENTORYENTRIES.LIST": [],
-    "LEDGERENTRIES.LIST": [],
-  };
-
   bool isVisibleItemHeading = false, isVisibleLedgerHeading = false;
 
   bool isVisibleUnit = true;
@@ -753,8 +747,24 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       SecuritybtnAcessHolder = "";
 
   late DateTime saledate, refdate;
-  String? HttpURL_loadData, HttpURL_salesEntry, HttpURL_fetchvchnos;
   List<String> vchnos = [];
+
+  // --- tally-api migration: masterId lookups -------------------------------
+  // The legacy `getSalesData`/`entry/create` endpoints spoke Tally's own
+  // XML-tag names (LEDGERNAME/STOCKITEMNAME/GODOWNNAME/...) end-to-end, so
+  // the UI never needed a numeric id for anything - it just round-tripped
+  // display names. tally-api's `voucher-entries` write endpoint needs
+  // `ledgerMasterId`/`stockItemMasterId`/`unitMasterId`/`godownMasterId`/
+  // `voucherTypeMasterId`/`currencyMasterId` instead, so these maps (built
+  // once in loadData(), from the same master lists already fetched for the
+  // dropdowns) resolve a selected display name back to its masterId at
+  // submit time, without changing any of the existing name-based dropdown/
+  // validation logic above.
+  final TallyApiClient _tallyApiClient = TallyApiClient();
+  final Map<String, int> _ledgerMasterIdByName = {};
+  final Map<String, int> _godownMasterIdByName = {};
+  final Map<String, int> _voucherTypeMasterIdByName = {};
+  int? _currencyMasterId;
 
   double selectedMultiplier = 0.0;
 
@@ -2496,151 +2506,191 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
         _isLoading = true;
       });
       String narrationValue = controller_narration.text.trim();
-      String vchnoValue = _vchnoController.text;
+      String vchnoValue = _vchnoController.text.trim();
+      String refnoValue = controller_orderno.text.trim();
 
-      String refnoValue = controller_orderno.text;
+      // --- tally-api migration: resolve every display name this screen
+      // works with back to the masterId `voucher-entries` needs (see the
+      // lookup maps built by loadData()).
+      final int? voucherTypeMasterId =
+          _voucherTypeMasterIdByName[_selectedvchtypename];
+      final int? partyLedgerMasterId =
+          _ledgerMasterIdByName[_selectedpartyledger];
+      final int? salesLedgerMasterId =
+          _ledgerMasterIdByName[_selectedsalesledger];
+      final int? currencyMasterId = _currencyMasterId;
 
-      jsonEntryData["DATE"] = saledatestring;
-      jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
-      jsonEntryData["PARTYLEDGERNAME"] = _selectedpartyledger;
-      jsonEntryData["totalAmount"] = roundedtotalAmount;
-      jsonEntryData["NARRATION"] = narrationValue;
-      jsonEntryData["VOUCHERNUMBER"] = vchnoValue;
-      jsonEntryData["REFERENCE"] = refnoValue;
+      if (voucherTypeMasterId == null) {
+        showAppMessage(context, 'Please select a Voucher Type');
+        setState(() => _isLoading = false);
+        return;
+      }
+      if (partyLedgerMasterId == null) {
+        showAppMessage(context, 'Unknown Party Ledger - please reselect it');
+        setState(() => _isLoading = false);
+        return;
+      }
+      if (salesLedgerMasterId == null) {
+        showAppMessage(context, 'Please select a Sales Ledger');
+        setState(() => _isLoading = false);
+        return;
+      }
+      if (currencyMasterId == null) {
+        showAppMessage(context, 'Could not resolve the company currency');
+        setState(() => _isLoading = false);
+        return;
+      }
+
       double totalItemAmount = 0.0;
-
       for (SaleItem item in saleItems) {
         totalItemAmount += item.itemAmount; // calculating item amounts total
       }
 
-      for (var saleItem in saleItems) {
-        // making sales ledger
-        if (saleItem.accountingAllocationList.isEmpty) {
-          saleItem.accountingAllocationList = {
-            "LEDGERNAME": _selectedsalesledger,
-            "AMOUNT": saleItem.itemAmount.toStringAsFixed(decimal!),
-            "ISDEEMEDPOSITIVE": "No",
-          };
+      // Builds each inventory entry - resolves stockItemMasterId/
+      // unitMasterId from the same itemdata list the item/unit dropdowns
+      // use. godownMasterId comes from the item's chosen location; when the
+      // company has no godowns at all, batchAllocations is omitted for that
+      // item entirely rather than guessing, since tally-api requires a real
+      // godownMasterId on every batch row.
+      final List<Map<String, dynamic>> inventoryEntries = [];
+      for (final item in saleItems) {
+        final Map<String, dynamic> itemInfo = itemdata
+            .cast<Map<String, dynamic>>()
+            .firstWhere((i) => i['name'] == item.itemName, orElse: () => {});
+        final int? stockItemMasterId = itemInfo['masterId'] as int?;
+        final List<Map<String, dynamic>> units =
+            ((itemInfo['unit'] as List?) ?? const [])
+                .cast<Map<String, dynamic>>();
+        final Map<String, dynamic> unitInfo = units.firstWhere(
+          (u) => u['name'] == item.itemUnit,
+          orElse: () => {},
+        );
+        final int? unitMasterId = unitInfo['masterId'] as int?;
+
+        if (stockItemMasterId == null || unitMasterId == null) {
+          showAppMessage(
+            context,
+            'Could not resolve item/unit for "${item.itemName}" - please re-add it',
+          );
+          setState(() => _isLoading = false);
+          return;
         }
+
+        final int? godownMasterId = _godownMasterIdByName[item.itemLocation];
+        final quantity = double.tryParse(item.itemQuantity) ?? 0;
+
+        inventoryEntries.add({
+          'stockItemMasterId': stockItemMasterId,
+          'quantity': quantity,
+          'rate': item.itemPrice,
+          'unitMasterId': unitMasterId,
+          'amount': item.itemAmount,
+          'ledgerMasterId': salesLedgerMasterId,
+          'isDebitQuantity': false,
+          if (godownMasterId != null)
+            'batchAllocations': [
+              {
+                'godownMasterId': godownMasterId,
+                // tally-api requires a batchName on every allocation row;
+                // this screen has no batch-tracking UI of its own, so
+                // 'Primary' - Tally's own default batch name for
+                // non-batch-tracked stock items - is used here, matching
+                // what a real Tally sync would show for the same item.
+                'batchName': 'Primary',
+                'quantity': quantity,
+              },
+            ],
+        });
       }
 
-      jsonEntryData["INVENTORYENTRIES.LIST"] = saleItems.map((item) {
-        // making stockitem list
-        return {
-          "STOCKITEMNAME": item.itemName,
-          "ISDEEMEDPOSITIVE": "No",
-          "RATE": "${item.itemPrice}/${item.itemUnit}",
-          "AMOUNT": item.itemAmount,
-          "ACTUALQTY": "${item.itemQuantity} ${item.itemUnit}",
-          "BILLEDQTY": "${item.itemQuantity} ${item.itemUnit}",
-          "BATCHALLOCATIONS.LIST": item.batchAllocationList,
-          "ACCOUNTINGALLOCATIONS.LIST": item.accountingAllocationList,
-        };
-      }).toList();
-
       double totalLedgerAmount = 0.0;
-
       for (LedgerEntry ledger in ledgerEntries) {
         // calculating total ledger amount
         totalLedgerAmount +=
             ledger.ledgerAmount; // calculating ledger amounts total
       }
 
-      double partyLedgerAmount =
+      // Double-entry ledgerEntries: the Party ledger is debited for the
+      // full invoice value; the Sales ledger, any additional ledgers, and
+      // VAT (when applicable) are credited for their respective shares -
+      // the same net effect as legacy's signed-AMOUNT/ISDEEMEDPOSITIVE
+      // convention, just expressed as tally-api's own isDebit-flag +
+      // unsigned-amount pairs (see vouchers-sync, which stores `amount` as
+      // an unsigned magnitude the same way).
+      final double partyLedgerAmount =
           totalVatAmount +
           totalItemAmount +
           totalLedgerAmount; // adding vat total, items total, ledgers total
 
-      partyLedgerAmount = partyLedgerAmount * -1;
+      final List<Map<String, dynamic>> ledgerEntriesPayload = [
+        {
+          'ledgerMasterId': partyLedgerMasterId,
+          'amount': partyLedgerAmount,
+          'isDebit': true,
+          'isPartyLedger': true,
+        },
+        {
+          'ledgerMasterId': salesLedgerMasterId,
+          'amount': totalItemAmount,
+          'isDebit': false,
+          'isPartyLedger': false,
+        },
+      ];
 
-      List<Map<String, Object>> ledgerList = [];
-
-      Map<String, Object> partyLedgerData = {
-        // making party ledger
-        "LEDGERNAME": _selectedpartyledger,
-        "AMOUNT": partyLedgerAmount.toStringAsFixed(decimal!),
-        "ISPARTYLEDGER": "Yes",
-        "ISDEEMEDPOSITIVE": "Yes",
-        "ledgerType": "Party",
-      };
-      ledgerList.add(partyLedgerData);
-
-      // Add ledger entries to the list
-      ledgerList.addAll(
-        ledgerEntries.map((item) {
-          return {
-            "LEDGERNAME": item.ledgerName,
-            "VATAPPLICABLE": item.vatApp,
-            "AMOUNT": item.ledgerAmount,
-            "ISDEEMEDPOSITIVE": "No",
-            "ledgerType": "ledgerList",
-          };
-        }),
-      );
+      bool missingLedger = false;
+      for (final entry in ledgerEntries) {
+        final int? ledgerMasterId = _ledgerMasterIdByName[entry.ledgerName];
+        if (ledgerMasterId == null) {
+          missingLedger = true;
+          break;
+        }
+        ledgerEntriesPayload.add({
+          'ledgerMasterId': ledgerMasterId,
+          'amount': entry.ledgerAmount,
+          'isDebit': false,
+          'isPartyLedger': false,
+        });
+      }
+      if (missingLedger) {
+        showAppMessage(context, 'Could not resolve one of the added ledgers');
+        setState(() => _isLoading = false);
+        return;
+      }
 
       // Add VAT ledger data if applicable
       if (_selectedvatledger != 'Not Applicable') {
-        Map<String, Object> vatDataToAdd = {
-          "LEDGERNAME": _selectedvatledger,
-          "AMOUNT": roundedtotalVatAmount,
-          "ISDEEMEDPOSITIVE": "No",
-          "ledgerType": "VAT",
-        };
-        ledgerList.add(vatDataToAdd);
+        final int? vatLedgerMasterId = _ledgerMasterIdByName[_selectedvatledger];
+        if (vatLedgerMasterId == null) {
+          showAppMessage(context, 'Could not resolve the VAT ledger');
+          setState(() => _isLoading = false);
+          return;
+        }
+        ledgerEntriesPayload.add({
+          'ledgerMasterId': vatLedgerMasterId,
+          'amount': roundedtotalVatAmount,
+          'isDebit': false,
+          'isPartyLedger': false,
+        });
       }
 
-      jsonEntryData["LEDGERENTRIES.LIST"] = ledgerList;
-
-      /*print(jsonEntryData);*/
-
-      Map<String, dynamic> jsonData = {
-        'type': 'sales order',
-        'data': jsonEntryData,
+      final Map<String, dynamic> body = {
+        'voucherTypeMasterId': voucherTypeMasterId,
+        'date': DateFormat('yyyy-MM-dd').format(saledate),
+        'currencyMasterId': currencyMasterId,
+        'narration': narrationValue,
+        'reference': refnoValue,
+        if (vchnoValue.isNotEmpty) 'voucherNumber': vchnoValue,
+        'ledgerEntries': ledgerEntriesPayload,
+        'inventoryEntries': inventoryEntries,
       };
 
-      String jsonDataString = jsonEncode(jsonData);
-
-      print(jsonDataString);
-
       try {
-        final url_salesentry = Uri.parse(HttpURL_salesEntry!);
-        Map<String, String> headers_salesentry = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_salesentry = jsonDataString;
-
-        final response_salesentry = await http.post(
-          url_salesentry,
-          body: body_salesentry,
-          headers: headers_salesentry,
-        );
-
-        if (response_salesentry.statusCode == 200) {
-          if (response_salesentry.body == 'Entry created successfully') {
-            // showAppMessage(context, response_salesentry.body);
-            showSalesOrderDialog(context);
-          } else {
-            showAppMessage(context, 'an error occoured');
-          }
-        } else {
-          Map<String, dynamic> data = json.decode(response_salesentry.body);
-          String error = '';
-
-          if (data.containsKey('error')) {
-            setState(() {
-              error = data['error'];
-            });
-          } else {
-            error = "Error in data fetching!!!";
-          }
-          showAppMessage(context, error);
-        }
+        await VoucherEntryRepository.instance.create(body);
+        showSalesOrderDialog(context);
+      } on ApiException catch (e) {
+        showAppMessage(context, e.message);
       } catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
+        showAppMessage(context, 'Could not reach the server. Please try again.');
         print(e);
       }
     }
@@ -3138,6 +3188,65 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     );
   }
 
+  // --- tally-api migration: master-list fetch helpers ----------------------
+  // No single tally-api endpoint returns this screen's whole "sales order
+  // entry form" bundle the way legacy's `getSalesData` did, so loadData()
+  // below assembles the same bundle from several tally-api list endpoints.
+  // These four don't have a dedicated `lib/api/` repository yet (unlike
+  // ledgers/stock-items) - see the migration report for the suggested
+  // additions (GodownRepository/VoucherTypeRepository/CurrencyRepository/
+  // an "all ledgers, unfiltered" method on LedgerRepository). Implemented
+  // inline here for now, using the same `TallyApiClient`/`fetchAllPages`
+  // plumbing those repositories use internally.
+  Future<List<Map<String, dynamic>>> _fetchAllLedgersUnfiltered() =>
+      fetchAllPages(
+        (page) => _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
+      );
+
+  /// masterIds of every group with tally-api's `'SALES'` GroupReservedName
+  /// enum label (screaming-snake-case, its 2026-08-21 schema-hardening
+  /// migration - not Tally's own mixed-case `'Sales Accounts'` string) -
+  /// used to classify "sales ledgers" the same way tally-api's own reports
+  /// classify sales activity (see CLAUDE.md's reports section).
+  Future<Set<int>> _fetchSalesAccountGroupIds() async {
+    final groups = await fetchAllPages(
+      (page) => _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
+    );
+    return groups
+        .where((g) => g['reservedName'] == 'SALES')
+        .map((g) => g['masterId'] as int)
+        .toSet();
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchGodowns() => fetchAllPages(
+        (page) => _tallyApiClient.getForCompany('/godowns?page=$page&limit=100'),
+      );
+
+  Future<List<Map<String, dynamic>>> _fetchVoucherTypes() => fetchAllPages(
+        (page) =>
+            _tallyApiClient.getForCompany('/voucher-types?page=$page&limit=100'),
+      );
+
+  /// Resolves the company's own currency masterId to match [isoCode]
+  /// (`currencycode`, e.g. `'AED'`) against tally-api's `isoCurrencyCode`
+  /// field; falls back to the first currency the company has synced if
+  /// nothing matches (a company should always have at least its home
+  /// currency), and to `null` only when the company has none at all.
+  Future<int?> _fetchCurrencyMasterId(String isoCode) async {
+    final currencies = await fetchAllPages(
+      (page) =>
+          _tallyApiClient.getForCompany('/currencies?page=$page&limit=100'),
+    );
+    if (currencies.isEmpty) return null;
+    final match = currencies.firstWhere(
+      (c) =>
+          (c['isoCurrencyCode'] as String?)?.toUpperCase() ==
+          isoCode.toUpperCase(),
+      orElse: () => currencies.first,
+    );
+    return match['masterId'] as int?;
+  }
+
   Future<void> loadData() async {
     vchtypenamedata.clear();
     itemdata.clear();
@@ -3146,78 +3255,148 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     vatledgerdata.clear();
     ledgerdata.clear();
     locationsdata.clear();
+    _ledgerMasterIdByName.clear();
+    _godownMasterIdByName.clear();
+    _voucherTypeMasterIdByName.clear();
 
     setState(() {
       _isLoading = true;
     });
 
-    // vchtype fetching
     try {
-      final url = Uri.parse(HttpURL_loadData!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final results = await Future.wait([
+        StockRepository.instance.listStockItems(),
+        _fetchAllLedgersUnfiltered(),
+        LedgerRepository.instance.listLedgers(),
+        _fetchSalesAccountGroupIds(),
+        _fetchGodowns(),
+        _fetchVoucherTypes(),
+        _fetchCurrencyMasterId(currencycode),
+      ]);
 
-      var body = jsonEncode({'type': "sales order"});
-      final response = await http.post(url, body: body, headers: headers);
+      final stockItems = results[0] as List<Map<String, dynamic>>;
+      final allLedgers = results[1] as List<Map<String, dynamic>>;
+      final partyLedgers = results[2] as List<Map<String, dynamic>>;
+      final salesAccountGroupIds = results[3] as Set<int>;
+      final godowns = results[4] as List<Map<String, dynamic>>;
+      final voucherTypes = results[5] as List<Map<String, dynamic>>;
+      _currencyMasterId = results[6] as int?;
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+      for (final l in allLedgers) {
+        _ledgerMasterIdByName[l['name'] as String] = l['masterId'] as int;
+      }
+      for (final g in godowns) {
+        _godownMasterIdByName[g['name'] as String] = g['masterId'] as int;
+      }
+      // Only "Sales Order" (Tally's own reservedName, stable regardless of
+      // any custom voucher-type naming) - matches legacy's
+      // `{'type': 'sales order'}` request filter.
+      final salesOrderTypes = voucherTypes
+          .where((v) => v['reservedName'] == 'SALES_ORDER')
+          .toList();
+      for (final v in salesOrderTypes) {
+        _voucherTypeMasterIdByName[v['name'] as String] = v['masterId'] as int;
+      }
 
-        print(response.body);
-        setState(() {
-          vchtypenamedata = jsonResponse["vchTypes"].cast<String>();
-          _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
-          fetchvchnos(_selectedvchtypename);
-          partyledgerdata = jsonResponse["partyLedgers"].cast<String>()
-            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-          _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
-          _partyLedgerController.text = _selectedpartyledger;
-          salesledger_data = jsonResponse["salesLedgers"].cast<String>();
-          _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
+      setState(() {
+        vchtypenamedata = salesOrderTypes
+            .map((v) => v['name'] as String)
+            .toList();
+        _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
+        fetchvchnos(_selectedvchtypename);
 
-          ledgerdata = List<Map<String, dynamic>>.from(
-            jsonResponse['otherLedgers'],
-          );
-          _selectedledger = ledgerdata.isNotEmpty
-              ? ledgerdata[0]['name']
-              : null;
+        partyledgerdata = partyLedgers.map((l) => l['name'] as String).toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
+        _partyLedgerController.text = _selectedpartyledger;
 
-          vatledgerdata.add('Not Applicable');
-          vatledgerdata.addAll(jsonResponse["vatLedgers"].cast<String>());
-          _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
+        // "Sales ledgers" - every ledger under a 'Sales Accounts' group.
+        salesledger_data = allLedgers
+            .where((l) => salesAccountGroupIds.contains(l['groupMasterId']))
+            .map((l) => l['name'] as String)
+            .toList();
+        _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
 
-          itemdata = jsonResponse["items"];
+        // "Other ledgers" (the free-pick "Add Ledger" dropdown, e.g.
+        // freight/discount allocations) - best-effort equivalent of
+        // legacy's `otherLedgers`: every ledger not already offered via the
+        // Party or Sales Ledger dropdowns above.
+        final partyNames = partyledgerdata.toSet();
+        final salesNames = salesledger_data.toSet();
+        ledgerdata = allLedgers
+            .where(
+              (l) =>
+                  !partyNames.contains(l['name']) &&
+                  !salesNames.contains(l['name']),
+            )
+            .toList();
+        _selectedledger = ledgerdata.isNotEmpty
+            ? ledgerdata[0]['name']
+            : null;
 
-          _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
-          _itemController.text = _selecteditem;
-          locationsdata = List<String>.from(jsonResponse['locations']);
-          if (locationsdata.isNotEmpty) {
-            selectedLocation = locationsdata[0];
-            setState(() {
-              isVisibleLocation = true;
-            });
-          } else {
-            setState(() {
-              isVisibleLocation = false;
+        // VAT ledgers - tally-api exposes a direct `vatApplicable` flag per
+        // ledger (more accurate than legacy's name/group-based guess).
+        vatledgerdata.add('Not Applicable');
+        vatledgerdata.addAll(
+          allLedgers
+              .where((l) => l['vatApplicable'] == true)
+              .map((l) => l['name'] as String),
+        );
+        _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
+
+        // Reshapes tally-api's stock-item row into the `name`/`saleprice`/
+        // `standardprice`/`unit` shape `_updateUnitDropdown`/`addItem`/
+        // `_addSelectedItemsInBulk` already expect (unchanged below) - see
+        // those methods' own comments for the "saleprice"/"standardprice"/
+        // unit-multiplier meaning. tally-api tracks at most a base + one
+        // additional unit per item (no arbitrary compound-unit list like
+        // legacy's `unit` array could carry) - `multiplier` for the
+        // additional unit is `denominator` ("1 additional unit = denominator
+        // base units", same relationship Items.dart's display already
+        // relies on for this pair of fields).
+        itemdata = stockItems.map((item) {
+          final List<Map<String, dynamic>> units = [];
+          final baseUnitMasterId = item['baseUnitMasterId'] as int?;
+          if (baseUnitMasterId != null) {
+            units.add({
+              'name': item['baseUnitSymbol'] ?? '',
+              'multiplier': 1.0,
+              'masterId': baseUnitMasterId,
             });
           }
-          _updateUnitDropdown(_selecteditem);
-        });
-      } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
+          final additionalUnitMasterId = item['additionalUnitMasterId'] as int?;
+          if (additionalUnitMasterId != null) {
+            final denominator = parseMoneyField(item['denominator']);
+            units.add({
+              'name': item['additionalUnitSymbol'] ?? '',
+              'multiplier': denominator == 0 ? 1.0 : denominator,
+              'masterId': additionalUnitMasterId,
+            });
+          }
+          return {
+            'masterId': item['masterId'],
+            'name': item['name'],
+            'saleprice': item['lastSalePrice'],
+            'standardprice': item['stardardPrice'],
+            'unit': units,
+          };
+        }).toList();
+
+        _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
+        _itemController.text = _selecteditem;
+        locationsdata = godowns.map((g) => g['name'] as String).toList();
+        if (locationsdata.isNotEmpty) {
+          selectedLocation = locationsdata[0];
+          isVisibleLocation = true;
         } else {
-          error = 'Something went wrong!!!';
+          isVisibleLocation = false;
         }
-        showAppMessage(context, error);
-      }
+        _updateUnitDropdown(_selecteditem);
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
     } catch (e) {
+      showAppMessage(context, 'Could not reach the server. Please try again.');
       print(e);
     }
 
@@ -3227,85 +3406,62 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   Future<void> fetchvchnos(String vchname) async {
-    // Format the dates as yyyyMMdd
-    String formattedStartDateVchNo = DateFormat(
-      'yyyyMMdd',
-    ).format(yearStartDate);
-    String formattedEndDateVchNo = DateFormat('yyyyMMdd').format(yearEndDate);
-
     vchnos.clear();
     setState(() {
       _isLoading = true;
     });
 
-    // vchnos fetching
+    // tally-api's VoucherEntry has no server-side auto-numbering (see
+    // VoucherEntryRepository's doc-comment on the "known gap") - this
+    // fetches every existing voucher-entry, narrows it to this voucher type
+    // and this year's date window (matching legacy's own from/to range),
+    // and reuses generateNextVchNo() to suggest the next number exactly as
+    // before. The field stays user-editable via the existing lock/edit
+    // toggle (isVchEditable) since there's no server sequence to defer to.
     try {
-      final url = Uri.parse(HttpURL_fetchvchnos!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final entries = await VoucherEntryRepository.instance.listAll();
+      final matching = entries.where((e) {
+        if (e['voucherTypeName'] != vchname) return false;
+        final date = DateTime.tryParse(e['date']?.toString() ?? '');
+        if (date == null) return false;
+        return !date.isBefore(yearStartDate) &&
+            !date.isAfter(
+              DateTime(
+                yearEndDate.year,
+                yearEndDate.month,
+                yearEndDate.day,
+                23,
+                59,
+                59,
+              ),
+            );
+      });
 
-      Map<String, dynamic> jsonDatabody = {
-        "to": formattedEndDateVchNo,
-        "from": formattedStartDateVchNo,
-        "vchname": vchname,
-      };
+      setState(() {
+        vchnos = matching
+            .map((e) => (e['voucherNumber'] as String?) ?? '')
+            .where((v) => v.isNotEmpty)
+            .toList();
 
-      String jsonDatabodyString = jsonEncode(jsonDatabody);
-
-      var body = jsonDatabodyString;
-      final response = await http.post(url, headers: headers, body: body);
-
-      if (response.statusCode == 200) {
-        /*print(response.body);*/
-        /*setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-
-          final List<dynamic> vchnosJson = jsonResponse['vchnos'];
-          vchnos = vchnosJson.cast<String>();
-          int q = vchnos.length;
-          print('vchno list containes $q nos whos values are $vchnos');
-
-          _vchnoController.clear();
-          checkVchNoExistence(_vchnoController.text);
-        });*/
-
-        setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-          final List<dynamic> vchnosJson = jsonResponse['vchnos'];
-
-          print(response.body);
-          vchnos = vchnosJson.cast<String>();
-
-          // SORT first
-          vchnos.sort((a, b) {
-            RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
-            int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
-            int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
-            return numA.compareTo(numB);
-          });
-
-          // GENERATE NEXT
-          String nextVch = generateNextVchNo(vchnos);
-
-          _vchnoController.text = nextVch;
+        // SORT first
+        vchnos.sort((a, b) {
+          RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
+          int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
+          int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
+          return numA.compareTo(numB);
         });
-      } else {
-        vchnos.clear();
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
-        }
-        showAppMessage(context, error);
-      }
+
+        // GENERATE NEXT
+        String nextVch = generateNextVchNo(vchnos);
+
+        _vchnoController.text = nextVch;
+      });
+    } on ApiException catch (e) {
+      vchnos.clear();
+      showAppMessage(context, e.message);
     } catch (e) {
       vchnos.clear();
+      showAppMessage(context, 'Could not reach the server. Please try again.');
       print(e);
     }
 
@@ -6796,8 +6952,9 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     final ledgerName = specificLedger['name'];
     final ledgerAmount = ledgerAmountController.text;
 
-    int vatApplicable = specificLedger['vatapplicable'];
-    final vatApp = vatApplicable == 1 ? true : false;
+    // tally-api's ledger row carries `vatApplicable` as a real bool
+    // (legacy's own shape used a 0/1 int under a lowercase key).
+    final vatApp = specificLedger['vatApplicable'] == true;
 
     if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
       // Create a new SaleItem object and add it to the list
@@ -6938,16 +7095,12 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       String? email_nav = prefs.getString('email_nav');
       String? name_nav = prefs.getString('name_nav');
 
-      HttpURL_loadData =
-          '$hostname/api/entry/getSalesData/$company_lowercase/$serial_no';
-      /*HttpURL_loadData = 'http://192.168.2.110:4999/api/entry/getSalesData/$company_lowercase/$serial_no';*/
-
-      HttpURL_fetchvchnos =
-          '$hostname/api/entry/nos/$company_lowercase/$serial_no';
-      /*HttpURL_fetchvchnos = 'http://192.168.2.110:4999/api/entry/nos/$company_lowercase/$serial_no';*/
-
-      HttpURL_salesEntry = '$hostname/api/entry/create/$company/$serial_no';
-      /*HttpURL_salesEntry = 'http://192.168.2.110:4999/api/entry/create/demonewformobilepp/767060064';*/
+      // tally-api migration: the legacy getSalesData/nos/create URLs this
+      // screen used to build here are gone - loadData()/fetchvchnos()/
+      // saveEntry() now talk to tally-api via StockRepository/
+      // LedgerRepository/VoucherEntryRepository (+ the local TallyApiClient
+      // helpers above) instead, which resolve the active company/session
+      // from TokenStore rather than these SharedPreferences fields.
 
       itemQuantityController.text = 1.toString();
       controller_vatamt.text = 0.toString();

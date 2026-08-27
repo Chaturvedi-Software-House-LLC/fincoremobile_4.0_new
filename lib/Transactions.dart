@@ -295,8 +295,37 @@ class _TransactionsPageState extends State<Transactions>
   dynamic _selectedtransaction = "All Transactions";
 
   List<String> spinner_list = ["All Transactions"];
+  final Map<String, int> _voucherTypeMasterIdByName = {};
 
   List<transactions> transactions_list = [];
+
+  // --- Incremental (infinite-scroll) paging state for the tally-api path
+  // only (legacy stays fully-fetched, unchanged - see _useTallyApi).
+  // tally-api's `/vouchers` list has NO server-side date-range filter at
+  // all (see VoucherRepository's doc comment) - only pagination plus an
+  // optional voucherTypeMasterId equality filter. Since a voucher's own
+  // masterId roughly tracks creation order in Tally, a recent date range's
+  // matches (the common case: "Today"/"This Month"/etc) usually sit on the
+  // LAST pages, not the first - so this walks pages backward from the end
+  // instead of forward from page 2, and auto-chains through empty pages on
+  // the very first load only (bounded by _txTotalPages) so a merely-empty
+  // early page doesn't flash a false "no data found".
+  static const int _txPageLimit = 30;
+  int _txTotalPages = 1;
+  int? _txCursor; // next page to fetch walking backward; null = exhausted
+  bool _isLoadingMoreTx = false;
+  DateTime? _txFrom, _txTo;
+  int? _txVoucherTypeMasterId;
+
+  // The Overview/trend chart aggregates the COMPLETE date-filtered voucher
+  // set (a monthly total that's missing most of the range would be
+  // misleading) - unlike the plain Transactions list above, so it's kept
+  // in its own separately, fully-fetched list rather than reusing the
+  // incrementally-loaded transactions_list. Mirrors Items.dart's Item
+  // Ageing/Stock Valuation tabs staying on a full fetch for the same
+  // "needs the whole dataset to aggregate correctly" reason.
+  List<transactions> _chartTransactionsList = [];
+  bool _isChartDataStale = true;
 
   void _showSelectionWindow(BuildContext context) {
     final List<IconData> icons = [
@@ -533,6 +562,25 @@ class _TransactionsPageState extends State<Transactions>
     });
   }
 
+  /// Fetches the full, unpaginated transaction list on demand for PDF/CSV
+  /// export - export is an occasional explicit action (not the initial
+  /// screen render infinite scroll is optimizing), so it's fine for it to
+  /// fetch everything for the current date range/voucher-type rather than
+  /// being limited to whatever's been scrolled into view so far
+  /// (`transactions_list`, on the tally-api path, only holds the pages
+  /// loaded/auto-chained so far). The legacy path already holds the full
+  /// list in `transactions_list`, so this just returns that unchanged.
+  Future<List<transactions>> _fullTransactionsForExport() async {
+    if (!_useTallyApi) return transactions_list;
+    if (_txFrom == null || _txTo == null) return transactions_list;
+    final vouchers = await VoucherRepository.instance.listInRange(
+      from: _txFrom!,
+      to: _txTo!,
+      voucherTypeMasterId: _txVoucherTypeMasterId,
+    );
+    return _mapVouchersToTransactions(vouchers);
+  }
+
   String formatledger_report(String ledger) {
     if (ledger == 'null') {
       ledger = '-';
@@ -540,7 +588,7 @@ class _TransactionsPageState extends State<Transactions>
     return ledger;
   }
 
-  Future<void> generateAndSharePDF_Transactions() async {
+  Future<void> generateAndSharePDF_Transactions(List<transactions> items) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -562,16 +610,14 @@ class _TransactionsPageState extends State<Transactions>
     ];
 
     final itemsPerPage = 8; // Adjust this value as needed
-    final pageCount = (transactions_list.length / itemsPerPage).ceil();
+    final pageCount = (items.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = transactions_list.sublist(
+      final itemsSubset = items.sublist(
         startIndex,
-        endIndex > transactions_list.length
-            ? transactions_list.length
-            : endIndex,
+        endIndex > items.length ? items.length : endIndex,
       );
 
       final tableSubsetRows = itemsSubset.map((item) {
@@ -712,7 +758,7 @@ class _TransactionsPageState extends State<Transactions>
     ], text: 'Sharing Transactions Report of $companyName');
   }
 
-  Future<void> generateAndShareCSV_Transactions() async {
+  Future<void> generateAndShareCSV_Transactions(List<transactions> items) async {
     final List<List<dynamic>> csvData = [];
     final headersRow = [
       'Vch No',
@@ -723,7 +769,7 @@ class _TransactionsPageState extends State<Transactions>
     ];
     csvData.add(headersRow);
 
-    for (final item in transactions_list) {
+    for (final item in items) {
       final rowData = [
         item.vchno,
         item.vchname,
@@ -859,7 +905,7 @@ class _TransactionsPageState extends State<Transactions>
   Map<String, Map<String, double>> _buildVoucherStackedTotals() {
     final totalsByTypeAndMonth = <String, Map<String, double>>{};
 
-    for (final t in transactions_list) {
+    for (final t in _chartTransactionsList) {
       final date = DateTime.tryParse(t.vchdate);
       if (date == null) continue;
       final monthLabel = DateFormat('MMMM yyyy').format(date);
@@ -876,7 +922,7 @@ class _TransactionsPageState extends State<Transactions>
   // economic events. Count is meaningful regardless of the type mix.
   Map<String, int> _buildVoucherMonthCounts() {
     final countByMonth = <String, int>{};
-    for (final t in transactions_list) {
+    for (final t in _chartTransactionsList) {
       final date = DateTime.tryParse(t.vchdate);
       if (date == null) continue;
       final monthLabel = DateFormat('MMMM yyyy').format(date);
@@ -953,7 +999,10 @@ class _TransactionsPageState extends State<Transactions>
             child: _buildTransTabButton(
               label: 'Overview',
               isSelected: _isTrendTabSelected,
-              onTap: () => setState(() => _isTrendTabSelected = true),
+              onTap: () {
+                setState(() => _isTrendTabSelected = true);
+                _ensureChartData();
+              },
             ),
           ),
           const SizedBox(width: 10),
@@ -1043,10 +1092,13 @@ class _TransactionsPageState extends State<Transactions>
           '/voucher-types?page=$page&limit=100',
         ),
       );
+      _voucherTypeMasterIdByName.clear();
       for (final row in voucherTypes) {
         final name = row['name']?.toString();
         if (name != null && name.isNotEmpty && !spinner_list.contains(name)) {
           spinner_list.add(name);
+          final masterId = row['masterId'];
+          if (masterId is int) _voucherTypeMasterIdByName[name] = masterId;
         }
       }
       setState(() {
@@ -1478,32 +1530,48 @@ class _TransactionsPageState extends State<Transactions>
         isSortVisible = false;
       } else {
         isSortVisible = true;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
+        _applySelectedSort();
       }
       _isLoading = false;
     });
+  }
+
+  /// Applies whichever sort option is currently selected - extracted out
+  /// of [fetchall_transactions]'s tail so incremental page loads (which
+  /// don't go through that tail) can re-sort the growing list too.
+  void _applySelectedSort() {
+    switch (selectedSortOption) {
+      case 'Default':
+        sortByDefault();
+        break;
+      case 'Newest to Oldest':
+        sortByDateHightoLow();
+        break;
+      case 'Oldest to Newest':
+        sortByDateLowtoHigh();
+        break;
+      case 'A->Z':
+        sortByAlphabetAtoZ();
+        break;
+      case 'Z->A':
+        sortByAlphabetZtoA();
+        break;
+      case 'Amount High to Low':
+        sortByAmountHightoLow();
+        break;
+      case 'Amount Low to High':
+        sortByAmountLowtoHigh();
+        break;
+    }
+  }
+
+  /// Reapplies the current search/quick-filter and sort over whatever's in
+  /// `transactions_list` right now - called after every incremental page
+  /// load (see `_loadNextTransactionsPage`) so the visible list stays
+  /// consistent as more pages arrive.
+  void _reapplyTransactionDisplay() {
+    _applyTransactionFilters();
+    _applySelectedSort();
   }
 
   /// Legacy collection-based fetch - unchanged behavior, split out of
@@ -1575,34 +1643,18 @@ class _TransactionsPageState extends State<Transactions>
     }
   }
 
-  /// tally-api path: [VoucherRepository.listInRange] over the date range,
-  /// filtered client-side to [vchname] ("All Transactions" or one voucher
-  /// type name from [spinner_list]) - same simplification as
-  /// `DashboardClicked`'s equivalent functions: the displayed "ledger" is
-  /// the voucher's first ledger entry, and `amount` is the sum of its
-  /// debit-side entries (see `_fetchSalesPurchaseCashTallyApi`'s doc
-  /// comment for why), kept consistent with how that screen already
-  /// renders tally-api vouchers.
-  Future<void> _fetchAllTransactionsTallyApi(
-    final String startdate,
-    final String enddate,
-    final String vchname,
-  ) async {
-    final from = parseCompactDate(startdate);
-    final to = parseCompactDate(enddate);
-    final vouchers = await VoucherRepository.instance.listInRange(
-      from: from,
-      to: to,
-    );
-
+  /// Maps raw tally-api voucher rows to [transactions] - same
+  /// simplification as `DashboardClicked`'s equivalent functions: the
+  /// displayed "ledger" is the voucher's first ledger entry, and `amount`
+  /// is the sum of its debit-side entries (see
+  /// `_fetchSalesPurchaseCashTallyApi`'s doc comment for why), kept
+  /// consistent with how that screen already renders tally-api vouchers.
+  /// A voucher with no ledger entries at all is skipped.
+  List<transactions> _mapVouchersToTransactions(
+    List<Map<String, dynamic>> vouchers,
+  ) {
     final rows = <transactions>[];
     for (final voucher in vouchers) {
-      if (vchname.isNotEmpty &&
-          vchname != 'All Transactions' &&
-          voucher['voucherTypeName'] != vchname) {
-        continue;
-      }
-
       final entries =
           (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
           const [];
@@ -1627,17 +1679,156 @@ class _TransactionsPageState extends State<Transactions>
         }),
       );
     }
+    return rows;
+  }
+
+  /// [_mapVouchersToTransactions], first narrowed to vouchers whose own
+  /// `date` falls within [from]..[to] (inclusive) - tally-api's `/vouchers`
+  /// list has no server-side date-range filter (see VoucherRepository's
+  /// doc comment), so every incrementally-loaded raw page has to be
+  /// date-filtered client-side like this, same as [VoucherRepository.
+  /// listInRange] already does for a full fetch.
+  List<transactions> _filterMapVoucherPage(
+    List<Map<String, dynamic>> rawVouchers,
+    DateTime from,
+    DateTime to,
+  ) {
+    final inRange = rawVouchers.where((v) {
+      final date = DateTime.tryParse(v['date'] as String? ?? '');
+      if (date == null) return false;
+      return !date.isBefore(DateTime(from.year, from.month, from.day)) &&
+          !date.isAfter(DateTime(to.year, to.month, to.day, 23, 59, 59));
+    });
+    return _mapVouchersToTransactions(inRange.toList());
+  }
+
+  /// tally-api path: starts (or restarts, e.g. on date-range/voucher-type
+  /// change) incremental backward paging over `/vouchers` and loads enough
+  /// of it to show a first result (see this class's paging-state doc
+  /// comment for why "backward" and why it auto-chains here specifically).
+  Future<void> _fetchAllTransactionsTallyApi(
+    final String startdate,
+    final String enddate,
+    final String vchname,
+  ) async {
+    final from = parseCompactDate(startdate);
+    final to = parseCompactDate(enddate);
+    final voucherTypeMasterId = (vchname.isEmpty || vchname == 'All Transactions')
+        ? null
+        : _voucherTypeMasterIdByName[vchname];
+
+    _txFrom = from;
+    _txTo = to;
+    _txVoucherTypeMasterId = voucherTypeMasterId;
+    _isChartDataStale = true;
+
+    final first = await VoucherRepository.instance.listPage(
+      page: 1,
+      limit: _txPageLimit,
+      voucherTypeMasterId: voucherTypeMasterId,
+    );
+    _txTotalPages = first.totalPages;
+    transactions_list.addAll(_filterMapVoucherPage(first.items, from, to));
+    _txCursor = _txTotalPages;
+
+    // Auto-chain backward (skipping page 1 - already covered above) only
+    // while nothing has matched yet, so a merely-empty early page doesn't
+    // flash a false "no data found" - bounded by _txTotalPages, so a
+    // genuinely empty range still terminates.
+    while (transactions_list.isEmpty && (_txCursor ?? 1) > 1) {
+      await _loadNextTransactionsPage(silent: true);
+    }
 
     isVisibleNoDataFound = false;
-    transactions_list.addAll(rows);
     filterPostDatedTransactions();
-    filteredItems_transactions = transactions_list;
+    _reapplyTransactionDisplay();
 
     setState(() {
       transactions_count = filteredItems_transactions.length.toString();
       _isAllList = true;
       _isLoading = false;
     });
+  }
+
+  /// Loads one more page (30 rows) walking backward from [_txTotalPages],
+  /// date-filtering and appending matches to `transactions_list`. Called
+  /// silently (no spinner/setState) by the auto-chain in
+  /// [_fetchAllTransactionsTallyApi]'s initial load, and normally by the
+  /// scroll-near-bottom listener for every page after that.
+  Future<void> _loadNextTransactionsPage({bool silent = false}) async {
+    if (_isLoadingMoreTx) return;
+    final page = _txCursor;
+    if (page == null || page <= 1) {
+      _txCursor = null; // page 1 already covered by the initial fetch
+      return;
+    }
+
+    if (!silent) setState(() => _isLoadingMoreTx = true);
+    try {
+      final result = await VoucherRepository.instance.listPage(
+        page: page,
+        limit: _txPageLimit,
+        voucherTypeMasterId: _txVoucherTypeMasterId,
+      );
+      transactions_list.addAll(
+        _filterMapVoucherPage(result.items, _txFrom!, _txTo!),
+      );
+      _txCursor = page - 1;
+
+      if (!silent) {
+        filterPostDatedTransactions();
+        _reapplyTransactionDisplay();
+        setState(() {
+          _isLoadingMoreTx = false;
+          transactions_count = filteredItems_transactions.length.toString();
+          isVisibleNoDataFound =
+              transactions_list.isEmpty && (_txCursor ?? 1) <= 1;
+        });
+      }
+    } catch (e) {
+      if (!silent) setState(() => _isLoadingMoreTx = false);
+    }
+  }
+
+  void _onTransactionsScroll() {
+    if (!_useTallyApi || _isTrendTabSelected) return;
+    if (_isLoadingMoreTx) return;
+    if (_txCursor == null || _txCursor! <= 1) return;
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      _loadNextTransactionsPage();
+    }
+  }
+
+  /// Ensures `_chartTransactionsList` reflects the CURRENT date range/
+  /// voucher-type filter, fully (see this class's paging-state doc comment
+  /// for why the trend chart can't just reuse the incrementally-loaded
+  /// `transactions_list`). No-op if already fresh; the legacy path is
+  /// already a full fetch, so it just reuses `transactions_list` directly.
+  Future<void> _ensureChartData() async {
+    if (!_isChartDataStale) return;
+    if (!_useTallyApi) {
+      setState(() => _chartTransactionsList = transactions_list);
+      return;
+    }
+    if (_txFrom == null || _txTo == null) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final vouchers = await VoucherRepository.instance.listInRange(
+        from: _txFrom!,
+        to: _txTo!,
+        voucherTypeMasterId: _txVoucherTypeMasterId,
+      );
+      setState(() {
+        _chartTransactionsList = _mapVouchersToTransactions(vouchers);
+        _isChartDataStale = false;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _initSharedPreferences() async {
@@ -1793,6 +1984,7 @@ class _TransactionsPageState extends State<Transactions>
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+    _scrollFabController.addListener(_onTransactionsScroll);
     _initSharedPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
@@ -1801,6 +1993,7 @@ class _TransactionsPageState extends State<Transactions>
 
   @override
   void dispose() {
+    _scrollFabController.removeListener(_onTransactionsScroll);
     _scrollFabController.dispose();
     super.dispose();
   }
@@ -1877,6 +2070,25 @@ class _TransactionsPageState extends State<Transactions>
                 size: 30,
               ),
             ),*/
+            // Sort now lives in the app bar (standard Material/iOS
+            // placement) instead of a floating pill hovering over the
+            // list - that pattern covered content, was easy to miss, and
+            // isn't how sort controls are usually surfaced. Disabled
+            // (greyed out) rather than hidden when there's nothing to sort
+            // (or on the Overview chart tab, where sorting never applied),
+            // so its position doesn't jump around as data/tabs change.
+            IconButton(
+              onPressed: isSortVisible && !_isTrendTabSelected
+                  ? () => _showSelectionWindow(context)
+                  : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible && !_isTrendTabSelected
+                    ? Colors.white
+                    : Colors.white38,
+                size: 22,
+              ),
+            ),
             IconButton(
               onPressed: () {
                 final RenderBox button =
@@ -1900,11 +2112,12 @@ class _TransactionsPageState extends State<Transactions>
                   items: <PopupMenuEntry<String>>[
                     PopupMenuItem<String>(
                       child: GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(context);
-                          if (!transactions_list.isEmpty) {
-                            generateAndSharePDF_Transactions();
-                          }
+                          if (transactions_list.isEmpty) return;
+                          final items = await _fullTransactionsForExport();
+                          if (items.isEmpty) return;
+                          generateAndSharePDF_Transactions(items);
                         },
                         child: Row(
                           children: [
@@ -1928,12 +2141,13 @@ class _TransactionsPageState extends State<Transactions>
                     ),
                     PopupMenuItem<String>(
                       child: GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(context);
 
-                          if (!transactions_list.isEmpty) {
-                            generateAndShareCSV_Transactions();
-                          }
+                          if (transactions_list.isEmpty) return;
+                          final items = await _fullTransactionsForExport();
+                          if (items.isEmpty) return;
+                          generateAndShareCSV_Transactions(items);
                         },
                         child: Row(
                           children: [
@@ -2561,55 +2775,29 @@ class _TransactionsPageState extends State<Transactions>
                       }, childCount: filteredItems_transactions.length),
                     ),
                   ),
-              ],
-            ),
 
-            Visibility(
-              // Sorting only applies to the transaction list, not the
-              // Overview chart tab - it was floating over the chart there
-              // before, which didn't make sense.
-              visible: isSortVisible && !_isTrendTabSelected,
-
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 50),
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: GestureDetector(
-                    onTap: () => _showSelectionWindow(context),
-                    child: Container(
-                      width: 100,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: app_color, // soft teal background
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.teal.withOpacity(0.3),
-                            blurRadius: 10,
-                            offset: Offset(0, 4),
+                // Bottom-of-list spinner while the next backward page of
+                // vouchers loads (tally-api path only - see this class's
+                // paging-state doc comment).
+                if (_useTallyApi && !_isTrendTabSelected && _isLoadingMoreTx)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: Colors.teal,
                           ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.sort, size: 18, color: Colors.white),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Sort',
-                            style: GoogleFonts.poppins(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
+              ],
             ),
+
             if (_isLoading)
               Positioned.fill(
                 child: Container(

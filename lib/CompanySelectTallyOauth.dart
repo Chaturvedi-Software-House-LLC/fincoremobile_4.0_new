@@ -6,35 +6,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Dashboard.dart';
 import 'Login.dart';
-import 'SerialSelect.dart';
 import 'constants.dart';
 import 'api/api_exception.dart';
 import 'api/auth_repository.dart';
+import 'legacy_permission_flags.dart';
 
 /// Company-switch entry points (Dashboard's app-bar company name,
-/// `app_bottom_nav.dart`'s "Companies" quick action) used to hardcode
-/// `SerialSelect()`, which only has data for a legacy-paired login -
-/// opening it from a tally-oauth-only session (Phase 6) showed an empty
-/// "No matching serial numbers" screen. `CompanySelectTallyOauth` never
-/// writes `serial_no` a real value (always `""`, see its own doc comment),
-/// while a legacy-paired session always has a real one - so its
-/// presence/absence is what these call sites should switch on instead of
-/// hardcoding either screen.
+/// `app_bottom_nav.dart`'s "Companies" quick action). Used to switch between
+/// `SerialSelect()` (legacy-paired login) and `CompanySelectTallyOauth()`
+/// depending on whether a `serial_no` pref was set - now that tally-oauth is
+/// the app's sole login driver (Phase 6+; the legacy backend is no longer
+/// used by any screen), no session ever sets a real `serial_no`, so this
+/// always resolves to `CompanySelectTallyOauth()`.
 Future<void> navigateToCompanySwitch(BuildContext context) async {
-  final prefs = await SharedPreferences.getInstance();
-  final serialNo = prefs.getString('serial_no');
   if (!context.mounted) return;
 
-  final hasLegacySession = serialNo != null && serialNo.isNotEmpty;
   // pushAndRemoveUntil, not pushReplacement - matches
   // app_bottom_nav.dart's own `_replaceWith` helper for the same "Companies"
   // action, clearing the whole nav stack rather than leaving a stale entry
   // behind a company switch.
   Navigator.of(context).pushAndRemoveUntil(
-    MaterialPageRoute(
-      builder: (_) =>
-          hasLegacySession ? SerialSelect() : const CompanySelectTallyOauth(),
-    ),
+    MaterialPageRoute(builder: (_) => const CompanySelectTallyOauth()),
     (route) => false,
   );
 }
@@ -68,10 +60,12 @@ Future<void> navigateToCompanySwitch(BuildContext context) async {
 ///
 /// Every SharedPreferences key this screen doesn't write (`hostname`,
 /// `token`, `company_trn`/`address`/`emirate`/`country`) is a deliberate
-/// gap, not a bug - see the "Phase 6" section of the migration plan. All
-/// ~47 legacy screen-visibility flags are granted "True" as an interim
-/// full-access default, since tally-oauth's permission catalog has no
-/// per-screen equivalent yet.
+/// gap, not a bug - see the "Phase 6" section of the migration plan. The
+/// ~48 legacy screen-visibility/enable flags are now set from the real
+/// permission-catalog `permissions` claim decoded off the company-user JWT
+/// (`AuthRepository.currentCompanyUserPermissions`), via
+/// `legacy_permission_flags.dart`'s mapping table - no longer the old
+/// hardcoded "everything True" interim default.
 class CompanySelectTallyOauth extends StatefulWidget {
   const CompanySelectTallyOauth({super.key});
 
@@ -302,59 +296,14 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
       await prefs.setString('company_emirate', '');
       await prefs.setString('company_country', '');
 
-      await prefs.setString('secbtnaccess', 'True');
-      for (final key in const [
-        'salesdash',
-        'purchasedash',
-        'barchartdash',
-        'linechartdash',
-        'piechartdash',
-        'salesentry',
-        'receiptentry',
-        'salesorderentry',
-        'outstandingreceivabledash',
-        'outstandingpayabledash',
-        'cashdash',
-        'receiptsdash',
-        'paymentsdash',
-        'allitems',
-        'activeitems',
-        'inactiveitems',
-        'rate',
-        'item_amount',
-        'item_sales',
-        'item_purchase',
-        'salesparty',
-        'purchaseparty',
-        'creditnoteparty',
-        'journalparty',
-        'payableparty',
-        'pendingpurchaseorderparty',
-        'receiptparty',
-        'paymentparty',
-        'debitnoteparty',
-        'receivableparty',
-        'pendingsalesorderparty',
-        'party_suppliers',
-        'party_customers',
-        'ledgerentries',
-        'inventoryentries',
-        'postdatedtransactions',
-        'billsentries',
-        'costcentreentries',
-        'vanallocation',
-        'deliverynoteentry',
-        'settings_currency',
-        'settings_amtdecimals',
-        'settings_vatperc',
-        'settings_inactivepdays',
-        'settings_sorttype',
-        'settings_defdaterange',
-        'settings_ageingconfig',
-        'settings_fastslowinactiveitem',
-      ]) {
-        await prefs.setString(key, 'True');
-      }
+      // Real per-permission screen-visibility flags, replacing the old
+      // hardcoded "everything True" interim default - see
+      // legacy_permission_flags.dart for the full legacy-key <-> new
+      // permission-string mapping and the fail-closed default it applies
+      // when the permissions claim can't be read at all.
+      final permissions =
+          await AuthRepository.instance.currentCompanyUserPermissions();
+      await applyPermissionFlags(prefs, permissions);
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(

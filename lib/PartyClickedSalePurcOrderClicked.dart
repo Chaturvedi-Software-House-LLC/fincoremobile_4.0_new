@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:FincoreGo/PartyClickedSalePurcOrder.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -15,6 +13,8 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
 import 'constants.dart';
+import 'api/ledger_repository.dart';
+import 'api/monthly_bucket_helper.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 
@@ -30,20 +30,13 @@ class Data_List {
     required this.pendingAmount,
     required this.vchdate,
   });
-
-  factory Data_List.fromJson(Map<String, dynamic> json) {
-    return Data_List(
-      orderno: json['orderno'].toString(),
-      pendingQty: json['pendingQty'].toString(),
-      pendingAmount: double.tryParse(json['pendingAmount'].toString()) ?? 0,
-      vchdate: json['vchdate'].toString(),
-    );
-  }
 }
 
 class PartyClickedSalePurcOrderClicked extends StatefulWidget {
   final String startdate_string, enddate_string, type, ledger, vchtype, item;
   final List<Data> dropdownItems;
+  final int ledgerMasterId;
+  final int stockItemMasterId;
 
   const PartyClickedSalePurcOrderClicked({
     required this.startdate_string,
@@ -53,6 +46,8 @@ class PartyClickedSalePurcOrderClicked extends StatefulWidget {
     required this.vchtype,
     required this.item,
     required this.dropdownItems,
+    required this.ledgerMasterId,
+    required this.stockItemMasterId,
   });
   @override
   _PartyClickedSalePurcOrderClickedPageState createState() =>
@@ -64,6 +59,8 @@ class PartyClickedSalePurcOrderClicked extends StatefulWidget {
         vchtype: vchtype,
         item: item,
         dropdownItems: dropdownItems,
+        ledgerMasterId: ledgerMasterId,
+        stockItemMasterId: stockItemMasterId,
       );
 }
 
@@ -81,8 +78,10 @@ class _PartyClickedSalePurcOrderClickedPageState
 
   int counter = 0;
   double total_double = 0;
+  final int ledgerMasterId;
+  final int stockItemMasterId;
 
-  String total_main = "0", token = '';
+  String total_main = "0";
 
   List<Data> dropdownItems;
 
@@ -97,6 +96,8 @@ class _PartyClickedSalePurcOrderClickedPageState
     required this.vchtype,
     required this.item,
     required this.dropdownItems,
+    required this.ledgerMasterId,
+    required this.stockItemMasterId,
   });
 
   List<Data_List> item_list = [];
@@ -135,13 +136,7 @@ class _PartyClickedSalePurcOrderClickedPageState
 
   late String? startdate_pref, enddate_pref;
 
-  String HttpURL = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
   String selectedSortOption = '';
@@ -559,13 +554,11 @@ class _PartyClickedSalePurcOrderClickedPageState
     return formattedDate;
   }
 
-  Future<void> fetchData(
-    final String vchtype,
-    final String partyname,
-    final String type,
-    final String enddate,
-    final String item,
-  ) async {
+  /// Replaces legacy's `getOrderSummary`-with-item-filter call. [stockItemMasterId]
+  /// drives the request; [item]'s name-string param is legacy-shaped but no
+  /// longer used to select data (the dropdown/initial value resolve their
+  /// own `stockItemMasterId` via [Data.stockItemMasterId] instead).
+  Future<void> _fetchOrderDetail(int stockItemMasterId) async {
     setState(() {
       _isLoading = true;
       _isListVisible = true;
@@ -576,40 +569,32 @@ class _PartyClickedSalePurcOrderClickedPageState
     filteredItems.clear();
 
     try {
-      final url = Uri.parse(HttpURL!);
+      final from = parseCompactDate(startDateString);
+      final to = parseCompactDate(endDateString);
+      final rows = await LedgerRepository.instance.pendingOrdersByVoucher(
+        ledgerMasterId,
+        stockItemMasterId,
+        isSales: vchtype == 'sales',
+        from: from,
+        to: to,
+      );
 
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final items = [
+        for (final row in rows)
+          Data_List(
+            orderno: (row['voucherNumber'] ?? '').toString(),
+            pendingQty: parseMoneyField(row['pendingQuantity']).toString(),
+            pendingAmount: parseMoneyField(row['pendingAmount']),
+            vchdate: (row['date'] ?? '').toString(),
+          ),
+      ];
 
-      var body = jsonEncode({
-        'vchtypes': vchtype,
-        'ledger': partyname,
-        'ordervchs': type,
-        'enddate': enddate,
-        'item': item,
+      setState(() {
+        item_list.addAll(items);
+        filteredItems = item_list;
+        isVisibleNoDataFound = false;
+        _isLoading = false;
       });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        print(response.body);
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          item_list.addAll(
-            values_list.map((json) => Data_List.fromJson(json)).toList(),
-          );
-          filteredItems = item_list;
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
-      }
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -650,12 +635,8 @@ class _PartyClickedSalePurcOrderClickedPageState
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
     try {
       selectedSortOption = prefs.getString('sort')!;
@@ -668,9 +649,6 @@ class _PartyClickedSalePurcOrderClickedPageState
     } catch (e) {
       selectedSortOption = 'Default';
     }
-
-    HttpURL =
-        '$hostname/api/ledger/getOrderSummary/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -717,7 +695,7 @@ class _PartyClickedSalePurcOrderClickedPageState
     setState(() {
       selectedTopValue = selectedValue;
     });
-    fetchData(vchtype, ledger, type, endDateString, selectedTopValue?.item ?? item);
+    _fetchOrderDetail(selectedTopValue?.stockItemMasterId ?? stockItemMasterId);
   }
 
   @override
@@ -782,6 +760,22 @@ class _PartyClickedSalePurcOrderClickedPageState
                 }
               },
               icon: Icon(Icons.search, color: Colors.white, size: 22),
+            ),
+            // Sort now lives in the app bar (standard Material/iOS
+            // placement) instead of a floating pill hovering over the
+            // list - that pattern covered content, was easy to miss, and
+            // isn't how sort controls are usually surfaced. Disabled
+            // (greyed out) rather than hidden when there's nothing to sort,
+            // so its position doesn't jump around as data loads.
+            IconButton(
+              onPressed: isSortVisible
+                  ? () => _showSelectionWindow(context)
+                  : null,
+              icon: Icon(
+                Icons.sort_rounded,
+                color: isSortVisible ? Colors.white : Colors.white38,
+                size: 22,
+              ),
             ),
             IconButton(
               onPressed: () {
@@ -929,14 +923,10 @@ class _PartyClickedSalePurcOrderClickedPageState
                             onChanged: (newValue) {
                               setState(() {
                                 selectedTopValue = newValue!;
-                                fetchData(
-                                  vchtype,
-                                  ledger,
-                                  type,
-                                  endDateString,
-                                  selectedTopValue!.item,
-                                );
                               });
+                              _fetchOrderDetail(
+                                selectedTopValue!.stockItemMasterId,
+                              );
                             },
                             items: dropdownItems.map((Data value) {
                               return DropdownMenuItem<Data>(
@@ -1288,61 +1278,6 @@ class _PartyClickedSalePurcOrderClickedPageState
               ),
             ],
           ),
-
-          if (isSortVisible)
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    _showSelectionWindow(context);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [app_color, app_color],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(50),
-                      boxShadow: [
-                        BoxShadow(
-                          color: app_color.withOpacity(0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.tune_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Sort',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
 
           if (_isLoading)
             Positioned.fill(

@@ -1,6 +1,19 @@
 import 'pagination_helper.dart';
 import 'tally_api_client.dart';
 
+/// One page of a `/vouchers` list call - `items` (raw voucher rows, masterId
+/// order) plus enough of tally-api's pagination `meta` to know whether to
+/// request another page. Used by callers that want real incremental
+/// (infinite-scroll) loading instead of [VoucherRepository.listAll]/
+/// [VoucherRepository.listInRange]'s "fetch every page up front" behavior.
+class VoucherPage {
+  VoucherPage({required this.items, required this.page, required this.totalPages});
+
+  final List<Map<String, dynamic>> items;
+  final int page;
+  final int totalPages;
+}
+
 /// Wraps tally-api's `vouchers` endpoints (full header + ledger/inventory/
 /// cost-centre entries per voucher - see `VOUCHER_DETAIL_SELECT` on the
 /// backend). Used by `DashboardClicked.dart`'s KPI-tile drill-down.
@@ -21,6 +34,28 @@ class VoucherRepository {
   Future<List<Map<String, dynamic>>> listAll() => fetchAllPages(
     (page) => _client.getForCompany('/vouchers?page=$page&limit=100'),
   );
+
+  /// One raw page of `/vouchers` (masterId order), optionally narrowed
+  /// server-side to one `voucherTypeMasterId`. **No date-range filter
+  /// exists on this endpoint** (see this class's doc comment) - a caller
+  /// wanting a date-bounded incremental list has to filter each page's
+  /// rows itself, same as [listInRange] does for the full set.
+  Future<VoucherPage> listPage({
+    required int page,
+    int limit = 30,
+    int? voucherTypeMasterId,
+  }) async {
+    final query = StringBuffer('?page=$page&limit=$limit');
+    if (voucherTypeMasterId != null) {
+      query.write('&voucherTypeMasterId=$voucherTypeMasterId');
+    }
+    final result = await _client.getForCompany('/vouchers$query');
+    return VoucherPage(
+      items: (result.data as List).cast<Map<String, dynamic>>(),
+      page: page,
+      totalPages: (result.meta?['totalPages'] as int?) ?? 1,
+    );
+  }
 
   /// [listAll] filtered client-side to [from]..[to] (inclusive, by the
   /// voucher's own `date` field) and optionally to one

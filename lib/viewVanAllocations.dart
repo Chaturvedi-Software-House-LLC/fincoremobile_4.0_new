@@ -1,92 +1,102 @@
-import 'dart:convert';
 import 'package:FincoreGo/addVanAllocations.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'ModifyVanAllocation.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
+import 'van_allocation_data.dart';
 import 'widgets/entry_widgets.dart';
 
+/// Lists company-users who currently have a vehicle allocated - i.e. have a
+/// single-masterId `GODOWN` master-restriction set (see
+/// `lib/van_allocation_data.dart` / `addVanAllocations.dart`'s doc-comment
+/// for the full design).
+///
+/// This is an N+1 screen by construction: master-restrictions has no
+/// "list every company-user's restrictions" endpoint, so this fetches every
+/// company-user then GETs their GODOWN/VOUCHER_TYPE restriction one at a
+/// time. Accepted per the task this was built against - a low-frequency
+/// admin screen, not a hot path.
 class ViewVanAllocationScreen extends StatefulWidget {
   const ViewVanAllocationScreen({super.key});
 
   @override
-  State<ViewVanAllocationScreen> createState() =>
-      _ViewVanAllocationScreenState();
+  State<ViewVanAllocationScreen> createState() => _ViewVanAllocationScreenState();
 }
 
 class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
   final Color primaryColor = app_color;
-  final Color backgroundColor = const Color(0xFFF5F7FA);
-  final Color textColor = const Color(0xFF1F2937);
 
   bool isLoading = true;
-
-  String hostname = "";
-  String token = "";
 
   final TextEditingController searchController = TextEditingController();
 
   List<Map<String, dynamic>> allocations = [];
   List<Map<String, dynamic>> filteredAllocations = [];
 
-  dynamic serial_no = "", company = "", company_lowercase = "";
-
   Set<int> expandedCards = {};
 
   @override
   void initState() {
     super.initState();
-    initialize();
-  }
-
-  Future<void> initialize() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    hostname = prefs.getString('hostname') ?? '';
-    token = prefs.getString('token') ?? '';
-    serial_no = prefs.getString('serial_no');
-    company = prefs.getString('company_name');
-    company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-    await fetchAllocations();
+    fetchAllocations();
   }
 
   Future<void> fetchAllocations() async {
+    setState(() => isLoading = true);
     try {
-      setState(() {
-        isLoading = true;
-      });
+      final results = await Future.wait([
+        VanAllocationData.listCompanyUsers(),
+        VanAllocationData.listAllGodowns(),
+        VanAllocationData.listVoucherTypesByReservedName('DELIVERY_NOTE'),
+        VanAllocationData.listVoucherTypesByReservedName('SALES'),
+        VanAllocationData.listVoucherTypesByReservedName('RECEIPT'),
+      ]);
+      final users = results[0] as List<CompanyUserOption>;
+      final godowns = results[1] as List<MasterOption>;
+      final godownNameById = {for (final g in godowns) g.masterId: g.name};
+      final vchNameById = <int, String>{
+        for (final v in results[2] as List<MasterOption>) v.masterId: v.name,
+        for (final v in results[3] as List<MasterOption>) v.masterId: v.name,
+        for (final v in results[4] as List<MasterOption>) v.masterId: v.name,
+      };
+      final deliveryIds = (results[2] as List<MasterOption>).map((v) => v.masterId).toSet();
+      final salesIds = (results[3] as List<MasterOption>).map((v) => v.masterId).toSet();
+      final receiptIds = (results[4] as List<MasterOption>).map((v) => v.masterId).toSet();
 
-      var url = Uri.parse(
-        '$BASE_URL_config/api/spectra/allocations?serial_no=$serial_no&company_name=$company',
-      );
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer $authTokenBase',
-          'Content-Type': 'application/json',
-        },
-      );
+      final built = <Map<String, dynamic>>[];
+      for (final user in users) {
+        final godownId = await VanAllocationData.currentGodownMasterId(user.id);
+        if (godownId == null) continue; // unrestricted/none -> not "allocated"
 
-      debugPrint("VIEW ALLOCATION URL: ${url}");
-      debugPrint("VIEW ALLOCATION RESPONSE: ${response.body}");
+        final vchIds = await VanAllocationData.currentVoucherTypeMasterIds(user.id);
+        String? nameFor(Set<int> group) {
+          for (final id in vchIds) {
+            if (group.contains(id)) return vchNameById[id];
+          }
+          return null;
+        }
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-
-        allocations = List<Map<String, dynamic>>.from(data);
-
-        filteredAllocations = allocations;
+        built.add({
+          'companyUserId': user.id,
+          'name': user.name,
+          'user_name': user.username,
+          'godownMasterId': godownId,
+          'godown_name': godownNameById[godownId] ?? '',
+          'voucherTypeMasterIds': vchIds,
+          'voucher_type_name': nameFor(deliveryIds) ?? '',
+          'sales_voucher_type': nameFor(salesIds) ?? '',
+          'receipt_voucher_type': nameFor(receiptIds) ?? '',
+        });
       }
+
+      allocations = built;
+      filteredAllocations = allocations;
     } catch (e) {
       debugPrint("VIEW ALLOCATION ERROR: $e");
     } finally {
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
     }
   }
 
@@ -95,44 +105,18 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
       filteredAllocations = allocations;
     } else {
       filteredAllocations = allocations.where((allocation) {
-        return allocation.toString().toLowerCase().contains(
-          query.toLowerCase(),
-        );
+        return allocation.toString().toLowerCase().contains(query.toLowerCase());
       }).toList();
     }
-
     setState(() {});
   }
 
   Future<void> deleteAllocation(Map<String, dynamic> allocation) async {
     try {
-      final response = await http.delete(
-        Uri.parse('$BASE_URL_config/api/spectra/Allocations'),
-
-        headers: {
-          'Authorization': 'Bearer $authTokenBase',
-          'Content-Type': 'application/json',
-        },
-
-        body: jsonEncode({
-          "user_name": allocation['user_name'],
-          "serial_no": allocation['serial_no'],
-          "company_name": allocation['company_name'],
-        }),
-      );
-
-      debugPrint("DELETE RESPONSE: ${response.body}");
-
-      if (response.statusCode == 200) {
-        /*showAppMessage(context, 'Allocation deleted successfully', isError: false);*/
-
-        fetchAllocations();
-      } else {
-        showAppMessage(context, 'Delete failed: ${response.body}');
-      }
+      await VanAllocationData.clearAllocation(allocation['companyUserId'] as String);
+      fetchAllocations();
     } catch (e) {
       debugPrint("DELETE ERROR: $e");
-
       showAppMessage(context, 'Error: $e');
     }
   }
@@ -142,51 +126,27 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
       context: context,
       builder: (_) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-
-          title: Text(
-            "Delete Allocation",
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-          ),
-
-          content: Text(
-            "Are you sure you want to delete this allocation?",
-            style: GoogleFonts.poppins(),
-          ),
-
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          title: Text("Delete Allocation", style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+          content: Text("Are you sure you want to delete this allocation?", style: GoogleFonts.poppins()),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
+              onPressed: () => Navigator.pop(context),
               child: Text(
                 "Cancel",
-                style: GoogleFonts.poppins(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                style: GoogleFonts.poppins(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
-
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-
               onPressed: () {
                 Navigator.pop(context);
-
                 deleteAllocation(allocation);
               },
-
-              child: Text(
-                "Delete",
-                style: GoogleFonts.poppins(color: Colors.white),
-              ),
+              child: Text("Delete", style: GoogleFonts.poppins(color: Colors.white)),
             ),
           ],
         );
@@ -194,12 +154,6 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
     );
   }
 
-  // Skeleton stand-in for the header + allocation list while the initial
-  // fetch is in flight - replaces the old centered spinner so the loading
-  // state reads as "content incoming" instead of a blank page. Generic
-  // (icon badge + 2 text lines + trailing value) rather than mirroring the
-  // exact allocation card variants, since the shape is close enough for
-  // the transition to feel seamless.
   Widget _buildSkeletonList() {
     return ShimmerLoading(
       child: ListView(
@@ -211,13 +165,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
             decoration: BoxDecoration(
               color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black12.withOpacity(0.08),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
+              boxShadow: [BoxShadow(color: Colors.black12.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 3))],
             ),
             child: const ShimmerBox(height: 38, borderRadius: 12),
           ),
@@ -228,16 +176,8 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12.withOpacity(0.08),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-                border: Border.all(
-                  color: Theme.of(context).dividerColor.withOpacity(0.55),
-                ),
+                boxShadow: [BoxShadow(color: Colors.black12.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 3))],
+                border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.55)),
               ),
               child: Row(
                 children: [
@@ -271,13 +211,12 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
         activeMoreItem: AppMoreItem.vanAllocation,
       ),
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-
       appBar: AppBar(
         elevation: 0,
         centerTitle: true,
         backgroundColor: primaryColor,
         iconTheme: const IconThemeData(color: Colors.white),
-        actions: [],
+        actions: const [],
         title: Row(
           children: [
             Container(
@@ -286,40 +225,25 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 color: Theme.of(context).cardColor.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
-                Icons.visibility_outlined,
-                color: Colors.white,
-                size: 20,
-              ),
+              child: const Icon(Icons.visibility_outlined, color: Colors.white, size: 20),
             ),
-
             const SizedBox(width: 12),
-
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'View Allocations',
-                  style: GoogleFonts.poppins(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
+                  style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white),
                 ),
                 Text(
                   'Manage allocations',
-
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    color: Colors.white.withOpacity(0.8),
-                  ),
+                  style: GoogleFonts.poppins(fontSize: 11, color: Colors.white.withOpacity(0.8)),
                 ),
               ],
             ),
           ],
         ),
       ),
-
       body: isLoading
           ? _buildSkeletonList()
           : RefreshIndicator(
@@ -332,21 +256,15 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                     padding: const EdgeInsets.all(16),
                     child: filteredAllocations.isEmpty
                         ? ConstrainedBox(
-                            constraints: BoxConstraints(
-                              minHeight: constraints.maxHeight - 32,
-                            ),
+                            constraints: BoxConstraints(minHeight: constraints.maxHeight - 32),
                             child: IntrinsicHeight(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   _buildSearchBar(),
-
                                   const SizedBox(height: 18),
-
                                   _buildStatsRow(),
-
                                   const SizedBox(height: 18),
-
                                   Expanded(child: _emptyState()),
                                 ],
                               ),
@@ -356,26 +274,17 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildSearchBar(),
-
                               const SizedBox(height: 18),
-
                               _buildStatsRow(),
-
                               const SizedBox(height: 18),
-
                               ListView.separated(
                                 shrinkWrap: true,
                                 physics: const NeverScrollableScrollPhysics(),
                                 itemCount: filteredAllocations.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(height: 14),
-                                itemBuilder: (context, index) {
-                                  final allocation = filteredAllocations[index];
-                                  print(allocation);
-                                  return _allocationCard(allocation, index);
-                                },
+                                separatorBuilder: (_, __) => const SizedBox(height: 14),
+                                itemBuilder: (context, index) =>
+                                    _allocationCard(filteredAllocations[index], index),
                               ),
-
                               const SizedBox(height: 90),
                             ],
                           ),
@@ -383,7 +292,6 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 },
               ),
             ),
-
       floatingActionButton: filteredAllocations.isEmpty
           ? null
           : FloatingActionButton.extended(
@@ -392,18 +300,13 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
               onPressed: () {
                 Navigator.pushReplacement(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const VanAllocationScreen(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const VanAllocationScreen()),
                 );
               },
               icon: const Icon(Icons.add, color: Colors.white),
               label: Text(
                 "Create Allocation",
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
               ),
             ),
     );
@@ -415,44 +318,23 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
         borderRadius: BorderRadius.circular(28),
         color: Theme.of(context).cardColor,
         boxShadow: [
-          BoxShadow(
-            color: primaryColor.withOpacity(0.08),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
+          BoxShadow(color: primaryColor.withOpacity(0.08), blurRadius: 22, offset: const Offset(0, 10)),
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 3)),
         ],
         border: Border.all(color: primaryColor.withOpacity(0.14), width: 1.3),
       ),
       child: TextField(
         controller: searchController,
         onChanged: filterAllocations,
-        style: GoogleFonts.poppins(
-          fontSize: 13.5,
-          fontWeight: FontWeight.w500,
-          color: Theme.of(context).colorScheme.onSurface,
-        ),
+        style: GoogleFonts.poppins(fontSize: 13.5, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface),
         decoration: InputDecoration(
           hintText: 'Search allocations...',
-          hintStyle: GoogleFonts.poppins(
-            fontSize: 12.8,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontWeight: FontWeight.w400,
-          ),
-
+          hintStyle: GoogleFonts.poppins(fontSize: 12.8, color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w400),
           prefixIcon: Container(
             margin: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(16),
-            ),
+            decoration: BoxDecoration(color: primaryColor.withOpacity(0.10), borderRadius: BorderRadius.circular(16)),
             child: Icon(Icons.search_rounded, color: primaryColor, size: 22),
           ),
-
           suffixIcon: searchController.text.isNotEmpty
               ? IconButton(
                   splashRadius: 20,
@@ -464,42 +346,22 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
                       color: Theme.of(context).brightness == Brightness.dark
-                          ? Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest
+                          ? Theme.of(context).colorScheme.surfaceContainerHighest
                           : Colors.grey.shade100,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      Icons.close_rounded,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                    child: Icon(Icons.close_rounded, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 )
               : null,
-
           filled: true,
           fillColor: Colors.transparent,
-
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 20,
-          ),
-
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(28),
-            borderSide: BorderSide.none,
-          ),
-
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: BorderSide.none),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(28),
-            borderSide: BorderSide(
-              color: primaryColor.withOpacity(0.10),
-              width: 1.2,
-            ),
+            borderSide: BorderSide(color: primaryColor.withOpacity(0.10), width: 1.2),
           ),
-
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(28),
             borderSide: BorderSide(color: primaryColor, width: 1.5),
@@ -512,15 +374,6 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
   Widget _buildStatsRow() {
     return Row(
       children: [
-        /*Expanded(
-          child: _statCard(
-            'Total',
-            allocations.length.toString(),
-            Icons.list_alt_outlined,
-          ),
-        ),
-
-        const SizedBox(width: 12),*/
         Expanded(
           child: _statCard(
             "Vehicle's",
@@ -528,9 +381,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
             Icons.location_on_outlined,
           ),
         ),
-
         const SizedBox(width: 12),
-
         Expanded(
           child: _statCard(
             'Users',
@@ -550,33 +401,13 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(14),
-            ),
+            decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(14)),
             child: Icon(icon, color: primaryColor),
           ),
-
           const SizedBox(height: 10),
-
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-
+          Text(value, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)),
           const SizedBox(height: 4),
-
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
+          Text(title, style: GoogleFonts.poppins(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       ),
     );
@@ -598,51 +429,31 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 backgroundColor: primaryColor.withOpacity(0.12),
                 child: Icon(Icons.person_outline, color: primaryColor),
               ),
-
               const SizedBox(width: 14),
-
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       allocation['name'] ?? '',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+                      style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
                     ),
-
                     const SizedBox(height: 4),
-
                     Text(
                       allocation['user_name'] ?? '',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11.5,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                      style: GoogleFonts.poppins(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
               ),
-
               PopupMenuButton<String>(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 onSelected: (value) {
-                  if (value == 'delete') {
-                    showDeleteDialog(allocation);
-                  }
-
+                  if (value == 'delete') showDeleteDialog(allocation);
                   if (value == 'edit') {
                     Navigator.pushReplacement(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ModifyVanAllocationScreen(allocation: allocation),
-                      ),
+                      MaterialPageRoute(builder: (_) => ModifyVanAllocationScreen(allocation: allocation)),
                     );
                   }
                 },
@@ -653,31 +464,15 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 16),
-
           Wrap(
             spacing: 10,
             runSpacing: 10,
             children: [
-              _infoChip(
-                Icons.location_on_outlined,
-                "Vehicle",
-                allocation['godown_name'] ?? '',
-              ),
-              _infoChip(
-                Icons.receipt_long_outlined,
-                'D/O Voucher',
-                allocation['voucher_type_name'] ?? '',
-              ),
-              _infoChip(
-                Icons.local_shipping_outlined,
-                'Bulk',
-                parseBoolFlag(allocation['is_bulk']) ? 'Yes' : 'No',
-              ),
+              _infoChip(Icons.location_on_outlined, "Vehicle", allocation['godown_name'] ?? ''),
+              _infoChip(Icons.receipt_long_outlined, 'D/O Voucher', allocation['voucher_type_name'] ?? ''),
             ],
           ),
-
           AnimatedCrossFade(
             firstChild: const SizedBox.shrink(),
             secondChild: Padding(
@@ -686,37 +481,15 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  _infoChip(
-                    Icons.point_of_sale_outlined,
-                    'Sales Voucher',
-                    allocation['sales_voucher_type'] ?? '',
-                  ),
-                  _infoChip(
-                    Icons.receipt_outlined,
-                    'Receipt Voucher',
-                    allocation['receipt_voucher_type'] ?? '',
-                  ),
-                  _infoChip(
-                    Icons.account_balance_wallet_outlined,
-                    'Sales Ledger',
-                    allocation['sales_ledger'] ?? '',
-                  ),
-                  _infoChip(
-                    Icons.payments_outlined,
-                    'Cash Ledger',
-                    allocation['cash_ledger'] ?? '',
-                  ),
+                  _infoChip(Icons.point_of_sale_outlined, 'Sales Voucher', allocation['sales_voucher_type'] ?? ''),
+                  _infoChip(Icons.receipt_outlined, 'Receipt Voucher', allocation['receipt_voucher_type'] ?? ''),
                 ],
               ),
             ),
-            crossFadeState: isExpanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
+            crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 220),
           ),
-
           const SizedBox(height: 12),
-
           Center(
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
@@ -730,26 +503,17 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 });
               },
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       isExpanded ? 'View Less' : 'View More',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: primaryColor,
-                      ),
+                      style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: primaryColor),
                     ),
                     const SizedBox(width: 4),
                     Icon(
-                      isExpanded
-                          ? Icons.keyboard_arrow_up_rounded
-                          : Icons.keyboard_arrow_down_rounded,
+                      isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                       color: primaryColor,
                       size: 20,
                     ),
@@ -763,52 +527,12 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
     );
   }
 
-  Widget _actionButton(
-    String title,
-    IconData icon,
-    Color color, {
-    VoidCallback? onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 18),
-
-            const SizedBox(width: 6),
-
-            Text(
-              title,
-              style: GoogleFonts.poppins(
-                color: color,
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _infoChip(IconData icon, String label, String value) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: isDark
-            ? Theme.of(
-                context,
-              ).colorScheme.surfaceContainerHighest.withOpacity(0.5)
-            : const Color(0xFFF5F7FA),
+        color: isDark ? Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5) : const Color(0xFFF5F7FA),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -818,19 +542,11 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
           const SizedBox(width: 6),
           Text(
             '$label: ',
-            style: GoogleFonts.poppins(
-              fontSize: 10.5,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
-            ),
+            style: GoogleFonts.poppins(fontSize: 10.5, color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w500),
           ),
           Text(
             value.isEmpty ? '-' : value,
-            style: GoogleFonts.poppins(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
+            style: GoogleFonts.poppins(fontSize: 11.5, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
           ),
         ],
       ),
@@ -853,71 +569,37 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
               Container(
                 height: 82,
                 width: 82,
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.08),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.inbox_outlined,
-                  size: 40,
-                  color: primaryColor,
-                ),
+                decoration: BoxDecoration(color: primaryColor.withOpacity(0.08), shape: BoxShape.circle),
+                child: Icon(Icons.inbox_outlined, size: 40, color: primaryColor),
               ),
-
               const SizedBox(height: 20),
-
               Text(
                 "No Allocations Found",
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
+                style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
               ),
-
               const SizedBox(height: 10),
-
               Text(
                 "There are currently no allocations available. Tap the button below to create a new allocation.",
                 textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                style: GoogleFonts.poppins(fontSize: 13, height: 1.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
-
               const SizedBox(height: 24),
-
               ElevatedButton.icon(
                 onPressed: () {
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const VanAllocationScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const VanAllocationScreen()),
                   );
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primaryColor,
                   elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
                 icon: const Icon(Icons.add_rounded, color: Colors.white),
-                label: Text(
-                  "Create Allocation",
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                label: Text("Create Allocation", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -933,13 +615,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
       border: Theme.of(context).brightness == Brightness.dark
           ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
           : null,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.04),
-          blurRadius: 18,
-          offset: const Offset(0, 8),
-        ),
-      ],
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 18, offset: const Offset(0, 8))],
     );
   }
 }

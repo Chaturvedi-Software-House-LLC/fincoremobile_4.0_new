@@ -4851,6 +4851,7 @@ class _PartyClickedPageState extends State<PartyClicked>
           type: type,
           ledger: partyname,
           vchtype: vchtype,
+          ledgerMasterId: ledgerMasterId,
         ),
       ),
     );

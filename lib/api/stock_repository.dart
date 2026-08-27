@@ -3,6 +3,21 @@ import 'tally_api_client.dart';
 
 String _dateOnly(DateTime d) => d.toIso8601String().split('T').first;
 
+/// One page of a `/stock-items` list call - `items` plus enough of
+/// tally-api's pagination `meta` to know whether to request another page.
+/// Used by callers that want real incremental (infinite-scroll) loading
+/// instead of [StockRepository.listStockItems]'s "fetch every page up
+/// front" behavior.
+class StockItemPage {
+  StockItemPage({required this.items, required this.page, required this.totalPages});
+
+  final List<Map<String, dynamic>> items;
+  final int page;
+  final int totalPages;
+
+  bool get hasMore => page < totalPages;
+}
+
 class StockRepository {
   StockRepository._();
   static final StockRepository instance = StockRepository._();
@@ -28,6 +43,27 @@ class StockRepository {
     return items
         .where((i) => i['stockGroupMasterId'] == stockGroupMasterId)
         .toList();
+  }
+
+  /// One page of stock items, optionally narrowed to one [stockGroupMasterId]
+  /// (server-side equality filter, unlike ledgers' groupMasterId - there's
+  /// no "All Groups but party-like only" narrowing to worry about here, so
+  /// omitting it genuinely means "every item", no multi-group merge needed).
+  Future<StockItemPage> listStockItemsPage({
+    required int page,
+    int limit = 30,
+    int? stockGroupMasterId,
+  }) async {
+    final query = StringBuffer('?page=$page&limit=$limit');
+    if (stockGroupMasterId != null) {
+      query.write('&stockGroupMasterId=$stockGroupMasterId');
+    }
+    final result = await _client.getForCompany('/stock-items$query');
+    return StockItemPage(
+      items: (result.data as List).cast<Map<String, dynamic>>(),
+      page: page,
+      totalPages: (result.meta?['totalPages'] as int?) ?? 1,
+    );
   }
 
   /// `reports/stock-items/movement-analysis` - fast/slow/inactive

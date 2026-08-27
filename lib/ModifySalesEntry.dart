@@ -6,7 +6,6 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,9 +17,24 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
+import 'api/api_exception.dart';
+import 'api/ledger_repository.dart';
+import 'api/stock_repository.dart';
+import 'api/voucher_entry_repository.dart';
+import 'api/group_repository.dart';
+import 'api/voucher_type_repository.dart';
+import 'api/currency_repository.dart';
+import 'api/godown_repository.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 
 class ModifySalesEntry extends StatefulWidget {
-  final int id, isSynced;
+  // `id` is now the tally-api `VoucherEntry.id` (a UUID string returned by
+  // `VoucherEntryRepository.getById`/`listAll`), not the legacy numeric row
+  // id. `data` must be one entry in `VoucherEntryRepository.listAll()`'s
+  // shape (equivalently `getById()`'s return value) - see this file's
+  // `loadData()` doc comment for the exact fields read off it.
+  final String id;
+  final int isSynced;
   final String type;
   final Map<String, dynamic> data;
   const ModifySalesEntry({
@@ -135,7 +149,8 @@ class LedgerEntry {
 
 class _ModifySalesEntryPageState extends State<ModifySalesEntry>
     with TickerProviderStateMixin {
-  int id, isSynced;
+  String id;
+  int isSynced;
   String type;
   Map<String, dynamic> data;
   _ModifySalesEntryPageState({
@@ -455,67 +470,74 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
     }
   }
 
+  /// Replaces legacy's `GET /api/entry/nos/:company/:serial` (server-side
+  /// generated/validated voucher numbers from Tally's own voucher sequence
+  /// for this vchtype/date-range).
+  ///
+  /// **Voucher-numbering gap** (same as SalesRegistration.dart's
+  /// `fetchvchnos`): tally-api's `VoucherEntry` table is an app-originated
+  /// table with no auto-numbering of its own and no visibility into Tally's
+  /// real voucher sequence. [vchnos] is populated from the voucher numbers
+  /// of this screen's own previously-created `VoucherEntry` rows (same
+  /// vchtype, same date range) instead, purely to keep
+  /// [checkVchNoExistence]'s duplicate-number validation working when the
+  /// user edits the voucher number field (`isVchEditable`) - unlike
+  /// SalesRegistration's version, this screen never auto-fills
+  /// `_vchnoController` from this list (the existing entry's own number,
+  /// loaded by `loadData()`, is left as-is unless the user edits it).
+  /// This entry's own [id] is excluded from the pool so re-saving with its
+  /// unchanged voucher number never flags itself as a duplicate.
   Future<void> fetchvchnos(String vchname) async {
-    // Format the dates as yyyyMMdd
-    String formattedStartDateVchNo = DateFormat(
-      'yyyyMMdd',
-    ).format(yearStartDate);
-    String formattedEndDateVchNo = DateFormat('yyyyMMdd').format(yearEndDate);
+    final DateTime rangeStart = yearStartDate;
+    final DateTime rangeEndExclusive = DateTime(
+      yearEndDate.year,
+      yearEndDate.month,
+      yearEndDate.day,
+    ).add(const Duration(days: 1));
 
     vchnos.clear();
     setState(() {
       _isLoading = true;
     });
 
-    // vchnos fetching
     try {
-      final url = Uri.parse(HttpURL_fetchvchnos!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
+      final entries = await VoucherEntryRepository.instance.listAll();
 
-      Map<String, dynamic> jsonDatabody = {
-        "to": formattedEndDateVchNo,
-        "from": formattedStartDateVchNo,
-        "vchname": vchname,
-      };
+      setState(() {
+        vchnos = [
+          for (final entry in entries)
+            if (entry['id'] != id)
+              if (voucherTypeMasterId == null ||
+                  entry['voucherTypeMasterId'] == voucherTypeMasterId)
+                if (_entryDateWithinRange(
+                  entry['date']?.toString(),
+                  rangeStart,
+                  rangeEndExclusive,
+                ))
+                  if ((entry['voucherNumber'] as String?)?.isNotEmpty ?? false)
+                    entry['voucherNumber'] as String,
+        ];
 
-      String jsonDatabodyString = jsonEncode(jsonDatabody);
-
-      var body = jsonDatabodyString;
-      final response = await http.post(url, headers: headers, body: body);
-
-      if (response.statusCode == 200) {
-        /*print(response.body);*/
-        setState(() {
-          final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-
-          final List<dynamic> vchnosJson = jsonResponse['vchnos'];
-          vchnos = vchnosJson.cast<String>();
-          int q = vchnos.length;
-          print('vchno list containes $q nos whos values are $vchnos');
-
-          if (isVchEditable) {
-            checkVchNoExistence(_vchnoController.text);
-          }
+        vchnos.sort((a, b) {
+          RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
+          int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
+          int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
+          return numA.compareTo(numB);
         });
-      } else {
-        vchnos.clear();
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
+
+        debugPrint('vch nos from tally-api VoucherEntry -> $vchnos');
+
+        if (isVchEditable) {
+          checkVchNoExistence(_vchnoController.text);
         }
-        showAppMessage(context, error);
-      }
+      });
+    } on ApiException catch (e) {
+      vchnos.clear();
+      showAppMessage(context, e.message);
     } catch (e) {
       vchnos.clear();
-      print(e);
+      debugPrint('ModifySalesEntry fetchvchnos failed: $e');
     }
 
     setState(() {
@@ -648,10 +670,6 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
       SecuritybtnAcessHolder = "";
 
   late DateTime saledate, refdate;
-  String? HttpURL_loadData,
-      HttpURL_modifysalesEntry,
-      HttpURL_fetchvchnos,
-      HttpURL_loadLedgerData;
 
   double selectedMultiplier = 0.0;
 
@@ -666,6 +684,108 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
   final TextEditingController ledgerAmountController = TextEditingController();
 
   String currencycode = '';
+
+  // ---- tally-api master-data caches (populated by loadData()) ----------
+  //
+  // Same role as SalesRegistration.dart's identically-named fields: resolve
+  // a display name back to the tally-api masterId a voucher-entries
+  // create/update body needs (loadLedgerData()/fetchvchnos()/updateEntry()
+  // read these instead of making their own network call).
+  final Map<String, int> _ledgerMasterIdByName = {};
+  final Map<String, int> _voucherTypeMasterIdByName = {};
+  final Map<String, int> _godownMasterIdByName = {};
+  List<Map<String, dynamic>> _allLedgersCache = [];
+  int? _currencyMasterId;
+
+  /// `YYYY-MM-DD`, the `z.iso.date()` shape every voucherEntrySchema date
+  /// field expects.
+  String _isoDate(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
+  /// Resolves [unitName] (the display name currently selected on a
+  /// [SaleItem]) back to its tally-api unitMasterId, by matching against
+  /// the item's own `unit` list (as shaped by
+  /// `_shapeStockItemForLegacyItemdata`, each entry carrying a `masterId`).
+  int? _findUnitMasterId(List<dynamic> unitJson, String unitName) {
+    for (final u in unitJson) {
+      if (u is Map && u['name'] == unitName) {
+        return u['masterId'] as int?;
+      }
+    }
+    return null;
+  }
+
+  /// Whether [isoDate] (a `YYYY-MM-DD` voucher-entry date) falls in
+  /// `[start, endExclusive)`. Used by [fetchvchnos] to scope the "existing
+  /// voucher numbers" pool to the same date range the date-range picker
+  /// selects.
+  bool _entryDateWithinRange(
+    String? isoDate,
+    DateTime start,
+    DateTime endExclusive,
+  ) {
+    if (isoDate == null) return false;
+    final date = DateTime.tryParse(isoDate);
+    if (date == null) return false;
+    return !date.isBefore(start) && date.isBefore(endExclusive);
+  }
+
+  /// Reshapes one tally-api stock-items row into the legacy key names this
+  /// screen's item picker/unit-dropdown/bulk-add code already reads
+  /// (`name`/`masterid`/`saleprice`/`standardprice`/`unit`/`part`) - mirrors
+  /// SalesRegistration.dart's identically-named method exactly.
+  Map<String, dynamic> _shapeStockItemForLegacyItemdata(
+    Map<String, dynamic> item,
+  ) {
+    final int? baseUnitMasterId = item['baseUnitMasterId'] as int?;
+    final String? baseUnitSymbol = (item['baseUnitSymbol'] as String?)
+        ?.trim();
+    final int? additionalUnitMasterId = item['additionalUnitMasterId'] as int?;
+    final String? additionalUnitSymbol =
+        (item['additionalUnitSymbol'] as String?)?.trim();
+    // "1 additionalUnit = denominator baseUnits" - saleprice/standardprice
+    // below are priced per base unit, so the additional unit's rate
+    // multiplier is that same denominator.
+    final double denominator = parseMoneyField(item['denominator']);
+
+    final units = <Map<String, dynamic>>[];
+    if (baseUnitMasterId != null &&
+        baseUnitSymbol != null &&
+        baseUnitSymbol.isNotEmpty) {
+      units.add({
+        'name': baseUnitSymbol,
+        'multiplier': '1',
+        'masterId': baseUnitMasterId,
+      });
+    }
+    if (additionalUnitMasterId != null &&
+        additionalUnitSymbol != null &&
+        additionalUnitSymbol.isNotEmpty) {
+      units.add({
+        'name': additionalUnitSymbol,
+        'multiplier': (denominator == 0 ? 1 : denominator).toString(),
+        'masterId': additionalUnitMasterId,
+      });
+    }
+    if (units.isEmpty) {
+      // Every real Tally stock item has at least a base unit - this only
+      // guards `_updateUnitDropdown()`'s `unitdata[0]` access for the
+      // unexpected case of a completely unresolved unit.
+      units.add({'name': '', 'multiplier': '1', 'masterId': null});
+    }
+
+    return {
+      'name': item['name'],
+      'masterid': item['masterId'],
+      'saleprice': item['lastSalePrice']?.toString() ?? 'null',
+      // tally-api's own field name (misspelled server-side, see Items.dart).
+      'standardprice': item['stardardPrice']?.toString() ?? 'null',
+      'unit': units,
+      'part': (item['partNo'] as List?)?.cast<String>().join(', ') ?? '',
+    };
+  }
 
   String formatitemKey(int key) {
     key++;
@@ -3063,58 +3183,38 @@ _itemController.text = _selecteditem;
     }
   }
 
+  /// Replaces legacy's `GET /api/ledger/getLedger/:company/:serial` with a
+  /// local lookup against `_allLedgersCache` (populated by loadData())
+  /// instead of a network call - mirrors SalesRegistration.dart's
+  /// identically-named method.
   Future<void> loadLedgerData() async {
     setState(() {
       _isLoading = true;
     });
 
-    // vchtype fetching
     try {
-      final url = Uri.parse(HttpURL_loadLedgerData!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
+      final ledger = _allLedgersCache.firstWhere(
+        (l) => l['name'] == _selectedpartyledger,
+        orElse: () => const {},
+      );
 
-      var body = jsonEncode({"ledger": _selectedpartyledger});
-      final response = await http.post(url, headers: headers, body: body);
+      final String tinValue = ledger['tinNumber']?.toString() ?? 'null';
+      final String address =
+          (ledger['address'] as List?)?.cast<String>().join(', ') ?? 'null';
+      final String emirate = ledger['stateName']?.toString() ?? 'null';
+      final String country = ledger['countryName']?.toString() ?? 'null';
 
-      if (response.statusCode == 200) {
-        /*print(response.body);*/
-
-        List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-
-        String tinValue = data.first['tin'].toString();
-        String address = data.first['address'].toString();
-
-        String emirate = data.first['state'].toString();
-        String country = data.first['country'].toString();
-
-        /*print('trn value of $_selectedpartyledger is $tinValue');*/
-
-        setState(() {
-          showSalesInvoiceDialogUpdated(
-            context,
-            tinValue,
-            address,
-            emirate,
-            country,
-          );
-        });
-      } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
-        }
-        showAppMessage(context, error);
-      }
+      setState(() {
+        showSalesInvoiceDialogUpdated(
+          context,
+          tinValue,
+          address,
+          emirate,
+          country,
+        );
+      });
     } catch (e) {
-      print(e);
+      debugPrint('ModifySalesEntry loadLedgerData failed: $e');
     }
 
     setState(() {
@@ -3194,7 +3294,15 @@ _itemController.text = _selecteditem;
     );
   }
 
-  Future<void> updateEntry(int id) async {
+  /// Replaces legacy's `POST /api/entry/updateEntry/:company/:serial` with
+  /// `VoucherEntryRepository.update`, building the request body the same
+  /// way SalesRegistration.dart's `saveEntry()` builds its create body
+  /// (same `voucherEntrySchema` field mapping) - this screen lets the user
+  /// re-edit `ledgerEntries`/`inventoryEntries` in full (add/remove items
+  /// and manual ledgers), so both are always rebuilt wholesale from the
+  /// current form state and included on every update, matching the
+  /// server's delete-then-reinsert semantics for those two arrays.
+  Future<void> updateEntry(String voucherEntryId) async {
     // ❌ Prevent save if Party Ledger not selected
     if (_selectedpartyledger == null ||
         _selectedpartyledger.toString().trim().isEmpty) {
@@ -3215,151 +3323,167 @@ _itemController.text = _selecteditem;
       String vchnoValue = _vchnoController.text;
       roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
 
-      jsonEntryData["DATE"] = saledatestring;
-      jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
-      jsonEntryData["PARTYLEDGERNAME"] = _selectedpartyledger;
-      jsonEntryData["totalAmount"] = roundedtotalAmount.toStringAsFixed(
-        decimal!,
-      );
-      jsonEntryData["NARRATION"] = narrationValue;
-      jsonEntryData["VOUCHERNUMBER"] = vchnoValue;
-      jsonEntryData["REFERENCE"] = refnoValue;
-      jsonEntryData["REFERENCEDATE"] = refdatestring;
-
       double totalItemAmount = 0.0;
-
       for (SaleItem item in saleItems) {
         totalItemAmount += double.parse(
           item.itemAmount.toStringAsFixed(decimal!),
         ); // calculating item amounts total
       }
 
-      for (var saleItem in saleItems) {
-        // making sales ledger
+      final int? voucherTypeMasterId =
+          _voucherTypeMasterIdByName[_selectedvchtypename];
+      final int? partyLedgerMasterId =
+          _ledgerMasterIdByName[_selectedpartyledger];
+      final int? salesLedgerMasterId =
+          _ledgerMasterIdByName[_selectedsalesledger];
+      final int? vatLedgerMasterId = _selectedvatledger != 'Not Applicable'
+          ? _ledgerMasterIdByName[_selectedvatledger]
+          : null;
 
-        saleItem.accountingAllocationList = {
-          "LEDGERNAME": _selectedsalesledger,
-          "AMOUNT": saleItem.itemAmount.toStringAsFixed(decimal!),
-          "ISDEEMEDPOSITIVE": "No",
-        };
+      if (voucherTypeMasterId == null ||
+          partyLedgerMasterId == null ||
+          salesLedgerMasterId == null ||
+          _currencyMasterId == null) {
+        setState(() {
+          _isLoading = false;
+        });
+        showAppMessage(
+          context,
+          'Could not resolve voucher type/party ledger/sales ledger/currency - please reload and try again.',
+        );
+        return;
       }
 
-      jsonEntryData["INVENTORYENTRIES.LIST"] = saleItems.map((item) {
-        // making stockitem list
-        return {
-          "STOCKITEMNAME": item.itemName,
-          "ISDEEMEDPOSITIVE": "No",
-          "RATE":
-              "${item.itemPrice.toStringAsFixed(decimal!)}/${item.itemUnit}",
-          "AMOUNT": item.itemAmount.toStringAsFixed(decimal!),
-          "ACTUALQTY": "${item.itemQuantity} ${item.itemUnit}",
-          "BILLEDQTY": "${item.itemQuantity} ${item.itemUnit}",
-          "BATCHALLOCATIONS.LIST": item.batchAllocationList,
-          "ACCOUNTINGALLOCATIONS.LIST": item.accountingAllocationList,
-        };
-      }).toList();
+      // Legacy encoded debit/credit via a signed AMOUNT plus a redundant
+      // "ISDEEMEDPOSITIVE" string; the new schema separates that into a
+      // plain positive `amount` and a single `isDebit` boolean.
+      final List<Map<String, dynamic>> entryLedgers = [];
 
-      double totalLedgerAmount = 0.0;
+      entryLedgers.add({
+        'ledgerMasterId': partyLedgerMasterId,
+        'amount': roundedtotalAmount,
+        'isDebit': true,
+        'isPartyLedger': true,
+      });
 
-      for (LedgerEntry ledger in ledgerEntries) {
-        // calculating total ledger amount
-        totalLedgerAmount += double.parse(
-          ledger.ledgerAmount.toStringAsFixed(decimal!),
-        ); // calculating ledger amounts total
+      // Aggregate sales-ledger credit entry - see
+      // SalesRegistration.dart's `saveEntry()` doc comment for why this one
+      // aggregate row replaces legacy's per-item ACCOUNTINGALLOCATIONS.LIST.
+      entryLedgers.add({
+        'ledgerMasterId': salesLedgerMasterId,
+        'amount': totalItemAmount,
+        'isDebit': false,
+        'isPartyLedger': false,
+      });
+
+      // Manual "other" ledger entries (freight/discount/etc). Any entry
+      // whose ledger name doesn't resolve to a masterId (shouldn't
+      // normally happen - names come from the same loadData() lists) is
+      // skipped rather than sent broken.
+      for (final item in ledgerEntries) {
+        final int? ledgerMasterId = _ledgerMasterIdByName[item.ledgerName];
+        if (ledgerMasterId == null) continue;
+        entryLedgers.add({
+          'ledgerMasterId': ledgerMasterId,
+          'amount': item.ledgerAmount,
+          'isDebit': false,
+          'isPartyLedger': false,
+        });
       }
 
-      double partyLedgerAmount = double.parse(
-        (double.parse(totalVatAmount.toStringAsFixed(decimal!)) +
-                double.parse(totalItemAmount.toStringAsFixed(decimal!)) +
-                double.parse(totalLedgerAmount.toStringAsFixed(decimal!)))
-            .toStringAsFixed(decimal!),
-      ); // adding vat total, items total, ledgers total
+      if (vatLedgerMasterId != null) {
+        entryLedgers.add({
+          'ledgerMasterId': vatLedgerMasterId,
+          'amount': roundedtotalVatAmount,
+          'isDebit': false,
+          'isPartyLedger': false,
+        });
+      }
 
-      partyLedgerAmount =
-          double.parse(partyLedgerAmount.toStringAsFixed(decimal!)) * -1;
+      final List<Map<String, dynamic>> entryInventory = [];
+      for (final item in saleItems) {
+        final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
+              (i) => i['name'] == item.itemName,
+              orElse: () => null,
+            )
+            as Map<String, dynamic>?;
+        final int? stockItemMasterId = itemInfo?['masterid'] as int?;
+        final List<dynamic> unitJson =
+            (itemInfo?['unit'] as List?) ?? const [];
+        final int? unitMasterId = _findUnitMasterId(unitJson, item.itemUnit);
 
-      List<Map<String, Object>> ledgerList = [];
+        if (stockItemMasterId == null || unitMasterId == null) {
+          // Can't build a valid inventory entry without both masterIds -
+          // skip rather than send a request the server will reject.
+          debugPrint(
+            'Skipping inventory entry for "${item.itemName}" - could not '
+            'resolve stockItemMasterId/unitMasterId',
+          );
+          continue;
+        }
 
-      Map<String, Object> partyLedgerData = {
-        // making party ledger
-        "LEDGERNAME": _selectedpartyledger,
-        "AMOUNT": partyLedgerAmount.toStringAsFixed(decimal!),
-        "ISPARTYLEDGER": "Yes",
-        "ISDEEMEDPOSITIVE": "Yes",
-        "ledgerType": "Party",
+        final double qty = double.tryParse(item.itemQuantity) ?? 0;
+        final int? godownMasterId = _godownMasterIdByName[item.itemLocation];
+
+        entryInventory.add({
+          'stockItemMasterId': stockItemMasterId,
+          'quantity': qty,
+          'rate': item.itemPrice,
+          'unitMasterId': unitMasterId,
+          'amount': item.itemAmount,
+          'ledgerMasterId': salesLedgerMasterId,
+          'isDebitQuantity': false,
+          if (godownMasterId != null)
+            'batchAllocations': [
+              {
+                'godownMasterId': godownMasterId,
+                // Tally's own default batch name for a godown-only
+                // (non-lot-tracked) allocation - these items aren't real
+                // Tally batches, but entryBatchAllocationRowSchema still
+                // requires a non-empty batchName.
+                'batchName': 'Primary Batch',
+                'quantity': qty,
+              },
+            ],
+        });
+      }
+
+      final Map<String, dynamic> voucherEntryBody = {
+        'voucherTypeMasterId': voucherTypeMasterId,
+        'date': _isoDate(parseCompactDate(saledatestring)),
+        'currencyMasterId': _currencyMasterId,
+        'narration': narrationValue,
+        if (refnoValue.trim().isNotEmpty) 'reference': refnoValue.trim(),
+        'referenceDate': _isoDate(parseCompactDate(refdatestring)),
+        if (vchnoValue.trim().isNotEmpty) 'voucherNumber': vchnoValue.trim(),
+        'ledgerEntries': entryLedgers,
+        'inventoryEntries': entryInventory,
       };
 
-      ledgerList.add(partyLedgerData);
-
-      // Add ledger entries to the list
-      ledgerList.addAll(
-        ledgerEntries.map((item) {
-          return {
-            "LEDGERNAME": item.ledgerName,
-            "VATAPPLICABLE": item.vatApp,
-            "AMOUNT": item.ledgerAmount,
-            "ISDEEMEDPOSITIVE": "No",
-            "ledgerType": "ledgerList",
-          };
-        }),
-      );
-
-      // Add VAT ledger data if applicable
-      if (_selectedvatledger != 'Not Applicable') {
-        Map<String, Object> vatDataToAdd = {
-          "LEDGERNAME": _selectedvatledger,
-          "AMOUNT": roundedtotalVatAmount,
-          "ISDEEMEDPOSITIVE": "No",
-          "ledgerType": "VAT",
-        };
-        ledgerList.add(vatDataToAdd);
-      }
-
-      jsonEntryData["LEDGERENTRIES.LIST"] = ledgerList;
-
-      Map<String, dynamic> jsonData = {
-        'id': id,
-        'vchno': _vchnoController.text,
-        'data': jsonEntryData,
-      };
-
-      String jsonDataString = jsonEncode(jsonData);
-
-      print(jsonDataString);
+      // Plain print() doesn't chunk long strings - Android/iOS truncate
+      // each log line at a fixed byte length, clipping this JSON mid-way
+      // for any entry with more than a couple items. debugPrint's
+      // wrapWidth splits it into multiple lines first, so the full
+      // payload actually shows up in the console.
+      debugPrint(jsonEncode(voucherEntryBody), wrapWidth: 1024);
 
       try {
-        final url_salesentry = Uri.parse(HttpURL_modifysalesEntry!);
-
-        Map<String, String> headers_salesentry = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body_salesentry = jsonDataString;
-
-        final response_salesentry = await http.post(
-          url_salesentry,
-          body: body_salesentry,
-          headers: headers_salesentry,
+        await VoucherEntryRepository.instance.update(
+          voucherEntryId,
+          voucherEntryBody,
         );
-
-        if (response_salesentry.statusCode == 200) {
-          if (response_salesentry.body == 'Entry updated successfully') {
-            loadLedgerData();
-          } else {
-            setState(() {
-              _isLoading = false;
-            });
-            showAppMessage(context, 'an error occoured');
-          }
-        } else {
-          showAppMessage(context, response_salesentry.body);
-        }
+        loadLedgerData();
+      } on ApiException catch (e) {
+        setState(() {
+          _isLoading = false;
+        });
+        showAppMessage(context, e.message);
       } catch (e) {
         setState(() {
           _isLoading = false;
         });
-        print(e);
+        debugPrint('ModifySalesEntry updateEntry failed: $e');
+        showAppMessage(context, 'Something went wrong!!!');
       }
     }
     setState(() {
@@ -3752,6 +3876,42 @@ _itemController.text = _selecteditem;
     }
   }
 
+  /// Replaces legacy's `GET /api/entry/getSalesData/:company/:serial` (same
+  /// master-data bundle SalesRegistration.dart's `loadData()` fetches) plus
+  /// the existing-entry prefill legacy's `data` (Tally-XML-shaped) carried
+  /// inline. [data] (from `VoucherEntryRepository.getById`/`listAll`) is
+  /// now this method's *only* source for the entry being edited - no
+  /// separate network call for "the entry itself" exists in the new
+  /// backend, so every "old..." value below is read straight off it
+  /// instead of a legacy uppercase-keyed field:
+  ///
+  ///  * `data['voucherTypeName']`/`voucherNumber`/`narration`/`reference`/
+  ///    `date`/`referenceDate` replace `VOUCHERTYPENAME`/`VOUCHERNUMBER`/
+  ///    `NARRATION`/`REFERENCE`/`DATE`/`REFERENCEDATE`.
+  ///  * The party ledger (legacy's top-level `PARTYLEDGERNAME`) is now
+  ///    derived from whichever `data['ledgerEntries']` row has
+  ///    `isPartyLedger == true`.
+  ///  * The per-item sales ledger (legacy's first item's
+  ///    `ACCOUNTINGALLOCATIONS.LIST.LEDGERNAME`) is now
+  ///    `data['inventoryEntries'].first['ledgerName']` -
+  ///    `entryInventoryEntryRowSchema.ledgerMasterId` is a single ledger
+  ///    reference per item rather than a nested allocation list.
+  ///  * The VAT ledger/amount (legacy's `LEDGERENTRIES.LIST` row with
+  ///    `ledgerType == 'VAT'`) is now whichever `ledgerEntries` row's
+  ///    `ledgerName` falls under the `'DUTIES'` reserved group -
+  ///    same classification `vatledgerdata` itself uses below.
+  ///  * Legacy's top-level `totalAmount` has no equivalent field on the new
+  ///    schema - it's recomputed here from the loaded items/ledgers/VAT,
+  ///    the same formula `_deleteSaleItem`/`_deleteLedger` already use.
+  ///
+  /// **Known gap**: legacy's per-manual-ledger `VATAPPLICABLE` flag (used
+  /// to include/exclude a manual "other" ledger entry from the VAT total)
+  /// has no equivalent on `entryLedgerEntryRowSchema` -
+  /// SalesRegistration.dart's `saveEntry()` already drops it on write, so
+  /// there's nothing to read back here either; every manual ledger entry
+  /// loaded below gets `vatApp: false` (not a data-loss from *this*
+  /// change - it was already lost the first time this voucher was written
+  /// under the new schema).
   Future<void> loadData() async {
     vchtypenamedata.clear();
     itemdata.clear();
@@ -3763,404 +3923,316 @@ _itemController.text = _selecteditem;
 
     ledgerdata.clear();
     locationsdata.clear();
+    _ledgerMasterIdByName.clear();
+    _voucherTypeMasterIdByName.clear();
+    _godownMasterIdByName.clear();
+    _allLedgersCache = [];
+    _currencyMasterId = null;
 
     setState(() {
       _isLoading = true;
     });
 
-    // vchtype fetching
     try {
-      final url = Uri.parse(HttpURL_loadData!);
+      final results = await Future.wait([
+        StockRepository.instance.listStockItems(),
+        LedgerRepository.instance.listLedgers(),
+        LedgerRepository.instance.listAllLedgers(),
+        GroupRepository.instance.listAll(),
+        VoucherTypeRepository.instance.listAll(),
+        GodownRepository.instance.listAll(),
+        CurrencyRepository.instance.listAll(),
+      ]);
 
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
+      final stockItems = results[0];
+      final partyLedgers = results[1];
+      final allLedgers = results[2];
+      final groups = results[3];
+      final voucherTypes = results[4];
+      final godowns = results[5];
+      final currencies = results[6];
+
+      final groupReservedNameByMasterId = <int, String?>{
+        for (final g in groups)
+          g['masterId'] as int: g['reservedName'] as String?,
       };
+      final partyLedgerMasterIds = partyLedgers
+          .map((l) => l['masterId'] as int)
+          .toSet();
 
-      final response = await http.post(url, headers: headers);
+      setState(() {
+        // tally-api's VoucherReservedName enum (2026-08-21 schema-hardening
+        // migration) uses screaming-snake-case labels ('SALES'), not
+        // Tally's own mixed-case reservedName string ('Sales').
+        vchtypenamedata = [
+          for (final vt in voucherTypes)
+            if (vt['reservedName'] == 'SALES') vt['name'] as String,
+        ];
+        _voucherTypeMasterIdByName
+          ..clear()
+          ..addAll({
+            for (final vt in voucherTypes)
+              if (vt['reservedName'] == 'SALES')
+                vt['name'] as String: vt['masterId'] as int,
+          });
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
+        _allLedgersCache = allLedgers;
+        for (final ledger in allLedgers) {
+          _ledgerMasterIdByName[ledger['name'] as String] =
+              ledger['masterId'] as int;
+        }
 
-        /*print('existing data = $data');*/
+        partyledgerdata = [for (final l in partyLedgers) (l['name'] as String)]
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-        setState(() {
-          // setting current sales entry data
+        salesledger_data = [
+          for (final l in allLedgers)
+            if (groupReservedNameByMasterId[l['groupMasterId']] == 'SALES')
+              l['name'] as String,
+        ];
 
-          String oldvchname = data['VOUCHERTYPENAME'];
-          String oldpartyledger = data['PARTYLEDGERNAME'];
-          String oldvchno = data['VOUCHERNUMBER'];
+        vatledgerdata.add('Not Applicable');
+        vatledgerdata.addAll([
+          for (final l in allLedgers)
+            if (groupReservedNameByMasterId[l['groupMasterId']] == 'DUTIES')
+              l['name'] as String,
+        ]);
+        final vatLedgerNames = vatledgerdata.toSet();
 
-          _vchnoController.text = oldvchno;
+        // "Other ledgers" (the manual Ledger Entry add list) - every ledger
+        // not already surfaced as a party/sales/VAT ledger above.
+        final salesLedgerNames = salesledger_data.toSet();
+        ledgerdata = [
+          for (final l in allLedgers)
+            if (!partyLedgerMasterIds.contains(l['masterId']) &&
+                !salesLedgerNames.contains(l['name']) &&
+                !vatLedgerNames.contains(l['name']))
+              {'name': l['name']},
+        ];
+        _selectedledger = ledgerdata.isNotEmpty
+            ? ledgerdata[0]['name']
+            : null;
 
-          /* String oldsalesledger = data['salesledger'];*/
-          String oldnarration = data['NARRATION'];
-          String oldrefno = data['REFERENCE'];
+        itemdata = [
+          for (final item in stockItems) _shapeStockItemForLegacyItemdata(item),
+        ];
 
-          saledate = DateTime.parse(data['DATE']);
-          saledatestring = _dateFormat.format(saledate);
-          saledatetxt = formatlastsaledate(saledatestring);
-          _dateController.text = saledatetxt;
+        locationsdata = [for (final g in godowns) g['name'] as String];
+        _godownMasterIdByName
+          ..clear()
+          ..addAll({
+            for (final g in godowns) g['name'] as String: g['masterId'] as int,
+          });
 
-          refdate = DateTime.parse(data['REFERENCEDATE']);
-          refdatestring = _dateFormat.format(refdate);
-          refdatetxt = formatlastsaledate(refdatestring);
-          _refdateController.text = refdatetxt;
-
-          controller_narration.text = oldnarration;
-          controller_refno.text = oldrefno;
-
-          vchtypenamedata = jsonResponse["vchTypes"].cast<String>();
-          _selectedvchtypename = oldvchname;
-          fetchvchnos(_selectedvchtypename);
-          partyledgerdata = jsonResponse["partyLedgers"].cast<String>()
-            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-          _partyLedgerController.text = oldpartyledger;
-          _selectedpartyledger = oldpartyledger;
-
-          salesledger_data = jsonResponse["salesLedgers"].cast<String>();
-
-          /*_selectedsalesledger = oldsalesledger;*/ // setting sales ledgers later
-          /* _selectedsalesledger = salesledger_data[0];*/
-
-          if (data.containsKey("INVENTORYENTRIES.LIST") &&
-              data["INVENTORYENTRIES.LIST"] is List) {
-            // setting items list in SaleItem objects
-
-            dynamic itemData = data['INVENTORYENTRIES.LIST'][0];
-
-            print('INVENTORYENTRIES.LIST ${itemData}');
-
-            if (itemData is Map<String, dynamic>) {
-              Map<String, dynamic> accountingAllocationList =
-                  itemData["ACCOUNTINGALLOCATIONS.LIST"];
-              String saleLedgerName = accountingAllocationList['LEDGERNAME'];
-              _selectedsalesledger =
-                  saleLedgerName; // setting sales ledger from first item data
-            }
-
-            print('_selectedsalesledger ${_selectedsalesledger}');
+        // Resolve the voucher-entry currency once here - matches the
+        // company's configured `currencycode` (prefs), falling back to
+        // whatever currency tally-api returns first.
+        Map<String, dynamic>? matchedCurrency;
+        for (final c in currencies) {
+          final iso = (c['isoCurrencyCode'] as String?)?.toUpperCase();
+          final symbol = (c['symbol'] as String?)?.toUpperCase();
+          if (iso == currencycode.toUpperCase() ||
+              symbol == currencycode.toUpperCase()) {
+            matchedCurrency = c;
+            break;
           }
+        }
+        matchedCurrency ??= currencies.isNotEmpty ? currencies.first : null;
+        _currencyMasterId = matchedCurrency?['masterId'] as int?;
 
-          ledgerdata = List<Map<String, dynamic>>.from(
-            jsonResponse['otherLedgers'],
+        // ---- Prefill this existing voucher entry's own fields ---------
+        final List<dynamic> existingLedgerEntries =
+            (data['ledgerEntries'] as List?) ?? const [];
+        final List<dynamic> existingInventoryEntries =
+            (data['inventoryEntries'] as List?) ?? const [];
+
+        final String oldvchname =
+            (data['voucherTypeName'] as String?) ??
+            (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : '');
+        final String oldvchno = (data['voucherNumber'] as String?) ?? '';
+        final String oldnarration = (data['narration'] as String?) ?? '';
+        final String oldrefno = (data['reference'] as String?) ?? '';
+
+        _vchnoController.text = oldvchno;
+        controller_narration.text = oldnarration;
+        controller_refno.text = oldrefno;
+
+        saledate = DateTime.parse(data['date'] as String);
+        saledatestring = _dateFormat.format(saledate);
+        saledatetxt = formatlastsaledate(saledatestring);
+        _dateController.text = saledatetxt;
+
+        final String? referenceDateIso = data['referenceDate'] as String?;
+        refdate = referenceDateIso != null
+            ? DateTime.parse(referenceDateIso)
+            : saledate;
+        refdatestring = _dateFormat.format(refdate);
+        refdatetxt = formatlastsaledate(refdatestring);
+        _refdateController.text = refdatetxt;
+
+        _selectedvchtypename = oldvchname;
+
+        // Party ledger - the ledgerEntries row flagged isPartyLedger.
+        final dynamic partyEntry = existingLedgerEntries.firstWhere(
+          (e) => e is Map && e['isPartyLedger'] == true,
+          orElse: () => null,
+        );
+        final String? oldpartyledger = partyEntry is Map
+            ? partyEntry['ledgerName'] as String?
+            : null;
+        _selectedpartyledger = oldpartyledger;
+        _partyLedgerController.text = oldpartyledger ?? '';
+
+        // Sales ledger - the first inventory entry's own ledgerMasterId/
+        // ledgerName (see this method's doc comment above).
+        String? salesLedgerName;
+        if (existingInventoryEntries.isNotEmpty &&
+            existingInventoryEntries.first is Map) {
+          salesLedgerName =
+              (existingInventoryEntries.first as Map)['ledgerName']
+                  as String?;
+        }
+        _selectedsalesledger =
+            salesLedgerName ??
+            (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
+
+        // VAT ledger - a ledgerEntries row whose ledgerName falls under the
+        // 'Duties & Taxes' reserved group (matches vatledgerdata's own
+        // classification above).
+        final dynamic vatEntry = existingLedgerEntries.firstWhere(
+          (e) => e is Map && vatLedgerNames.contains(e['ledgerName']),
+          orElse: () => null,
+        );
+        if (vatEntry is Map) {
+          _selectedvatledger = vatEntry['ledgerName'] as String?;
+          totalVatAmount = parseMoneyField(vatEntry['amount']);
+        } else {
+          _selectedvatledger = vatledgerdata.isNotEmpty
+              ? vatledgerdata[0]
+              : 'Not Applicable';
+          totalVatAmount = 0.0;
+        }
+        roundedtotalVatAmount = double.parse(
+          totalVatAmount.toStringAsFixed(decimal!),
+        );
+        NumberFormat vatFormatter = NumberFormat(
+          '#,##0.${'0' * decimal!}',
+          'en_US',
+        );
+        controller_vatamt.text = vatFormatter.format(roundedtotalVatAmount);
+
+        // Manual "other" ledger entries - everything left over (not party,
+        // not sales, not VAT).
+        final Set<String> salesLedgerNameSet = salesLedgerName != null
+            ? {salesLedgerName}
+            : <String>{};
+        for (final e in existingLedgerEntries) {
+          if (e is! Map) continue;
+          final String? ledgerName = e['ledgerName'] as String?;
+          if (ledgerName == null) continue;
+          if (e['isPartyLedger'] == true) continue;
+          if (vatLedgerNames.contains(ledgerName)) continue;
+          if (salesLedgerNameSet.contains(ledgerName)) continue;
+          ledgerEntries.add(
+            LedgerEntry(
+              ledgerName: ledgerName,
+              ledgerAmount: parseMoneyField(e['amount']),
+              // No new-schema equivalent for legacy's per-ledger
+              // VATAPPLICABLE flag - see this method's doc comment.
+              vatApp: false,
+            ),
           );
-          _selectedledger = ledgerdata.isNotEmpty
-              ? ledgerdata[0]['name']
-              : null;
+        }
+        isVisibleLedgerHeading = ledgerEntries.isNotEmpty;
 
-          vatledgerdata.add('Not Applicable');
-          vatledgerdata.addAll(jsonResponse["vatLedgers"].cast<String>());
-
-          _selectedvatledger = vatledgerdata[0];
-
-          try {
-            // vat ledger name value setting
-            String vatLedgerValue =
-                data['LEDGERENTRIES.LIST']
-                        .firstWhere(
-                          (ledger) => ledger['ledgerType'] == 'VAT',
-                          orElse: () => null,
-                        )
-                        ?.containsKey('LEDGERNAME') ==
-                    true
-                ? data['LEDGERENTRIES.LIST'].firstWhere(
-                    (ledger) => ledger['ledgerType'] == 'VAT',
-                    orElse: () => null,
-                  )['LEDGERNAME']
-                : null;
-
-            if (vatLedgerValue != null &&
-                vatledgerdata.contains(vatLedgerValue)) {
-              // if vat ledger exists
-              _selectedvatledger = vatLedgerValue;
-              // Extract VAT ledger amount as a string
-
-              double vatLedgerAmountString = 0.0;
-              try {
-                // setting vat ledger amount if it is in double
-                vatLedgerAmountString =
-                    data['LEDGERENTRIES.LIST']
-                            .firstWhere(
-                              (ledger) => ledger['ledgerType'] == 'VAT',
-                              orElse: () => null,
-                            )
-                            ?.containsKey('AMOUNT') ==
-                        true
-                    ? data['LEDGERENTRIES.LIST'].firstWhere(
-                        (ledger) => ledger['ledgerType'] == 'VAT',
-                        orElse: () => null,
-                      )['AMOUNT']
-                    : null;
-              } catch (e) {
-                // setting vat ledger amount if it is in integer
-
-                int vatLedgerAmountint =
-                    data['LEDGERENTRIES.LIST']
-                            .firstWhere(
-                              (ledger) => ledger['ledgerType'] == 'VAT',
-                              orElse: () => null,
-                            )
-                            ?.containsKey('AMOUNT') ==
-                        true
-                    ? data['LEDGERENTRIES.LIST'].firstWhere(
-                        (ledger) => ledger['ledgerType'] == 'VAT',
-                        orElse: () => null,
-                      )['AMOUNT']
-                    : null;
-                NumberFormat formatter =
-                    NumberFormat.decimalPattern(); // Create a formatter
-                formatter.minimumFractionDigits =
-                    decimal!; // Set the number of decimal places
-
-                String formattedValue = formatter.format(
-                  vatLedgerAmountint,
-                ); // Format the integer
-                formattedValue = formattedValue.replaceAll(
-                  ',',
-                  '',
-                ); // Remove commas
-
-                vatLedgerAmountString =
-                    double.tryParse(formattedValue.replaceAll(',', '')) ?? 0.0;
-              }
-
-              // if vat ledger is other than not applicable
-              if (_selectedvatledger != 'Not Applicable') {
-                try {
-                  // set total vat amount from vat ledger if it is in double
-                  totalVatAmount = vatLedgerAmountString;
-                } catch (e) {
-                  // set total vat amount from vat ledger if it is in integer
-
-                  print(e);
-                  NumberFormat formatter =
-                      NumberFormat.decimalPattern(); // Create a formatter
-                  formatter.minimumFractionDigits =
-                      decimal!; // Set the number of decimal places
-
-                  String formattedValue = formatter.format(
-                    vatLedgerAmountString,
-                  ); // Format the integer
-                  formattedValue = formattedValue.replaceAll(
-                    ',',
-                    '',
-                  ); // Remove commas
-
-                  totalVatAmount =
-                      double.tryParse(formattedValue.replaceAll(',', '')) ??
-                      0.0;
-                  /*print(totalVatAmount);*/
-                }
-
-                roundedtotalVatAmount = double.parse(
-                  totalVatAmount.toStringAsFixed(decimal!),
-                );
-
-                NumberFormat formatter = NumberFormat(
-                  '#,##0.${'0' * decimal!}',
-                  'en_US',
-                );
-                String formattedVat = formatter.format(roundedtotalVatAmount);
-                controller_vatamt.text = formattedVat.toString();
-              } else // if vat ledger is not applicable
-              {
-                totalVatAmount = 0;
-                roundedtotalVatAmount = double.parse(
-                  totalVatAmount.toStringAsFixed(decimal!),
-                );
-                NumberFormat formatter = NumberFormat(
-                  '#,##0.${'0' * decimal!}',
-                  'en_US',
-                );
-                String formattedVat = formatter.format(0);
-                controller_vatamt.text = formattedVat.toString();
-              }
-            }
-          } catch (e) // if vat ledger has error
-          {
-            print(e);
-            _selectedvatledger = vatledgerdata[0];
-
-            totalVatAmount = 0;
-            roundedtotalVatAmount = double.parse(
-              totalVatAmount.toStringAsFixed(decimal!),
-            );
-            NumberFormat formatter = NumberFormat(
-              '#,##0.${'0' * decimal!}',
-              'en_US',
-            );
-            String formattedVat = formatter.format(0);
-            controller_vatamt.text = formattedVat.toString();
+        // Sale items from inventoryEntries.
+        for (final e in existingInventoryEntries) {
+          if (e is! Map) continue;
+          final String itemName = (e['stockItemName'] as String?) ?? '';
+          final double qty = parseMoneyField(e['quantity']);
+          final double rate = parseMoneyField(e['rate']);
+          final double amount = parseMoneyField(e['amount']);
+          final String unitSymbol = (e['unitSymbol'] as String?) ?? '';
+          final List<dynamic> batchAllocations =
+              (e['batchAllocations'] as List?) ?? const [];
+          String itemLocation = '';
+          if (batchAllocations.isNotEmpty && batchAllocations.first is Map) {
+            itemLocation =
+                (batchAllocations.first as Map)['godownName'] as String? ??
+                '';
           }
-          try {
-            totalAmount =
-                double.tryParse(
-                  data['totalAmount'].toString().replaceAll(',', ''),
-                ) ??
-                0.0;
-          } catch (e) {
-            NumberFormat formatter =
-                NumberFormat.decimalPattern(); // Create a formatter
-            formatter.minimumFractionDigits =
-                decimal!; // Set the number of decimal places
 
-            String formattedValue = formatter.format(
-              data['totalAmount'],
-            ); // Format the integer
-            formattedValue = formattedValue.replaceAll(
-              ',',
-              '',
-            ); // Remove commas
-
-            totalAmount =
-                double.tryParse(formattedValue.replaceAll(',', '')) ?? 0.0;
-          }
-          roundedtotalAmount = double.parse(
-            totalAmount.toStringAsFixed(decimal!),
+          saleItems.add(
+            SaleItem(
+              itemName: itemName,
+              // itemQuantity is used as an int-parseable string everywhere
+              // downstream (int.tryParse/BigInt.parse) - matches legacy's
+              // own `extractQuantity` (digits-only, no decimal) behavior.
+              itemQuantity: qty.truncate().toString(),
+              itemPrice: rate,
+              itemAmount: amount,
+              itemLocation: itemLocation,
+              itemUnit: unitSymbol,
+              accountingAllocationList: const {},
+              batchAllocationList: const {},
+            ),
           );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedtotal = formatter.format(roundedtotalAmount);
+        }
+        isVisibleItemHeading = saleItems.isNotEmpty;
 
-          controller_totalamt.text = formattedtotal.toString();
-
-          if (data.containsKey("INVENTORYENTRIES.LIST") &&
-              data["INVENTORYENTRIES.LIST"] is List) {
-            // setting items list in SaleItem objects
-
-            data["INVENTORYENTRIES.LIST"].forEach((itemData) {
-              if (itemData is Map<String, dynamic>) {
-                String itemName = itemData["STOCKITEMNAME"] ?? "";
-
-                String itemQuantity = itemData["ACTUALQTY"] ?? "";
-
-                String quantity = extractQuantity(itemQuantity);
-
-                String parsedQuantity = quantity.replaceAll(',', '');
-
-                String rate = itemData["RATE"] ?? "";
-                List<String> rateParts = rate.split('/');
-                if (rateParts.length == 2) {
-                  double itemPrice = 0.0;
-                  if (rateParts[0].contains('.')) {
-                    try {
-                      itemPrice = double.tryParse(rateParts[0]) ?? 0.0;
-                    } catch (e) {
-                      itemPrice = int.parse(rateParts[0]).toDouble();
-                      print("Error parsing itemPrice as double: $e");
-                    }
-                  } else {
-                    try {
-                      itemPrice = int.parse(rateParts[0]).toDouble();
-                    } catch (e) {
-                      print("Error parsing itemPrice as int: $e");
-                    }
-                  }
-
-                  String itemUnit = rateParts[1];
-
-                  // Try parsing itemAmount as a double, and if that fails, as an integer
-                  double itemAmount;
-                  try {
-                    itemAmount = double.parse(
-                      itemData["AMOUNT"].toStringAsFixed(decimal!),
-                    );
-                  } catch (e) {
-                    try {
-                      itemAmount = int.parse(
-                        itemData["AMOUNT"].toString(),
-                      ).toDouble();
-                      print("Error parsing itemAmount as double: $e");
-                    } catch (e) {
-                      print("Error parsing itemAmount as int: $e");
-                      itemAmount = 0.0; // Default to 0.0 if parsing fails
-                    }
-                  }
-                  Map<String, dynamic> batchAllocationList =
-                      itemData['BATCHALLOCATIONS.LIST'];
-
-                  String itemLocation = batchAllocationList["GODOWNNAME"] ?? "";
-
-                  Map<String, dynamic> accountingAllocationList =
-                      itemData['ACCOUNTINGALLOCATIONS.LIST'];
-
-                  SaleItem saleItem = SaleItem(
-                    itemName: itemName,
-                    itemQuantity: parsedQuantity,
-                    itemPrice: itemPrice,
-                    itemAmount: itemAmount,
-                    itemLocation: itemLocation,
-                    itemUnit: itemUnit,
-                    accountingAllocationList: accountingAllocationList,
-                    batchAllocationList: batchAllocationList,
-                  );
-
-                  saleItems.add(saleItem);
-                }
-              }
-            });
-          }
-
-          if (saleItems.isEmpty) {
-            isVisibleItemHeading = false;
-          } else {
-            isVisibleItemHeading = true;
-          }
-
-          // Extract and convert ledger entries from the JSON data
-          if (data.containsKey("LEDGERENTRIES.LIST") &&
-              data["LEDGERENTRIES.LIST"] is List) {
-            data["LEDGERENTRIES.LIST"].forEach((ledgerData) {
-              if (ledgerData is Map<String, dynamic> &&
-                  ledgerData["ledgerType"] == "ledgerList") {
-                String ledgerName = ledgerData["LEDGERNAME"] ?? "";
-
-                // Try parsing ledgerAmount as a double, or default to 0.0
-                double ledgerAmount =
-                    double.tryParse(ledgerData["AMOUNT"].toString()) ?? 0.0;
-
-                bool vatApp = ledgerData["VATAPPLICABLE"];
-
-                LedgerEntry ledgerEntry = LedgerEntry(
-                  ledgerName: ledgerName,
-                  ledgerAmount: ledgerAmount,
-                  vatApp: vatApp,
-                );
-
-                ledgerEntries.add(ledgerEntry);
-              }
-            });
-          }
-          if (ledgerEntries.isEmpty) {
-            isVisibleLedgerHeading = false;
-          } else {
-            isVisibleLedgerHeading = true;
-          }
-
-          itemdata = jsonResponse["items"];
-
-          _selecteditem = '${itemdata[0]['name']}';
-          _itemController.text = _selecteditem;
-
-          locationsdata = List<String>.from(jsonResponse['locations']);
-          if (locationsdata.isNotEmpty) {
-            selectedLocation = locationsdata[0];
-            setState(() {
-              isVisibleLocation = true;
-            });
-          } else {
-            setState(() {
-              isVisibleLocation = false;
-            });
-          }
-          _updateUnitDropdown(_selecteditem);
+        // Legacy's top-level `totalAmount` has no new-schema equivalent -
+        // recompute from the loaded items/ledgers/VAT (same formula
+        // `_deleteSaleItem`/`_deleteLedger` use).
+        totalPriceOfItems = saleItems.fold(0.0, (
+          double previousAmount,
+          SaleItem item,
+        ) {
+          return previousAmount +
+              (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
+                  double.parse(item.itemQuantity));
         });
+        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
+          double previousAmount,
+          LedgerEntry entry,
+        ) {
+          return previousAmount + entry.ledgerAmount;
+        });
+        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
+        roundedtotalAmount = double.parse(
+          totalAmount.toStringAsFixed(decimal!),
+        );
+        NumberFormat totalFormatter = NumberFormat(
+          '#,##0.${'0' * decimal!}',
+          'en_US',
+        );
+        controller_totalamt.text = totalFormatter.format(roundedtotalAmount);
+
+        if (itemdata.isNotEmpty) {
+          _selecteditem = '${itemdata[0]['name']}';
+          _itemController.text = _selecteditem ?? '';
+        }
+
+        if (locationsdata.isNotEmpty) {
+          selectedLocation = locationsdata[0];
+          isVisibleLocation = true;
+        } else {
+          isVisibleLocation = false;
+        }
+
+        if (itemdata.isNotEmpty) {
+          _updateUnitDropdown(_selecteditem);
+        }
+      });
+
+      if (_selectedvchtypename != null &&
+          (_selectedvchtypename as String).isNotEmpty) {
+        fetchvchnos(_selectedvchtypename);
       }
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
     } catch (e) {
-      print(e);
+      debugPrint('ModifySalesEntry loadData failed: $e');
+      showAppMessage(context, 'Something went wrong!!!');
     }
 
     setState(() {
@@ -7537,7 +7609,15 @@ _itemController.text = _selecteditem;
 
       decimal = prefs?.getInt('decimalplace') ?? 2;
 
-      saledate = DateTime.parse(data['DATE']);
+      // Placeholder values only - `loadData()` (called right below) is the
+      // real source of truth for this existing entry's date/reference
+      // date, sourced from `data['date']`/`data['referenceDate']` (the
+      // tally-api `voucherEntrySchema` field names) rather than legacy's
+      // uppercase `DATE`/`REFERENCEDATE`.
+      final String? initialDateIso = data['date'] as String?;
+      saledate = initialDateIso != null
+          ? DateTime.parse(initialDateIso)
+          : DateTime.now();
       saledatestring = _dateFormat.format(saledate);
       saledatetxt = formatlastsaledate(saledatestring);
       _dateController.text = saledatetxt;
@@ -7551,22 +7631,6 @@ _itemController.text = _selecteditem;
 
       String? email_nav = prefs.getString('email_nav');
       String? name_nav = prefs.getString('name_nav');
-
-      HttpURL_loadData =
-          '$hostname/api/entry/getSalesData/$company_lowercase/$serial_no';
-      /*HttpURL_loadData = 'http://192.168.2.110:4999/api/entry/getSalesData/$company_lowercase/$serial_no';*/
-
-      HttpURL_loadLedgerData =
-          '$hostname/api/ledger/getLedger/$company_lowercase/$serial_no';
-      /*HttpURL_loadLedgerData = 'http://192.168.2.110:4999/api/ledger/getLedger/$company_lowercase/$serial_no';*/
-
-      HttpURL_fetchvchnos =
-          '$hostname/api/entry/nos/$company_lowercase/$serial_no';
-      /*HttpURL_fetchvchnos = 'http://192.168.2.110:4999/api/entry/nos/$company_lowercase/$serial_no';*/
-
-      HttpURL_modifysalesEntry =
-          '$hostname/api/entry/updateEntry/$company_lowercase/$serial_no';
-      /*HttpURL_salesEntry = 'http://192.168.2.110:4999/api/entry/create/demonewformobilepp/767060064';*/
 
       itemQuantityController.text = 1.toString();
       controller_vatamt.text = 0.toString();

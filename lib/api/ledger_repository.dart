@@ -1,6 +1,20 @@
 import 'pagination_helper.dart';
 import 'tally_api_client.dart';
 
+/// One page of a `/ledgers` list call - `items` plus enough of tally-api's
+/// pagination `meta` to know whether to request another page. Used by
+/// callers that want real incremental (infinite-scroll) loading instead of
+/// [LedgerRepository.listLedgers]'s "fetch every page up front" behavior.
+class LedgerPage {
+  LedgerPage({required this.items, required this.page, required this.totalPages});
+
+  final List<Map<String, dynamic>> items;
+  final int page;
+  final int totalPages;
+
+  bool get hasMore => page < totalPages;
+}
+
 /// Legacy `Party` screen restricted its ledger list to a fixed set of
 /// "party-like" group names (`ledgroups` in Party.dart) rather than every
 /// ledger in the company. tally-api's ledgers list has no server-side group
@@ -13,6 +27,16 @@ import 'tally_api_client.dart';
 /// Debtors" with an unrelated name won't be picked up. Flagged as a known
 /// limitation versus the (unknown, server-side) exact behavior of the
 /// legacy `ledGroups` filter.
+///
+/// `reservedName` values match tally-api's `GroupReservedName` Postgres
+/// enum (`SUNDRY_DEBTORS`/`SUNDRY_CREDITORS`, screaming-snake-case), not
+/// Tally's own mixed-case reservedName strings - a tally-api schema-
+/// hardening migration (2026-08-21) changed this column to a strict enum
+/// without updating the sync/report code that still compares against the
+/// old-style strings, so tally-api itself doesn't correctly ingest or
+/// report on this field right now either. Matching the new enum values
+/// here is forward-looking - it's what the column will actually contain
+/// once that's fixed, not a workaround for a Flutter-side bug.
 const _legacyPartyGroupNames = {
   'sundry debtors',
   'sundry creditors',
@@ -21,7 +45,7 @@ const _legacyPartyGroupNames = {
   'creditors',
   'debtors',
 };
-const _reservedPartyGroupNames = {'Sundry Debtors', 'Sundry Creditors'};
+const _reservedPartyGroupNames = {'SUNDRY_DEBTORS', 'SUNDRY_CREDITORS'};
 
 String _dateOnly(DateTime d) => d.toIso8601String().split('T').first;
 
@@ -67,6 +91,36 @@ class LedgerRepository {
           : partyGroupIds!.contains(id);
     }).toList();
   }
+
+  /// One page of ledgers restricted to a single [groupMasterId] (server-side
+  /// `groupMasterId` equality filter - tally-api has no "in a set of group
+  /// ids" filter, so this only ever narrows to one group at a time; the
+  /// "All Parties" multi-group view pages through each party group's ids in
+  /// turn rather than requesting them all in one call - see Party.dart).
+  Future<LedgerPage> listLedgersPage({
+    required int page,
+    int limit = 30,
+    required int groupMasterId,
+  }) async {
+    final result = await _client.getForCompany(
+      '/ledgers?page=$page&limit=$limit&groupMasterId=$groupMasterId',
+    );
+    return LedgerPage(
+      items: (result.data as List).cast<Map<String, dynamic>>(),
+      page: page,
+      totalPages: (result.meta?['totalPages'] as int?) ?? 1,
+    );
+  }
+
+  /// Every ledger in the company, with no party-group narrowing - unlike
+  /// [listLedgers] (which defaults to party-like groups only when
+  /// [groupMasterId] is omitted). Used by the entry-registration screens
+  /// to classify ledgers themselves (party/sales/VAT/cash/bank) by
+  /// joining against [GroupRepository]'s `reservedName`s, since sales and
+  /// VAT ledgers aren't party-like groups and would otherwise never appear.
+  Future<List<Map<String, dynamic>>> listAllLedgers() => fetchAllPages(
+        (page) => _client.getForCompany('/ledgers?page=$page&limit=100'),
+      );
 
   /// Ledgers with no voucher activity since [asOf]
   /// (`reports/ledgers/inactive`), enriched with `alias`/contact fields the
@@ -192,4 +246,54 @@ class LedgerRepository {
   // `VoucherRepository.listInRange` (which returns full voucher headers
   // including voucherTypeName) plus client-side ledgerEntries matching is
   // used for that instead - see PartyClicked.dart's `_fetchLedgerMonthly`.
+
+  /// `reports/ledgers/:ledgerMasterId/pending-orders` - item-wise pending
+  /// quantity/amount for this party's Sales Orders or Purchase Orders not
+  /// yet fully fulfilled by a later Delivery Note/Receipt Note. Replaces
+  /// legacy's `getOrderSummary`, consumed by
+  /// `PartyClickedSalePurcOrder.dart`. Rows: `{stockItemMasterId,
+  /// stockItemName, pendingQuantity, pendingAmount}` - amounts are
+  /// `formatMoney`-formatted strings, parse with `parseMoneyField`.
+  ///
+  /// **Known limitation** (server-side, not fixable here): fulfilment
+  /// matching only works for batch-tracked stock items - tally-api's
+  /// 2026-08-21 schema-hardening migration moved `orderNumber` off a plain
+  /// inventory-entry column into the per-line `batchAllocations` JSON
+  /// array, so a non-batch-tracked item's fulfilling voucher is never
+  /// matched and its orders always show fully pending even once fulfilled.
+  Future<List<Map<String, dynamic>>> pendingOrdersByItem(
+    int ledgerMasterId, {
+    required bool isSales,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final query = StringBuffer('?voucherType=${isSales ? 'sales' : 'purchase'}');
+    if (from != null) query.write('&from=${_dateOnly(from)}');
+    if (to != null) query.write('&to=${_dateOnly(to)}');
+    final result = await _client.getForCompany(
+      '/reports/ledgers/$ledgerMasterId/pending-orders$query',
+    );
+    return (result.data as List).cast<Map<String, dynamic>>();
+  }
+
+  /// `reports/ledgers/:ledgerMasterId/pending-orders/:stockItemMasterId` -
+  /// order-wise breakdown of [pendingOrdersByItem] for one specific stock
+  /// item. Replaces legacy's per-item order drill-down, consumed by
+  /// `PartyClickedSalePurcOrderClicked.dart`. Rows: `{voucherMasterId,
+  /// voucherNumber, date, pendingQuantity, pendingAmount}`.
+  Future<List<Map<String, dynamic>>> pendingOrdersByVoucher(
+    int ledgerMasterId,
+    int stockItemMasterId, {
+    required bool isSales,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final query = StringBuffer('?voucherType=${isSales ? 'sales' : 'purchase'}');
+    if (from != null) query.write('&from=${_dateOnly(from)}');
+    if (to != null) query.write('&to=${_dateOnly(to)}');
+    final result = await _client.getForCompany(
+      '/reports/ledgers/$ledgerMasterId/pending-orders/$stockItemMasterId$query',
+    );
+    return (result.data as List).cast<Map<String, dynamic>>();
+  }
 }

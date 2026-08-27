@@ -689,10 +689,14 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       final groups = await fetchAllPages(
         (page) => TallyApiClient().getForCompany('/groups?page=$page&limit=100'),
       );
+      // tally-api's GroupReservedName enum (2026-08-21 schema-hardening
+      // migration) uses screaming-snake-case labels, not Tally's own
+      // mixed-case reservedName strings - see ledger_repository.dart's
+      // doc comment for why this doesn't match the old-style strings.
       const cashBankReservedNames = {
-        'Cash-in-Hand',
-        'Bank Accounts',
-        'Bank OD A/c',
+        'CASH',
+        'BANK',
+        'BANK_OD',
       };
       final cashBankGroupIds = groups
           .where((g) => cashBankReservedNames.contains(g['reservedName']))

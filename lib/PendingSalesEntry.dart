@@ -8,12 +8,35 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'widgets/entry_widgets.dart';
-import 'package:http/http.dart' as http;
 import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'api/api_exception.dart';
+import 'api/voucher_entry_repository.dart';
+import 'api/voucher_type_repository.dart';
 
+/// One row of `VoucherEntryRepository.instance.listAll()`, shaped for this
+/// screen. tally-api's `VoucherEntry` primary key is a String UUID (not the
+/// legacy backend's int autoincrement id) - [entryId] carries that real id
+/// for repository calls (delete), while [id] is a synthetic, stable-per-row
+/// int (derived from [entryId]) kept only because both this screen's
+/// `expandedCards` Set<int> and ModifySalesEntry's current (not yet
+/// migrated as of this pass) constructor still expect an int id. [data]
+/// carries the full tally-api VoucherEntry map plus the legacy-named
+/// display keys ('DATE'/'VOUCHERNUMBER'/'PARTYLEDGERNAME'/'totalAmount'/
+/// 'VOUCHERTYPENAME') this screen's own rendering code reads.
+///
+/// tally-api has no outbound-push-to-Tally job yet (see
+/// `voucher_entry_repository.dart`'s doc-comment), so `syncedAt` is always
+/// null today - every entry is therefore "pending" by definition, matching
+/// this screen's original "pending sales entries" purpose. [isSynced] is
+/// still derived from `syncedAt` (rather than hardcoded) so this keeps
+/// working once that job ships. There is no "sync error" status distinct
+/// from "unsynced" in the new backend (no 3rd state like the legacy `2`) -
+/// [message] (from `syncError`) is shown whenever present, regardless of
+/// [isSynced].
 class SalesModel {
+  final String entryId;
   final int id;
   final Map<String, dynamic> data;
   final String type;
@@ -21,6 +44,7 @@ class SalesModel {
   final String? message;
 
   SalesModel({
+    required this.entryId,
     required this.id,
     required this.data,
     required this.type,
@@ -28,13 +52,41 @@ class SalesModel {
     this.message,
   });
 
-  factory SalesModel.fromJson(Map<String, dynamic> json) {
+  factory SalesModel.fromVoucherEntry(Map<String, dynamic> json) {
+    final String entryId = json['id'].toString();
+
+    final List<dynamic> ledgerEntries =
+        (json['ledgerEntries'] as List<dynamic>?) ?? const [];
+
+    Map<String, dynamic>? partyLedgerEntry;
+    for (final e in ledgerEntries) {
+      if (e is Map && e['isPartyLedger'] == true) {
+        partyLedgerEntry = Map<String, dynamic>.from(e);
+        break;
+      }
+    }
+
+    final String partyLedgerName =
+        (partyLedgerEntry?['ledgerName'] ?? '').toString();
+
+    final num totalAmount = partyLedgerEntry != null
+        ? (num.tryParse(partyLedgerEntry['amount'].toString()) ?? 0).abs()
+        : 0;
+
+    final data = Map<String, dynamic>.from(json);
+    data['DATE'] = json['date'];
+    data['VOUCHERNUMBER'] = json['voucherNumber'] ?? '';
+    data['VOUCHERTYPENAME'] = json['voucherTypeName'] ?? '';
+    data['PARTYLEDGERNAME'] = partyLedgerName;
+    data['totalAmount'] = totalAmount;
+
     return SalesModel(
-      id: json['id'],
-      data: json['data'],
-      type: json['type'],
-      isSynced: json['isSynced'],
-      message: json['message'],
+      entryId: entryId,
+      id: entryId.hashCode,
+      data: data,
+      type: 'sales',
+      isSynced: json['syncedAt'] != null ? 1 : 0,
+      message: json['syncError']?.toString(),
     );
   }
 }
@@ -54,8 +106,6 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
       isRolesEnable = true,
       _isLoading = false,
       isVisibleNoSalesEntryFound = false;
-
-  String? HttpURL_loadData, HttpURL_deleteEntry, token = '';
 
   String rolename_fetched = "";
 
@@ -102,22 +152,12 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
       company_lowercase = company!.replaceAll(' ', '').toLowerCase();
       serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
 
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
       String? email_nav = prefs.getString('email_nav');
       String? name_nav = prefs.getString('name_nav');
 
-      // full list
-      HttpURL_loadData =
-          '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales';
-
-      // not synced only list
-      // HttpURL_loadData = '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales&&isSynced=false';
-
-      HttpURL_deleteEntry =
-          '$hostname/api/entry/deleteEntry/$company_lowercase/$serial_no';
       if (email_nav != null && name_nav != null) {
         name = name_nav;
 
@@ -137,7 +177,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
 
   Future<void> _showConfirmationDialogAndNavigate(
     BuildContext context,
-    int id,
+    String id,
   ) async {
     await showGeneralDialog(
       context: context,
@@ -259,154 +299,129 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
     );
   }
 
-  Future<void> entrydelete(int id) async {
+  Future<void> entrydelete(String entryId) async {
     setState(() {
       _isLoading = true;
     });
-    final url = Uri.parse(HttpURL_deleteEntry!);
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({'id': id.toString()});
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final response_data = response.body;
-      showAppMessage(context, response_data);
-      if (response_data == "Entry deleted successfully") {
-        setState(() {
-          _isLoading = true;
-          fetchSalesEntries();
-        });
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Server Error!!!';
-      }
-
-      showAppMessage(context, error);
+    try {
+      await VoucherEntryRepository.instance.remove(entryId);
+      showAppMessage(context, "Entry deleted successfully");
+      await fetchSalesEntries();
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      showAppMessage(context, 'Server Error!!!');
       setState(() {
         _isLoading = false;
       });
     }
   }
 
+  // Pulls every voucher entry for the active company from tally-api
+  // (`VoucherEntryRepository.listAll()`), then filters client-side to the
+  // Sales voucher type(s) (matched on `reservedName == 'SALES'`, the same
+  // stable-identifier rationale tally-api's own report queries use - see
+  // its CLAUDE.md) rather than a `type=sales` query param, since tally-api
+  // has no such filter on `voucher-entries`. If a company-specific Sales
+  // voucher type NAME is configured (the legacy `spectra_allocations` ->
+  // `sales_voucher_type` override, previously sent as `vchName=`), that
+  // name is applied as an extra client-side filter, same as before.
+  //
+  // "Pending" in the legacy backend meant "not yet pushed to Tally"
+  // (`isSynced`/`vchName` query params). tally-api has no outbound-push-to-
+  // -Tally job yet (see `voucher_entry_repository.dart`), so `syncedAt` is
+  // always null and every entry returned here is, today, pending by
+  // definition - there is no separate "pending only" filter to apply.
   Future<void> fetchSalesEntries() async {
     setState(() {
       _isLoading = true;
     });
 
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    String? voucherTypeName;
+      String? voucherTypeName;
 
-    final String? spectraAllocationsString = prefs.getString(
-      'spectra_allocations',
-    );
-
-    if (spectraAllocationsString != null &&
-        spectraAllocationsString.isNotEmpty) {
-      final List<dynamic> spectraAllocations = jsonDecode(
-        spectraAllocationsString,
+      final String? spectraAllocationsString = prefs.getString(
+        'spectra_allocations',
       );
 
-      if (spectraAllocations.isNotEmpty) {
-        voucherTypeName = spectraAllocations.first['sales_voucher_type'];
+      if (spectraAllocationsString != null &&
+          spectraAllocationsString.isNotEmpty) {
+        final List<dynamic> spectraAllocations = jsonDecode(
+          spectraAllocationsString,
+        );
+
+        if (spectraAllocations.isNotEmpty) {
+          voucherTypeName = spectraAllocations.first['sales_voucher_type'];
+        }
       }
-    }
-    dynamic url;
-    if (voucherTypeName != null && voucherTypeName.trim().isNotEmpty) {
-      url = Uri.parse(
-        '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales&vchName=$voucherTypeName',
-      );
-    } else {
-      url = Uri.parse(
-        '$hostname/api/entry/getEntries/$company_lowercase/$serial_no?type=sales',
-      );
-    }
 
-    print('sales voucher type -> $voucherTypeName');
-    print('getting sales from url -> $url');
+      final salesVoucherTypes = await VoucherTypeRepository.instance
+          .byReservedName('SALES');
 
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    };
+      final Set<int> salesVoucherTypeMasterIds = salesVoucherTypes
+          .map<int>((v) => (v['masterId'] as num).toInt())
+          .toSet();
 
-    final response = await http.post(url, headers: headers);
+      final allEntries = await VoucherEntryRepository.instance.listAll();
 
-    if (response.statusCode == 200) {
+      final bool hasVoucherTypeNameFilter =
+          voucherTypeName != null && voucherTypeName.trim().isNotEmpty;
+
+      final mapped = allEntries
+          .where(
+            (json) => salesVoucherTypeMasterIds.contains(
+              json['voucherTypeMasterId'],
+            ),
+          )
+          .map((json) => SalesModel.fromVoucherEntry(json))
+          .where(
+            (m) =>
+                !hasVoucherTypeNameFilter ||
+                (m.data['VOUCHERTYPENAME'] ?? '').toString() ==
+                    voucherTypeName,
+          )
+          .toList();
+
       salesentries.clear();
       filteredSalesEntries.clear();
 
-      try {
-        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes));
+      isVisibleNoSalesEntryFound = false;
 
-        isVisibleNoSalesEntryFound = false;
+      salesentries.addAll(mapped);
 
-        salesentries.addAll(
-          jsonList.map((json) => SalesModel.fromJson(json)).toList(),
-        );
+      salesentries.sort((a, b) {
+        DateTime dateA = DateTime.parse(a.data['DATE'].toString());
+        DateTime dateB = DateTime.parse(b.data['DATE'].toString());
+        if (dateA != dateB) return dateB.compareTo(dateA);
+        final vchA =
+            int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+        final vchB =
+            int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
+        return vchB.compareTo(vchA);
+      });
 
-        salesentries.sort((a, b) {
-          DateTime dateA = DateTime.parse(a.data['DATE']);
-          DateTime dateB = DateTime.parse(b.data['DATE']);
-          if (dateA != dateB) return dateB.compareTo(dateA);
-          final vchA =
-              int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          final vchB =
-              int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          return vchB.compareTo(vchA);
-        });
+      filteredSalesEntries = List.from(salesentries);
 
-        filteredSalesEntries = List.from(salesentries);
+      setState(() {
+        FocusManager.instance.primaryFocus?.unfocus();
+        _searchController.clear();
+        selectedSingleDate = null;
+        selectedDateRange = null;
 
-        setState(() {
-          FocusManager.instance.primaryFocus?.unfocus();
-          _searchController.clear();
-          selectedSingleDate = null;
-          selectedDateRange = null;
-
-          if (filteredSalesEntries.isEmpty) {
-            isVisibleNoSalesEntryFound = true;
-          }
-
-          _isLoading = false;
-        });
-      } catch (e) {
-        print(e);
-
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } else {
-      String error = 'Server Error!!!';
-
-      try {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-
-        if (data.containsKey('error')) {
-          error = data['error'];
+        if (filteredSalesEntries.isEmpty) {
+          isVisibleNoSalesEntryFound = true;
         }
-      } catch (_) {}
 
-      showAppMessage(context, error);
+        _isLoading = false;
+      });
+    } on ApiException catch (e) {
+      showAppMessage(context, e.message);
 
       setState(() {
         if (filteredSalesEntries.isEmpty) {
@@ -415,89 +430,14 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
 
         _isLoading = false;
       });
+    } catch (e) {
+      print(e);
+
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
-
-  /*Future<void> fetchSalesEntries() async {
-    setState(() {
-      _isLoading = true;
-    });
-    final url = Uri.parse(HttpURL_loadData!);
-
-    Map<String,String> headers = {
-      'Authorization' : 'Bearer $token',
-      "Content-Type": "application/json"
-    };
-
-    final response = await http.post(
-        url,
-        headers:headers
-    );
-
-    if (response.statusCode == 200)
-    {
-      salesentries.clear();
-      filteredSalesEntries.clear();
-      print(response.body);
-      try
-      {
-        final List<dynamic> jsonList = json.decode(utf8.decode(response.bodyBytes)) ;
-
-        isVisibleNoSalesEntryFound = false;
-        salesentries.addAll(jsonList.map((json) => SalesModel.fromJson(json)).toList());
-        salesentries.sort((a, b) {
-          final vchA = int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          final vchB = int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-          if (vchA != vchB) return vchB.compareTo(vchA);
-          DateTime dateA = DateTime.parse(a.data['DATE']);
-          DateTime dateB = DateTime.parse(b.data['DATE']);
-          return dateB.compareTo(dateA);
-        });
-
-        filteredSalesEntries = List.from(salesentries);
-        setState(() {
-          FocusManager.instance.primaryFocus?.unfocus();
-          _searchController.clear();
-        });
-
-        setState(() {
-          if(filteredSalesEntries.isEmpty)
-          {
-            isVisibleNoSalesEntryFound = true;
-          }
-          _isLoading = false;
-        });
-      }
-      catch (e)
-      {
-        print(e);
-      }
-    }
-    else
-    {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      }
-      else
-      {
-        error = 'Server Error!!!';
-      }
-
-      showAppMessage(context, error);
-    }
-
-    setState(() {
-      if(filteredSalesEntries.isEmpty)
-      {
-        isVisibleNoSalesEntryFound = true;
-      }
-      _isLoading = false;
-    });}*/
 
   @override
   void initState() {
@@ -989,10 +929,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                             partyName: partyLedger,
                             amount: totalAmount.toString(),
                             isSynced: card.isSynced == 1,
-                            errorMessage:
-                                (card.isSynced == 2 && card.message != null)
-                                ? card.message
-                                : null,
+                            errorMessage: card.message,
                             isExpanded: isExpanded,
                             onTap: () {
                               setState(() {
@@ -1008,7 +945,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                                       MaterialPageRoute(
                                         builder: (context) => ModifySalesEntry(
                                           type: card.type,
-                                          id: card.id,
+                                          id: card.entryId,
                                           isSynced: card.isSynced,
                                           data: card.data,
                                         ),
@@ -1020,7 +957,7 @@ class _PendingSalesEntryPageState extends State<PendingSalesEntry>
                                 ? () {
                                     _showConfirmationDialogAndNavigate(
                                       context,
-                                      card.id,
+                                      card.entryId,
                                     );
                                   }
                                 : null,
