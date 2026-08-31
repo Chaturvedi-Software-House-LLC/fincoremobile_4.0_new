@@ -17,7 +17,6 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'DashboardAnalytics.dart';
 import 'PendingSalesOrderEntry.dart';
-import 'SerialSelect.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'package:url_launcher/url_launcher.dart';

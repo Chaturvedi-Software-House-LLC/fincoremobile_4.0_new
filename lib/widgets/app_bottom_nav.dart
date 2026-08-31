@@ -12,7 +12,6 @@ import 'package:FincoreGo/PendingReceiptEntry.dart';
 import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:FincoreGo/PendingSalesOrderEntry.dart';
 import 'package:FincoreGo/RolesView.dart';
-import 'package:FincoreGo/SerialSelect.dart';
 import 'package:FincoreGo/CompanySelectTallyOauth.dart';
 import 'package:FincoreGo/Settings.dart';
 import 'package:FincoreGo/Transactions.dart';
