@@ -18,7 +18,6 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'widgets/entry_widgets.dart';
 import 'services/biometric_auth_service.dart';
@@ -47,17 +46,11 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   late SharedPreferences prefs_login;
 
-  bool isValidId = false;
   String responseMessage = ''; // To store the server response.
-  String socketId = ''; // To store the socket ID.
 
   bool isVisibleTimer = false;
 
-  late IO.Socket socket;
-
   bool isOTPVerified = false, isAnotherDevice = false;
-
-  dynamic socket_data;
 
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
@@ -73,8 +66,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   String? deviceIdentifier = '';
 
   String generatedotp = '';
-
-  dynamic jsonPayload, response_getusers, response_resetpass;
 
   bool isVisibleLoginForm = true,
       isVisibleResetPassForm = false,
@@ -145,8 +136,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
         FocusManager.instance.primaryFocus?.unfocus();
 
-        socket.emit('deleteMyId', socket_data);
-
         isOTPVerified = true;
         isAnotherDevice = true;
 
@@ -178,108 +167,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   bool isEmail(String value) {
     return _emailRegex.hasMatch(value.trim());
-  }
-
-  void emitSaveId(final jsonPayload, final response) {
-    if (!mounted || !isOTPVerified) return;
-
-    final navigator = Navigator.of(context);
-
-    socket.emit('saveMyId', jsonPayload);
-
-    socket.once('isIdSaved', (data) async {
-      if (!mounted) return;
-
-      if (data == true) {
-        // A degraded/overloaded backend can return a truncated, malformed,
-        // or unexpected-shape body under heavy concurrent login load -
-        // guard the whole decode/rebuild so that shows as a normal error
-        // message instead of crashing the login flow outright.
-        try {
-          final responseData = json.decode(utf8.decode(response.bodyBytes));
-
-          if (responseData is! List) {
-            throw const FormatException('Expected a JSON list response');
-          }
-
-          if (responseData.isNotEmpty) {
-            final userName = responseData[0]['name']?.toString() ?? '';
-            await prefs_login.setString('name', userName);
-          }
-
-          final myList = <Map<String, dynamic>>[];
-
-          for (final data in responseData) {
-            final newObj = <String, dynamic>{
-              'serial_no': data['serial_no'],
-              'role_id': data['role_id'],
-              'license_expiry': data['license_expiry'],
-              'website_url': data['website_url'],
-              'token': data['token'],
-            };
-
-            if (data['spectra_allocations'] != null) {
-              newObj['spectra_allocations'] = data['spectra_allocations'];
-            }
-
-            myList.add(newObj);
-          }
-
-          final jsonString = jsonEncode(myList);
-
-          // "Remember me" as a user-facing toggle is gone - username/
-          // password are no longer prefilled into the form on next launch.
-          // These are still saved every time, silently, purely as the
-          // credential source Settings' biometric toggle and the post-
-          // login "Enable Face ID/Biometric?" prompt need to persist
-          // biometric_username/biometric_password - never shown back to
-          // the user or used to auto-fill/auto-submit the login form.
-          prefs_login.setString('username_remember', usernamee);
-          prefs_login.setString('password_remember', passwordd);
-          prefs_login.setString('username', usernamee);
-          prefs_login.setString('password', passwordd);
-          prefs_login.remove('sync_pref');
-          prefs_login.remove('serial_no');
-
-          prefs_login.setString('login_list', jsonString);
-
-          if (_biometricEnabled) {
-            prefs_login.setString('biometric_username', usernamee);
-            prefs_login.setString('biometric_password', passwordd);
-          }
-
-          // Whenever biometric login isn't actively enabled - either the
-          // device has no fingerprint/Face ID hardware, or the user has
-          // hardware but chose not to use it - fall back to the plain
-          // Remember Me switch, keeping its saved credentials fresh on
-          // every successful login the same way biometric does above.
-          if (!_biometricEnabled && _rememberMeEnabled) {
-            prefs_login.setString('remember_me_username', usernamee);
-            prefs_login.setString('remember_me_password', passwordd);
-          }
-
-          if (!mounted) return;
-
-          await _maybeOfferBiometricEnable();
-
-          if (!mounted) return;
-
-          navigator.pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => SerialSelect(autoNavigate: myList.length == 1),
-            ),
-          );
-        } catch (e) {
-          debugPrint('LOGIN RESPONSE PARSE ERROR: $e');
-          if (!mounted) return;
-          showAppMessage(context, 'An error occured.');
-        }
-      } else {
-        if (!mounted) return;
-
-        showAppMessage(context, 'An error occured.');
-      }
-    });
   }
 
   Future<void> _showConfirmationDialogAndExit(BuildContext context) async {
@@ -937,14 +824,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         isOTPVerified = true;
         isAnotherDevice = true;
 
-        final jsonPayload = {
-          'username': entered_username,
-          'password': entered_password,
-          'macId': deviceIdentifier,
-        };
-
-        socket.emit('deleteMyId', jsonPayload);
-
         _directlogin();
       } else {
         if (username_prefs != entered_username) {
@@ -1095,7 +974,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       _isLoading = true;
       isDirectLogin = true;
       isOTPLogin = false;
-      response_getusers = null;
     });
 
     if (!await _loginToTallyOauth()) {
@@ -1116,7 +994,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       _isLoading = true;
       isDirectLogin = false;
       isOTPLogin = true;
-      response_getusers = null;
     });
 
     if (!await _loginToTallyOauth()) {
@@ -1186,322 +1063,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       }
     });*/
 
-    // Initialize Socket.IO connection
-    socket = IO.io(SOCKET_URL, <String, dynamic>{
-      'transports': ['websocket'],
-      'path': '/main/socket.io',
-      'autoConnect': false,
-      'reconnection': true,
-      'reconnectionAttempts': 10,
-      'reconnectionDelay': 1500,
-      'timeout': 20000,
-      'forceNew': true,
-      'auth': {'token': authTokenBase},
-    });
-
-    socket.onConnect((_) {
-      print("🔌 Socket Connected");
-    });
-
-    socket.onConnectError((data) {
-      print("❌ Connect Error: $data");
-    });
-
-    socket.onDisconnect((_) {
-      debugPrint("Socket disconnected");
-    });
-
-    socket.connect();
-
-    /*socket = IO.io('http://192.168.2.110:5999', <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': true,
-      'auth' : {
-        'token' : '$authTokenBase'
-      }
-    });*/
-
-    /*socket = IO.io('http://192.168.2.80:5999', <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': true,
-      'auth' : {
-        'token' : '$authTokenBase'
-      }
-    });*/
-
-    // Listen for the socket connection event and get the socket ID
-
-    socket.on('connect', (_) {
-      socketId = socket.id!;
-    });
-
-    socket.on('idConflict', (data) {
-      // show dialog
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (BuildContext context) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              elevation: 12,
-              backgroundColor: Theme.of(context).colorScheme.surface,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      color: app_color,
-                      size: 48,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'User Already Logged In',
-
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'This user is already logged in on another device. Do you want to continue here?',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 15,
-                        height: 1.4,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: app_color),
-                              foregroundColor: app_color,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            onPressed: () {
-                              Navigator.of(context).pop();
-                              // Handle "No"
-                            },
-                            child: const Text(
-                              'No',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: app_color,
-                              foregroundColor: Colors.white,
-                              elevation: 2,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            onPressed: () async {
-                              String username = usernameController.text;
-                              Navigator.of(context).pop();
-
-                              String entered_username = usernameController.text;
-                              String entered_password = passwordController.text;
-
-                              if (entered_username == 'demouser@ca-eim.com' &&
-                                  entered_password == 'user1234') {
-                                isOTPVerified = true;
-                                isAnotherDevice = true;
-                                socket.emit('deleteMyId', data);
-                                _directlogin();
-                              } else {
-                                if (isEmail(username)) {
-                                  sendOTP(username);
-                                  socket_data = data;
-
-                                  setState(() {
-                                    isVisibleLoginForm = false;
-                                    isVisibleResetPassForm = false;
-                                    _isButtonEnabled = false;
-                                    isVisibleTimer = true;
-                                    _isOtpVerifyingProgress = false;
-                                    _isVerifyingOtp = false;
-                                    otpController.clear();
-                                    currentText = '';
-
-                                    _startTimer();
-                                    isVisibleOTPForm = true;
-                                    maskedEmail = username;
-                                  });
-                                } else {
-                                  isOTPVerified = true;
-                                  isAnotherDevice = true;
-                                  socket.emit('deleteMyId', data);
-                                  _directlogin();
-                                }
-
-                                /* sendOTP(username);
-                                socket_data = data;
-                                setState(() {
-                                  isVisibleLoginForm = false;
-                                  isVisibleResetPassForm = false;
-                                  _isButtonEnabled = false;
-                                  isVisibleTimer = true;
-                                  _isOtpVerifyingProgress = false;
-                                  _isVerifyingOtp = false;
-                                  otpController.clear();
-                                  currentText = '';
-
-                                  _startTimer();
-                                  isVisibleOTPForm = true;
-                                  maskedEmail = username;
-                                });*/
-                              }
-                            },
-                            child: const Text(
-                              'Yes, Continue',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      }
-    });
-
-    socket.on('isValidId', (data) {
-      /*print('isValidiD : $data');*/
-      if (!mounted) return;
-
-      if ((data &&
-              isDirectLogin &&
-              isOTPVerified == true &&
-              isAnotherDevice == true) ||
-          (data &&
-              isDirectLogin &&
-              isOTPVerified == false &&
-              isAnotherDevice == false)) {
-        isValidId = data;
-
-        if (data) {
-          isOTPVerified = true;
-          emitSaveId(jsonPayload, response_getusers);
-        } else {
-          isOTPVerified = false;
-
-          prefs_login.remove('username_remember');
-          prefs_login.remove('password_remember');
-
-          showAppMessage(context, 'User is active on another device.');
-        }
-      } else if (data && isOTPLogin && isOTPVerified == false) {
-        isValidId = data;
-
-        if (data) {
-          /*setState(() {
-              isOTPVerified = true;
-              emitSaveId(jsonPayload, response_getusers);
-            });*/
-
-          /*sendOTP('saadan@ca-eim.com');*/
-
-          if (isEmail(usernamee)) {
-            sendOTP(usernamee);
-
-            socket_data = data;
-
-            setState(() {
-              isVisibleLoginForm = false;
-              isVisibleResetPassForm = false;
-              _isButtonEnabled = false;
-              isVisibleTimer = true;
-              _isOtpVerifyingProgress = false;
-              _isVerifyingOtp = false;
-              otpController.clear();
-              currentText = '';
-
-              _startTimer();
-              isVisibleOTPForm = true;
-              maskedEmail = usernamee;
-            });
-          } else {
-            isOTPVerified = true;
-            isAnotherDevice = true;
-            _directlogin();
-            // return;
-          }
-
-          /* if (isEmail(usernamee)) {
-              sendOTP(usernamee);
-            } else {
-              isOTPVerified = true;
-              isAnotherDevice = true;
-              _directlogin();
-            }
-
-            socket_data = data;
-
-            setState(() {
-              isVisibleLoginForm = false;
-              isVisibleResetPassForm = false;
-              _isButtonEnabled = false;
-              isVisibleTimer = true;
-              _isOtpVerifyingProgress = false;
-              _isVerifyingOtp = false;
-              otpController.clear();
-              currentText = '';
-
-              _startTimer();
-              isVisibleOTPForm = true;
-              maskedEmail = usernamee;
-            });*/
-        } else {
-          isOTPVerified = false;
-          prefs_login.remove('username_remember');
-          prefs_login.remove('password_remember');
-
-          showAppMessage(context, 'User is active on another device.');
-        }
-      } else {
-        prefs_login.remove('username_remember');
-        prefs_login.remove('password_remember');
-
-        showAppMessage(context, 'User is active on another device.');
-      }
-    });
-
-    try {
-      socket.connect();
-    } catch (e) {
-      showAppMessage(context, e.toString());
-    }
     _initSharedPreferences();
   }
 
@@ -1631,12 +1192,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   @override
   void dispose() {
     _timer?.cancel();
-
-    socket.off('isValidId');
-    socket.off('idConflict');
-    socket.off('isIdSaved');
-    socket.disconnect();
-    socket.dispose();
 
     passwordController.removeListener(_onPasswordChanged);
     resetemailController.removeListener(_onResetEmailChanged);

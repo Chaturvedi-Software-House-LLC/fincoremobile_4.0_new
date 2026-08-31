@@ -14,7 +14,6 @@ import 'package:FincoreGo/PendingSalesOrderEntry.dart';
 import 'package:FincoreGo/RolesView.dart';
 import 'package:FincoreGo/SerialSelect.dart';
 import 'package:FincoreGo/CompanySelectTallyOauth.dart';
-import 'package:FincoreGo/widgets/company_switcher.dart';
 import 'package:FincoreGo/Settings.dart';
 import 'package:FincoreGo/Transactions.dart';
 import 'package:FincoreGo/UserView.dart';
@@ -27,7 +26,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 enum AppBottomNavTab {
   none,
@@ -99,17 +97,13 @@ class _AppBottomNavState extends State<AppBottomNav> {
   String nameNav = '';
   String emailNav = '';
 
-  String? socketId = '';
   String? deviceIdentifier = '';
-
-  IO.Socket? socket;
 
   @override
   void initState() {
     super.initState();
     _loadPermissions();
     _getDeviceIdentifier();
-    _initSocket();
     _awaitPoppinsForLabelSizing();
   }
 
@@ -247,34 +241,8 @@ class _AppBottomNavState extends State<AppBottomNav> {
     }
   }
 
-  void _initSocket() {
-    socket = IO.io(SOCKET_URL, <String, dynamic>{
-      'transports': ['websocket'],
-      'path': '/main/socket.io',
-      'autoConnect': false,
-      'reconnection': true,
-      'reconnectionAttempts': 10,
-      'reconnectionDelay': 1500,
-      'timeout': 20000,
-      'forceNew': true,
-      'auth': {'token': authTokenBase},
-    });
-
-    socket?.on('connect', (_) {
-      socketId = socket?.id;
-    });
-
-    socket?.connect();
-  }
-
-  void emitDeleteMyId(Map<String, dynamic> jsonPayload, Function() onComplete) {
-    socket?.emit('deleteMyId', jsonPayload);
-    onComplete();
-  }
-
   @override
   void dispose() {
-    socket?.dispose();
     super.dispose();
   }
 
@@ -616,7 +584,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
             _profileChip(
               Icons.business_outlined,
               companyName,
-              onTap: () => showQuickCompanySwitcher(context),
+              onTap: () => navigateToCompanySwitch(context),
               trailingIcon: Icons.swap_horiz_rounded,
             ),
             if (vanSalesSerialNo.contains(serialNo.trim()) &&
@@ -1137,23 +1105,15 @@ class _AppBottomNavState extends State<AppBottomNav> {
                           // own explicit call.
                           await AuthRepository.instance.logout();
 
-                          final jsonPayload = {
-                            'username': usernamePrefs,
-                            'password': passwordPrefs,
-                            'macId': deviceIdentifier,
-                          };
-
                           Navigator.of(context).pop();
 
-                          emitDeleteMyId(jsonPayload, () {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    Login(username: '', password: ''),
-                              ),
-                            );
-                          });
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  Login(username: '', password: ''),
+                            ),
+                          );
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: app_color,
