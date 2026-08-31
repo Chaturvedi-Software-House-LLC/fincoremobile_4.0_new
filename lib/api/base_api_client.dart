@@ -34,6 +34,34 @@ abstract class BaseApiClient {
   /// tokens differ between the two.
   Future<void> refresh(TokenScope scope);
 
+  /// In-flight refresh, shared across every [BaseApiClient] instance (every
+  /// repository builds its own `TallyApiClient`/`TallyOauthClient`, so this
+  /// can't be instance state) - keyed by scope since a user-token refresh
+  /// and a company-user-token refresh are independent.
+  ///
+  /// tally-oauth rotates the refresh token on every use, revoking the old
+  /// one the instant a new pair is issued (see token_refresher.dart). If
+  /// several requests 401 around the same time (routine - most screens
+  /// fire multiple calls on load) and each independently called
+  /// `refresh(scope)`, only the first would succeed; every other call
+  /// would still be holding the refresh token that first call just
+  /// rotated away, fail with a revoked-refresh-token error, and force a
+  /// full logout - even though the session was actually fine. Coalescing
+  /// concurrent 401s for the same scope onto one shared refresh call (and
+  /// letting every caller await its result) closes that race.
+  static final Map<TokenScope, Future<void>> _refreshInFlight = {};
+
+  Future<void> _refreshOnce(TokenScope scope) {
+    final existing = _refreshInFlight[scope];
+    if (existing != null) return existing;
+
+    final future = refresh(scope).whenComplete(() {
+      _refreshInFlight.remove(scope);
+    });
+    _refreshInFlight[scope] = future;
+    return future;
+  }
+
   Future<String?> _tokenFor(TokenScope scope) {
     switch (scope) {
       case TokenScope.none:
@@ -116,7 +144,7 @@ abstract class BaseApiClient {
 
     if (response.statusCode == 401 && scope != TokenScope.none && !isRetry) {
       try {
-        await refresh(scope);
+        await _refreshOnce(scope);
       } catch (_) {
         // The one-shot refresh itself failed (refresh token dead/expired,
         // not just the access token) - there's no path back to a valid
