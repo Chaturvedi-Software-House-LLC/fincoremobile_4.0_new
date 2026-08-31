@@ -22,8 +22,8 @@ import 'widgets/searchable_selector.dart';
 import 'widgets/signature_capture.dart';
 import 'api/api_exception.dart';
 import 'api/ledger_repository.dart';
-import 'api/stock_repository.dart';
 import 'api/voucher_entry_repository.dart';
+import 'api/voucher_entry_dropdowns_repository.dart';
 import 'api/price_level_repository.dart';
 import 'api/pagination_helper.dart';
 import 'api/tally_api_client.dart';
@@ -4620,25 +4620,31 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   /// Replaces legacy's single `POST /api/entry/getSalesData/:company/:serial`
   /// (which server-side pre-classified everything for `"type": "sales"` -
   /// vchTypes/partyLedgers/salesLedgers/vatLedgers/otherLedgers/items/
-  /// locations in one response) with tally-api's separate master-list
-  /// endpoints, combined and classified client-side:
-  ///  - vchTypes -> voucher types whose `reservedName == 'SALES'` (tally-
-  ///    api's VoucherReservedName enum label, not Tally's own `'Sales'`).
-  ///  - partyLedgers -> `LedgerRepository.listLedgers()` (party-like groups,
-  ///    same "Sundry Debtors/Creditors" restriction Party.dart uses).
-  ///  - salesLedgers -> ledgers whose group `reservedName == 'SALES'`.
-  ///  - vatLedgers -> ledgers whose group `reservedName == 'DUTIES'`
-  ///    (Tally's own fixed VAT/GST group reservedName - not yet used by any
-  ///    tally-api report today, so this is a client-side-only
-  ///    classification, same "best effort against reservedName" pattern
-  ///    `LedgerRepository`'s party-group filter already uses).
-  ///  - otherLedgers -> every remaining ledger (not party/sales/VAT).
-  ///  - locations -> godowns.
-  ///  - items -> stock items, reshaped into the same key names
-  ///    (`name`/`masterid`/`saleprice`/`standardprice`/`unit`/`part`) the
-  ///    rest of this screen already reads, so none of the many item-picker/
-  ///    unit-dropdown/bulk-add call sites elsewhere in this file need to
-  ///    change.
+  /// locations in one response) with tally-api's own equivalent bundle
+  /// endpoint - `VoucherEntryDropdownsRepository.salesData()`
+  /// (`GET .../voucher-entry-dropdowns/sales-data`) - which does the exact
+  /// same server-side classification (by `GroupReservedName`/
+  /// `VoucherReservedName` instead of legacy's raw Tally name strings) in
+  /// one call, already scoped to this company-user's master-restrictions
+  /// (Van Allocation). This replaced an earlier client-side-classification
+  /// version of this method that fetched every `/ledgers`/`/groups`/
+  /// `/voucher-types`/`/godowns`/stock-item list separately and
+  /// re-classified them here.
+  ///  - vchTypes/partyLedgers/salesLedgers/vatLedgers/otherLedgers/godowns ->
+  ///    used as-is (`{masterId, name}` rows, `otherLedgers` also carries
+  ///    `vatApplicable`, not currently read here).
+  ///  - items -> stock items, already shaped close to what this screen's
+  ///    item-picker/unit-dropdown/bulk-add code reads; reshaped one more
+  ///    step by `_shapeStockItemForLegacyItemdata` into the exact legacy key
+  ///    names (`name`/`masterid`/`saleprice`/`standardprice`/`unit`/`part`)
+  ///    so none of those call sites needed to change.
+  ///
+  /// `currencies` has no equivalent in this bundle (Sales/Receipt dropdown
+  /// data is currency-agnostic) - fetched separately, same as before.
+  /// `creditPeriod` (UniGas per-party lookup) is likewise absent from this
+  /// bundle's `partyLedgers` - `LedgerRepository.listLedgers()` is still
+  /// fetched alongside it, but only when `isUniGasSerial`, purely to
+  /// resolve that one field.
   ///
   /// **Known gap**: legacy's per-party `price_level` (UniGas's automatic
   /// price-level-by-customer lookup) has no equivalent field on tally-api's
@@ -4682,64 +4688,55 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       debugPrint('sales loadData isUniGasSerial -> $isUniGasSerial');
 
       final results = await Future.wait([
-        StockRepository.instance.listStockItems(),
-        LedgerRepository.instance.listLedgers(),
-        fetchAllPages(
-          (page) =>
-              _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
-        ),
-        fetchAllPages(
-          (page) =>
-              _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
-        ),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany(
-            '/voucher-types?page=$page&limit=100',
-          ),
-        ),
-        fetchAllPages(
-          (page) =>
-              _tallyApiClient.getForCompany('/godowns?page=$page&limit=100'),
-        ),
+        VoucherEntryDropdownsRepository.instance.salesData(),
         fetchAllPages(
           (page) => _tallyApiClient.getForCompany(
             '/currencies?page=$page&limit=100',
           ),
         ),
+        // Only needed to resolve creditPeriod (see this method's doc
+        // comment) - not part of the dropdown bundle above.
+        isUniGasSerial
+            ? LedgerRepository.instance.listLedgers()
+            : Future.value(<Map<String, dynamic>>[]),
       ]);
 
-      final stockItems = results[0];
-      final partyLedgers = results[1];
-      final allLedgers = results[2];
-      final groups = results[3];
-      final voucherTypes = results[4];
-      final godowns = results[5];
-      final currencies = results[6];
+      final salesData = results[0] as Map<String, dynamic>;
+      final currencies = results[1] as List<Map<String, dynamic>>;
+      final creditPeriodLedgers = results[2] as List<Map<String, dynamic>>;
 
-      final groupReservedNameByMasterId = <int, String?>{
-        for (final g in groups)
-          g['masterId'] as int: g['reservedName'] as String?,
+      final voucherTypes = (salesData['vchTypes'] as List)
+          .cast<Map<String, dynamic>>();
+      final partyLedgers = (salesData['partyLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final salesLedgers = (salesData['salesLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final vatLedgers = (salesData['vatLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final otherLedgersRaw = (salesData['otherLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final stockItems = (salesData['items'] as List)
+          .cast<Map<String, dynamic>>();
+      final godowns = (salesData['godowns'] as List)
+          .cast<Map<String, dynamic>>();
+
+      final creditPeriodByLedgerName = <String, String?>{
+        for (final l in creditPeriodLedgers)
+          l['name'] as String:
+              (l['creditPeriod'] as String?)?.trim().isEmpty ?? true
+              ? null
+              : (l['creditPeriod'] as String).trim(),
       };
-      final partyLedgerMasterIds = partyLedgers
-          .map((l) => l['masterId'] as int)
-          .toSet();
 
       String? voucherTypeToFetch;
 
       setState(() {
-        // tally-api's VoucherReservedName enum (2026-08-21 schema-hardening
-        // migration) uses screaming-snake-case labels ('SALES'), not
-        // Tally's own mixed-case reservedName string ('Sales').
-        vchtypenamedata = [
-          for (final vt in voucherTypes)
-            if (vt['reservedName'] == 'SALES') vt['name'] as String,
-        ];
+        vchtypenamedata = [for (final vt in voucherTypes) vt['name'] as String];
         _voucherTypeMasterIdByName
           ..clear()
           ..addAll({
             for (final vt in voucherTypes)
-              if (vt['reservedName'] == 'SALES')
-                vt['name'] as String: vt['masterId'] as int,
+              vt['name'] as String: vt['masterId'] as int,
           });
 
         // Van Allocation: tally-api's master-restrictions feature already
@@ -4753,8 +4750,18 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
         voucherTypeToFetch = _selectedvchtypename;
 
-        _allLedgersCache = allLedgers;
-        for (final ledger in allLedgers) {
+        // The dropdown bundle above already scopes every list to the
+        // dropdowns this screen actually offers - merge them all into one
+        // name->masterId map for saveEntry()'s lookups (covers every ledger
+        // reachable through any picker on this screen).
+        _allLedgersCache = [
+          ...partyLedgers,
+          ...salesLedgers,
+          ...vatLedgers,
+          ...otherLedgersRaw,
+        ];
+        _ledgerMasterIdByName.clear();
+        for (final ledger in _allLedgersCache) {
           _ledgerMasterIdByName[ledger['name'] as String] =
               ledger['masterId'] as int;
         }
@@ -4776,9 +4783,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
             // master - see this method's doc comment "Known gap" above.
             partyLedgerPriceLevelMap[ledgerName] = null;
             partyLedgerCreditPeriodMap[ledgerName] =
-                (ledger['creditPeriod'] as String?)?.trim().isEmpty ?? true
-                ? null
-                : (ledger['creditPeriod'] as String).trim();
+                creditPeriodByLedgerName[ledgerName];
           }
         } else {
           partyledgerdata = [
@@ -4789,11 +4794,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
         );
 
-        salesledger_data = [
-          for (final l in allLedgers)
-            if (groupReservedNameByMasterId[l['groupMasterId']] == 'SALES')
-              l['name'] as String,
-        ];
+        salesledger_data = [for (final l in salesLedgers) l['name'] as String];
 
         // Sales ledger soft default (not master-restriction-gated): the one
         // ledger under a Group whose reservedName is SALES, company-wide.
@@ -4814,22 +4815,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         isSalesLedgerLocked = false;
 
         vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll([
-          for (final l in allLedgers)
-            if (groupReservedNameByMasterId[l['groupMasterId']] == 'DUTIES')
-              l['name'] as String,
-        ]);
-        final vatLedgerNames = vatledgerdata.toSet();
+        vatledgerdata.addAll([for (final l in vatLedgers) l['name'] as String]);
 
-        // "Other ledgers" (the manual Ledger Entry add list) - every ledger
-        // not already surfaced as a party/sales/VAT ledger above.
-        final salesLedgerNames = salesledger_data.toSet();
+        // "Other ledgers" (the manual Ledger Entry add list) - the bundle's
+        // own `otherLedgers` classification (see the dropdowns service's
+        // doc-comment: SALES/expense/income/asset/liability groups).
         ledgerdata = [
-          for (final l in allLedgers)
-            if (!partyLedgerMasterIds.contains(l['masterId']) &&
-                !salesLedgerNames.contains(l['name']) &&
-                !vatLedgerNames.contains(l['name']))
-              {'name': l['name']},
+          for (final l in otherLedgersRaw) {'name': l['name']},
         ];
 
         _selectedledger = ledgerdata.isNotEmpty

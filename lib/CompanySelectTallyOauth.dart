@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Dashboard.dart';
@@ -265,7 +266,23 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
     try {
       final companyId = company['id'] as String;
       final companyName = company['name'] as String;
-      final startFrom = company['startFrom']?.toString() ?? '';
+      // tally-oauth's `startFrom` is a full ISO datetime string
+      // ("2026-04-01T00:00:00.000Z"), but every screen that reads the
+      // 'startfrom' prefs key (SalesRegistration/ReceiptRegistration/
+      // DeliveryNoteRegistration's fetchvchnos, Dashboard, PartyClicked,
+      // Transactions, ItemsClicked, DashboardClicked) expects legacy's
+      // compact `yyyyMMdd` via parseCompactDate/DateFormat('yyyyMMdd') -
+      // storing the raw ISO string crashed fetchvchnos's date-range parse
+      // with an uncaught FormatException (confirmed live: voucher-number
+      // auto-fill silently never completed). Converted here, once, at the
+      // source, rather than fixing every consumer's parse call.
+      final rawStartFrom = company['startFrom']?.toString();
+      final parsedStartFrom = rawStartFrom == null
+          ? null
+          : DateTime.tryParse(rawStartFrom);
+      final startFrom = parsedStartFrom == null
+          ? ''
+          : DateFormat('yyyyMMdd').format(parsedStartFrom);
       // tally-oauth's `GET /company` response nests the owning license's
       // real `validUntil` here (CompanyResponseSchema). Dashboard.dart
       // treats a missing/unparseable `license_expiry` as *already expired*
@@ -285,7 +302,14 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('company_name', _normalizeCompanyName(companyName));
-      await prefs.setString('startfrom', startFrom);
+      // Only written when parsing actually succeeded - every consumer's own
+      // `prefs.getString('startfrom') ?? <yearStart fallback>` only kicks in
+      // for a genuinely absent key, not an empty string, so leaving the key
+      // unset here (rather than writing '') is what makes that fallback
+      // actually take effect if `startFrom` was ever missing/unparseable.
+      if (startFrom.isNotEmpty) {
+        await prefs.setString('startfrom', startFrom);
+      }
       if (licenseExpiry != null) {
         await prefs.setString('license_expiry', licenseExpiry);
       }

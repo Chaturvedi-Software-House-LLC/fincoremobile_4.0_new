@@ -599,7 +599,12 @@ class _RolesViewPageState extends State<RolesView>
                               children: [
                                 GestureDetector(
                                   onTap: () {
-                                    Navigator.pushReplacement(
+                                    // push, not pushReplacement - this must
+                                    // keep RolesView on the stack underneath,
+                                    // or ModifyRole's back arrow (a plain
+                                    // Navigator.pop) has nothing to return to
+                                    // and shows a black screen.
+                                    Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) =>
@@ -672,7 +677,10 @@ class _RolesViewPageState extends State<RolesView>
                 child: FloatingActionButton(
                   backgroundColor: app_color,
                   onPressed: () {
-                    Navigator.pushReplacement(
+                    // push, not pushReplacement - same reasoning as the
+                    // ModifyRole navigation above: AddRole's back arrow
+                    // needs RolesView still on the stack to pop back to.
+                    Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => AddRole()),
                     );

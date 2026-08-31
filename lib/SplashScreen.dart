@@ -538,6 +538,7 @@ class AppUpdateService {
 
   // Check if an update is available on the App Store
   static Future<bool> isIOSUpdateAvailable() async {
+    return false; // TEMP: bypass App Store check for simulator testing
     try {
       if (!Platform.isIOS) return false;
 

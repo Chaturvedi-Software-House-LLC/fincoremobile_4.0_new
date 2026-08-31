@@ -1,8 +1,11 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../Login.dart';
 import 'api_exception.dart';
+import 'navigator_key.dart';
 import 'token_store.dart';
 
 /// Which token (if any) a request should be authorized with. tally-oauth
@@ -43,7 +46,13 @@ abstract class BaseApiClient {
   }
 
   Future<Map<String, String>> _headers(TokenScope scope) async {
-    final headers = {'Content-Type': 'application/json'};
+    final headers = {
+      'Content-Type': 'application/json',
+      // tally-oauth's login/refresh require this (single-active-session-
+      // per-device tracking) - sent on every request, not just those two,
+      // since it's harmless elsewhere and one place to maintain.
+      'x-device-id': await TokenStore.instance.deviceId,
+    };
     final token = await _tokenFor(scope);
     if (token != null) headers['Authorization'] = 'Bearer $token';
     return headers;
@@ -109,6 +118,24 @@ abstract class BaseApiClient {
       try {
         await refresh(scope);
       } catch (_) {
+        // The one-shot refresh itself failed (refresh token dead/expired,
+        // not just the access token) - there's no path back to a valid
+        // session short of a full re-login. Clear whatever's left of it and
+        // force-navigate to Login from here (via the global navigatorKey)
+        // rather than relying on every call site's catch block to notice
+        // this specific exception type and redirect - most of them only
+        // handle ApiException and would otherwise show a generic error
+        // while silently leaving the user stuck on a dead session.
+        await TokenStore.instance.clearAll();
+        final navState = navigatorKey.currentState;
+        if (navState != null) {
+          navState.pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (context) => Login(username: '', password: ''),
+            ),
+            (route) => false,
+          );
+        }
         throw SessionExpiredException(
           'Session expired - please log in again.',
         );

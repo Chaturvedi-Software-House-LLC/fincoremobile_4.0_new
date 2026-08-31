@@ -71,4 +71,20 @@ class VoucherEntryRepository {
   Future<List<Map<String, dynamic>>> listAll() => fetchAllPages(
         (page) => _client.getForCompany('/voucher-entries?page=$page&limit=100'),
       );
+
+  /// Bill allocations against [ledgerMasterId] from this app's own
+  /// not-yet-synced-to-Tally entries (`GET .../voucher-entries/pending-bills`)
+  /// - e.g. a Sales entry created in FincoreGo that hasn't reached Tally
+  /// yet, so it has no row in tally-api's Tally-synced `bills` table and
+  /// won't show up in `LedgerRepository.outstandingBills`. Used to surface
+  /// those bills alongside the real Tally ones when picking bills to settle
+  /// on a Receipt/Payment entry against the same party.
+  Future<List<Map<String, dynamic>>> pendingBills({
+    required int ledgerMasterId,
+  }) async {
+    final result = await _client.getForCompany(
+      '/voucher-entries/pending-bills?ledgerMasterId=$ledgerMasterId',
+    );
+    return (result.data as List).cast<Map<String, dynamic>>();
+  }
 }

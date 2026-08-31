@@ -24,6 +24,7 @@ import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 import 'api/pagination_helper.dart';
 import 'api/tally_api_client.dart';
 import 'api/voucher_entry_repository.dart';
+import 'api/voucher_entry_dropdowns_repository.dart';
 
 class ReceiptRegistration extends StatefulWidget {
   const ReceiptRegistration({Key? key}) : super(key: key);
@@ -294,6 +295,22 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         ledgerMasterId: ledgerMasterId,
       );
 
+      // This party's still-pending bills from FincoreGo-originated entries
+      // that haven't reached Tally yet (no `bills` row of their own, so
+      // they'd otherwise be invisible here) - see
+      // VoucherEntryRepository.pendingBills' doc-comment. Fetched/caught
+      // separately from the Tally bills above: a failure here (e.g. this
+      // ledger restricted out for the caller) shouldn't blank out the real
+      // outstanding bills that already loaded successfully.
+      List<Map<String, dynamic>> rawPendingBills = [];
+      try {
+        rawPendingBills = await VoucherEntryRepository.instance.pendingBills(
+          ledgerMasterId: ledgerMasterId,
+        );
+      } catch (e) {
+        debugPrint('ReceiptRegistration pendingBills fetch failed: $e');
+      }
+
       // Adapted onto the same lowercase keys (billno/outstanding/billdate/
       // duedate/billtype) the rest of this screen's bill-selection UI
       // already expects (addOutstandingBillToReceipt/buildOutstandingCard/
@@ -315,6 +332,29 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           'billtype': row['isAdvance'] == true ? 'Advance' : '',
         };
       }).toList();
+
+      // Pending (not-yet-synced) bills use the FincoreGo entry's own bill
+      // name/date/amount - "billtype" is deliberately labeled "Pending" so
+      // the picker (which shows billtype as the row subtitle - see
+      // buildOutstandingCard) makes clear these haven't reached Tally yet,
+      // distinct from a real "Advance"/blank Tally bill above.
+      values.addAll(
+        rawPendingBills.map((row) {
+          final date = row['date']?.toString();
+          final dueDate = row['dueDate']?.toString();
+          return <String, dynamic>{
+            'billno': row['billName'],
+            'outstanding': parseMoneyField(row['amount']),
+            'billdate': date != null && date.isNotEmpty
+                ? DateFormat('yyyyMMdd').format(DateTime.parse(date))
+                : '',
+            'duedate': dueDate != null && dueDate.isNotEmpty
+                ? DateFormat('yyyyMMdd').format(DateTime.parse(dueDate))
+                : '',
+            'billtype': 'Pending',
+          };
+        }),
+      );
 
       double billsOutstanding = 0.0;
 
@@ -3693,62 +3733,24 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     });
 
     try {
-      // tally-api replacement for legacy's getReceiptData/:company/:serial,
-      // which returned {vchTypes, partyLedgers, cashLedgers} in one call.
-      // tally-api has no equivalent bundle endpoint, so the three master
-      // lists are fetched individually: LedgerRepository for party ledgers
-      // (already restricted to party-like groups, matching legacy's
-      // partyLedgers - see LedgerRepository.listLedgers's own doc-comment),
-      // plus direct TallyApiClient calls for groups/voucher-types/
-      // currencies, none of which has a dedicated repository yet (flagged
-      // in this migration's final report).
-      final partyLedgers = await LedgerRepository.instance.listLedgers();
-
-      final groups = await fetchAllPages(
-        (page) =>
-            _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
-      );
-      // Same reservedName set tally-api's own dashboard-reports uses to
-      // classify a ledger as "bank/cash" (see dashboard-reports.service.ts)
-      // - Tally's fixed reserved group names, not user-editable group names.
-      // tally-api's GroupReservedName enum (2026-08-21 schema-hardening
-      // migration) uses screaming-snake-case labels, not Tally's own
-      // mixed-case reservedName strings.
-      const bankCashReservedNames = {
-        'CASH',
-        'BANK',
-        'BANK_OD',
-      };
-      final groupReservedNameById = <int, String?>{
-        for (final g in groups) g['masterId'] as int: g['reservedName'] as String?,
-      };
-      final bankCashGroupIds = groupReservedNameById.entries
-          .where((e) => bankCashReservedNames.contains(e.value))
-          .map((e) => e.key)
-          .toSet();
-
-      final allLedgers = await fetchAllPages(
-        (page) =>
-            _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
-      );
-      final bankCashLedgers = allLedgers
-          .where((l) => bankCashGroupIds.contains(l['groupMasterId'] as int?))
-          .toList();
-
-      // Van Allocation: fetch RECEIPT voucher types via tally-api's own
-      // reservedName filter (rather than fetching every voucher type and
-      // filtering client-side), so the picker only ever offers
-      // receipt-family types straight from the server.
-      List<Map<String, dynamic>> receiptVoucherTypes = [];
-      try {
-        receiptVoucherTypes = await fetchAllPages(
-          (page) => _tallyApiClient.getForCompany(
-            '/voucher-types?reservedName=RECEIPT&page=$page&limit=100',
-          ),
-        );
-      } catch (e) {
-        debugPrint('receipt voucher-type fetch error -> $e');
-      }
+      // tally-api's own equivalent bundle endpoint -
+      // VoucherEntryDropdownsRepository.receiptData()
+      // (`GET .../voucher-entry-dropdowns/receipt-data`) - replaces legacy's
+      // `getReceiptData/:company/:serial` (`{vchTypes, partyLedgers,
+      // cashLedgers}` in one call) with tally-api's own server-side
+      // classification by GroupReservedName/VoucherReservedName, already
+      // scoped to this company-user's master-restrictions (Van Allocation).
+      // This replaced an earlier client-side-classification version of this
+      // method that fetched every `/groups`/`/ledgers`/`/voucher-types`
+      // list separately and re-classified them here.
+      final receiptData =
+          await VoucherEntryDropdownsRepository.instance.receiptData();
+      final partyLedgers = (receiptData['partyLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final cashLedgers = (receiptData['cashLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final receiptVoucherTypes = (receiptData['vchTypes'] as List)
+          .cast<Map<String, dynamic>>();
 
       final currencies = await fetchAllPages(
         (page) =>
@@ -3763,26 +3765,17 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       );
 
       // Van Allocation: cash-ledger soft default is the single ledger under
-      // the CASH-reservedName group(s), when there is exactly one across
-      // the company - reusing the groups/ledgers already fetched above
-      // rather than re-fetching. Deliberately not a master-restriction
-      // (LEDGER restrictions are not applied here - that would hide party
-      // ledgers app-wide), so it's left editable rather than locked.
+      // the CASH-reservedName group, when there is exactly one across the
+      // company - reusing `cashLedgers` from the bundle above rather than
+      // re-fetching. Deliberately not a master-restriction (LEDGER
+      // restrictions are not applied here - that would hide party ledgers
+      // app-wide), so it's left editable rather than locked.
       String? tallyAutoCashLedgerName;
-      try {
-        final cashGroupIds = groupReservedNameById.entries
-            .where((e) => e.value == 'CASH')
-            .map((e) => e.key)
-            .toSet();
-        final tallyCashLedgers = allLedgers
-            .where((l) => cashGroupIds.contains(l['groupMasterId'] as int?))
-            .toList();
-
-        if (tallyCashLedgers.length == 1) {
-          tallyAutoCashLedgerName = tallyCashLedgers.first['name']?.toString();
-        }
-      } catch (e) {
-        debugPrint('receipt cash-ledger fetch error -> $e');
+      final tallyCashLedgers = cashLedgers
+          .where((l) => l['groupReservedName'] == 'CASH')
+          .toList();
+      if (tallyCashLedgers.length == 1) {
+        tallyAutoCashLedgerName = tallyCashLedgers.first['name']?.toString();
       }
 
       String? voucherTypeToFetch;
@@ -3794,7 +3787,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
             l['name'] as String: l['masterId'] as int,
         };
         _bankCashLedgerMasterIdByName = {
-          for (final l in bankCashLedgers)
+          for (final l in cashLedgers)
             l['name'] as String: l['masterId'] as int,
         };
         _voucherTypeMasterIdByName = {
@@ -3817,9 +3810,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
         partydata.sort();
 
-        bankcashname_data = bankCashLedgers.map((l) {
-          final reservedName =
-              groupReservedNameById[l['groupMasterId'] as int?];
+        bankcashname_data = cashLedgers.map((l) {
+          final reservedName = l['groupReservedName'];
           return {
             'name': l['name'] as String,
             'type': reservedName == 'CASH' ? 'Cash-in-Hand' : 'Bank',

@@ -350,6 +350,7 @@ class AuthRepository {
       headers: {
         'Content-Type': 'application/json',
         if (bearerToken != null) 'Authorization': 'Bearer $bearerToken',
+        'x-device-id': await TokenStore.instance.deviceId,
       },
       body: jsonEncode(body),
     );
@@ -389,6 +390,7 @@ class AuthRepository {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $refreshToken',
+            'x-device-id': await TokenStore.instance.deviceId,
           },
         );
       } catch (_) {

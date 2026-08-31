@@ -7,11 +7,10 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SharedPreferencesService.dart';
 import 'SplashScreen.dart';
+import 'api/navigator_key.dart';
 import 'l10n/app_localizations.dart';
 import 'locale_controller.dart';
 import 'theme_controller.dart';
-
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

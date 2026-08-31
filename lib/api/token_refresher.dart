@@ -68,6 +68,11 @@ class TokenRefresher {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $refreshToken',
+        // Required by tally-oauth's refresh endpoint (single-active-
+        // session-per-device tracking) - must be the same id [saveUserTokens]/
+        // [saveCompanyUserTokens] logged in with, or the refresh would look
+        // like a different device and fail the single-session check.
+        'x-device-id': await TokenStore.instance.deviceId,
       },
     );
 
