@@ -1390,11 +1390,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       _itemsTotalPages = result.totalPages;
       _itemsPage++;
 
-      _onSearchChanged(searchController.text);
       setState(() {
         _isInactiveList = false;
         _isActiveList = false;
         _isAllList = true;
+      });
+      _onSearchChanged(searchController.text);
+      setState(() {
         _isLoadingMoreItems = false;
         _isLoading = false;
         isVisibleNoDataFound = all_items_list.isEmpty;
