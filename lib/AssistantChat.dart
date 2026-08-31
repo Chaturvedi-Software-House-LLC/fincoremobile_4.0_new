@@ -441,6 +441,29 @@ class _AssistantChatState extends State<AssistantChat> {
       return;
     }
 
+    // The AI Assistant runs on each company's own legacy middleware server
+    // (`hostname`), which a tally-oauth-only login never populates - there
+    // is no new-backend equivalent to fall back to yet. Rather than firing
+    // a network call that's guaranteed to fail and landing on the same
+    // generic "contact support" card as a real outage, say so plainly so
+    // it's clear this is a known gap, not a transient error.
+    if (_hostname.isEmpty) {
+      setState(() {
+        _messages.add(
+          _ChatMessage(
+            text: "The AI Assistant isn't available for your account yet.",
+            isUser: false,
+          ),
+        );
+        _messages.add(
+          _ChatMessage(text: '', isUser: false, isSupportForm: true),
+        );
+      });
+      _scrollToBottom();
+      await _persistSession(isUserInput: false);
+      return;
+    }
+
     setState(() => _isSending = true);
     final placeholder = _ChatMessage(text: '', isUser: false);
     setState(() => _messages.add(placeholder));
