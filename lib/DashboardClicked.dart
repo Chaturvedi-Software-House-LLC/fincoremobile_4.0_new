@@ -2516,8 +2516,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  // new function fetchReceivable_payable
-
   /// Receivable/Payable outstanding-bills list. Dispatches to the
   /// tally-api sibling for a tally-oauth-only session.
   Future<void> fetchReceivable_payable(
