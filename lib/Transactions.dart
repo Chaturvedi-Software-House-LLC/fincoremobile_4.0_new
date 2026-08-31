@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:fl_chart/fl_chart.dart';
@@ -11,7 +10,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'CompanySelectTallyOauth.dart';
-import 'package:http/http.dart' as http;
 import 'TransactionClicked.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -88,12 +86,7 @@ class _TransactionsPageState extends State<Transactions>
 
   late String startdate_text = "", enddate_text = "";
 
-  String selectedSortOption = '', token = '';
-
-  // True for a tally-oauth-only session (no legacy serial_no) - drives
-  // fetchParentData()/fetchall_transactions()'s dispatch to the tally-api
-  // path, same pattern as DashboardClicked.dart.
-  bool _useTallyApi = false;
+  String selectedSortOption = '';
 
   int counter = 0;
 
@@ -189,11 +182,7 @@ class _TransactionsPageState extends State<Transactions>
   late String currencysymbol = '';
   String _currencyCode = 'AED';
 
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
 
   bool _isLoading = false;
 
@@ -289,8 +278,6 @@ class _TransactionsPageState extends State<Transactions>
     );
   }
 
-  String? HttpURL_Parent, HttpURL_transaction;
-
   dynamic _selectedtransaction = "All Transactions";
 
   List<String> spinner_list = ["All Transactions"];
@@ -298,8 +285,7 @@ class _TransactionsPageState extends State<Transactions>
 
   List<transactions> transactions_list = [];
 
-  // --- Incremental (infinite-scroll) paging state for the tally-api path
-  // only (legacy stays fully-fetched, unchanged - see _useTallyApi).
+  // --- Incremental (infinite-scroll) paging state for the tally-api list.
   // tally-api's `/vouchers` list has NO server-side date-range filter at
   // all (see VoucherRepository's doc comment) - only pagination plus an
   // optional voucherTypeMasterId equality filter. Since a voucher's own
@@ -566,11 +552,8 @@ class _TransactionsPageState extends State<Transactions>
   /// screen render infinite scroll is optimizing), so it's fine for it to
   /// fetch everything for the current date range/voucher-type rather than
   /// being limited to whatever's been scrolled into view so far
-  /// (`transactions_list`, on the tally-api path, only holds the pages
-  /// loaded/auto-chained so far). The legacy path already holds the full
-  /// list in `transactions_list`, so this just returns that unchanged.
+  /// (`transactions_list` only holds the pages loaded/auto-chained so far).
   Future<List<transactions>> _fullTransactionsForExport() async {
-    if (!_useTallyApi) return transactions_list;
     if (_txFrom == null || _txTo == null) return transactions_list;
     final vouchers = await VoucherRepository.instance.listInRange(
       from: _txFrom!,
@@ -1069,17 +1052,12 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Future<void> fetchParentData(final String ledGroups) async {
-    if (_useTallyApi) {
-      return _fetchParentDataTallyApi();
-    }
-    return _fetchParentDataLegacy(ledGroups);
+    return _fetchParentDataTallyApi();
   }
 
-  /// tally-api path: populates [spinner_list] from `/voucher-types` (the
-  /// same master list `DashboardClicked`'s filter dropdown already uses),
-  /// appended after the existing "All Transactions" entry so that stays
-  /// the default selection, matching legacy's behavior of always defaulting
-  /// to `spinner_list[0]`.
+  /// Populates [spinner_list] from `/voucher-types` (the same master list
+  /// `DashboardClicked`'s filter dropdown already uses), appended after the
+  /// existing "All Transactions" entry so that stays the default selection.
   Future<void> _fetchParentDataTallyApi() async {
     setState(() {
       _isLoading = true;
@@ -1109,56 +1087,6 @@ class _TransactionsPageState extends State<Transactions>
         _isLoading = false;
       });
       showAppMessage(context, e.message);
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
-  Future<void> _fetchParentDataLegacy(final String ledGroups) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final url = Uri.parse(HttpURL_Parent!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      final response = await http.post(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        for (var item in data) {
-          String vchname = item['vchname'];
-          spinner_list.add(vchname);
-        }
-        setState(() {
-          _selectedtransaction = spinner_list[0];
-        });
-        fetchtransactionsData();
-      } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-
-        if (data.containsKey('error')) {
-          setState(() {
-            error = data['error'];
-          });
-        } else {
-          error = 'Something went wrong!!!';
-        }
-
-        showAppMessage(context, error);
-        setState(() {
-          _isLoading = false;
-        });
-      }
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -1508,11 +1436,7 @@ class _TransactionsPageState extends State<Transactions>
     transactions_list.clear();
 
     try {
-      if (_useTallyApi) {
-        await _fetchAllTransactionsTallyApi(startdate, enddate, vchname);
-      } else {
-        await _fetchAllTransactionsLegacy(startdate, enddate, vchname, orderby);
-      }
+      await _fetchAllTransactionsTallyApi(startdate, enddate, vchname);
     } catch (e) {
       setState(() {
         _isAllList = false;
@@ -1571,75 +1495,6 @@ class _TransactionsPageState extends State<Transactions>
   void _reapplyTransactionDisplay() {
     _applyTransactionFilters();
     _applySelectedSort();
-  }
-
-  /// Legacy collection-based fetch - unchanged behavior, split out of
-  /// [fetchall_transactions] so that function can dispatch between this and
-  /// [_fetchAllTransactionsTallyApi] while sharing the same setup/sort tail.
-  Future<void> _fetchAllTransactionsLegacy(
-    final String startdate,
-    final String enddate,
-    final String vchname,
-    final String orderby,
-  ) async {
-    final url = Uri.parse(HttpURL_transaction!);
-
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({
-      'startdate': startdate,
-      'enddate': enddate,
-      'vchname': vchname,
-      'orderby': orderby,
-    });
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-      if (values_list != null) {
-        isVisibleNoDataFound = false;
-
-        transactions_list.addAll(
-          values_list.map((json) => transactions.fromJson(json)).toList(),
-        );
-
-        filterPostDatedTransactions();
-
-        filteredItems_transactions = transactions_list;
-
-        setState(() {
-          transactions_count = filteredItems_transactions.length.toString();
-          _isAllList = true;
-          _isLoading = false;
-        });
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-
-      showAppMessage(context, error);
-
-      setState(() {
-        transactions_count = filteredItems_transactions.length.toString();
-        _isAllList = false;
-        _isLoading = false;
-      });
-    }
   }
 
   /// Maps raw tally-api voucher rows to [transactions] - same
@@ -1790,7 +1645,7 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   void _onTransactionsScroll() {
-    if (!_useTallyApi || _isTrendTabSelected) return;
+    if (_isTrendTabSelected) return;
     if (_isLoadingMoreTx) return;
     if (_txCursor == null || _txCursor! <= 1) return;
     if (!_scrollFabController.hasClients) return;
@@ -1803,14 +1658,9 @@ class _TransactionsPageState extends State<Transactions>
   /// Ensures `_chartTransactionsList` reflects the CURRENT date range/
   /// voucher-type filter, fully (see this class's paging-state doc comment
   /// for why the trend chart can't just reuse the incrementally-loaded
-  /// `transactions_list`). No-op if already fresh; the legacy path is
-  /// already a full fetch, so it just reuses `transactions_list` directly.
+  /// `transactions_list`). No-op if already fresh.
   Future<void> _ensureChartData() async {
     if (!_isChartDataStale) return;
-    if (!_useTallyApi) {
-      setState(() => _chartTransactionsList = transactions_list);
-      return;
-    }
     if (_txFrom == null || _txTo == null) return;
 
     setState(() => _isLoading = true);
@@ -1834,13 +1684,8 @@ class _TransactionsPageState extends State<Transactions>
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name') ?? '';
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
-      _useTallyApi = serial_no == null || serial_no!.isEmpty;
       datetype = prefs.getString('datetype') ?? date_range.first;
       decimal = prefs?.getInt('decimalplace') ?? 2;
 
@@ -1947,11 +1792,6 @@ class _TransactionsPageState extends State<Transactions>
     } catch (e) {
       selectedSortOption = 'Default';
     }
-
-    HttpURL_Parent =
-        '$hostname/api/voucher/getvoucherNames/$company_lowercase/$serial_no';
-    HttpURL_transaction =
-        '$hostname/api/voucher/getvouchers/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
@@ -2778,7 +2618,7 @@ class _TransactionsPageState extends State<Transactions>
                 // Bottom-of-list spinner while the next backward page of
                 // vouchers loads (tally-api path only - see this class's
                 // paging-state doc comment).
-                if (_useTallyApi && !_isTrendTabSelected && _isLoadingMoreTx)
+                if (!_isTrendTabSelected && _isLoadingMoreTx)
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),

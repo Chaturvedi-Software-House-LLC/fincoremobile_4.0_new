@@ -1,11 +1,9 @@
-import 'dart:convert';
 import 'package:FincoreGo/utils/currency_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'CompanySelectTallyOauth.dart';
-import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
@@ -142,7 +140,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       isoptional = "",
       ledger = "";
 
-  String startDateString = "", endDateString = "", token = '';
+  String startDateString = "", endDateString = "";
 
   List<LedgerEntries> ledgerentries_list = [];
   List<Bills> bills_list = [];
@@ -200,26 +198,9 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
   late SharedPreferences prefs;
 
-  String HttpURL = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
-
-  String ledgerentries = '';
-  String inventoryentries = '';
-  String billsentries = '';
-  String costcentreentries = '';
-
-  // True for a tally-oauth-only session (no legacy serial_no) - drives
-  // fetchData()'s dispatch to the tally-api path instead of the legacy
-  // collection-based HTTP calls, which require `hostname`/`token` that are
-  // never populated for these sessions (see CompanySelectTallyOauth.dart).
-  bool _useTallyApi = false;
 
   // No longer a real gap - bill allocations are read straight off each
   // ledger entry's `billAllocations` JSON array (see `_fetchDataTallyApi`).
@@ -268,28 +249,12 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
     return formattedDate;
   }
 
-  Future<void> fetchData(
-    final String ledgercollection,
-    final String billscollection,
-    final String inventorycollections,
-    String costcentercollections,
-    final String masterid,
-  ) async {
-    if (_useTallyApi) {
-      return _fetchDataTallyApi(masterid);
-    }
-    return _fetchDataLegacy(
-      ledgercollection,
-      billscollection,
-      inventorycollections,
-      costcentercollections,
-      masterid,
-    );
+  Future<void> fetchData(final String masterid) async {
+    return _fetchDataTallyApi(masterid);
   }
 
-  /// tally-api path: a single `GET vouchers/:masterId` call already returns
-  /// ledger/inventory/cost-centre entries together (see `VoucherRepository`),
-  /// replacing the 5 separate legacy collection calls below - bill
+  /// A single `GET vouchers/:masterId` call returns ledger/inventory/
+  /// cost-centre entries together (see `VoucherRepository`) - bill
   /// allocations included, read off each ledger entry's own
   /// `billAllocations` array rather than a separate bills collection call.
   Future<void> _fetchDataTallyApi(String masterid) async {
@@ -405,360 +370,15 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
     }
   }
 
-  Future<void> _fetchDataLegacy(
-    final String ledgercollection,
-    final String billscollection,
-    final String inventorycollections,
-    String costcentercollections,
-    final String masterid,
-  ) async {
-    setState(() {
-      isVisibleLedgerEntry = false;
-      isVisibleBills = false;
-      isVisibleInventoryEntry = false;
-      isVisibleCostCenter = false;
-      _isLoading = true;
-    });
-
-    try {
-      // These 4 collections are independent of each other (ledger/bills/
-      // inventory/cost-center) and were previously fetched one after
-      // another with `await`, adding up their latencies serially even
-      // though none depends on another's result. Firing them together
-      // with Future.wait cuts this screen's load time to whichever single
-      // call is slowest, instead of the sum of all four.
-      await Future.wait([
-        _fetchLedgerEntries(ledgercollection, masterid),
-        _fetchBills(billscollection, masterid),
-        _fetchInventoryEntries(inventorycollections, masterid),
-        _fetchCostCenter(costcentercollections, masterid),
-      ]);
-
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        isVisibleLedgerEntry = false;
-        isVisibleBills = false;
-        isVisibleInventoryEntry = false;
-        isVisibleCostCenter = false;
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> _fetchLedgerEntries(
-    String ledgercollection,
-    String masterid,
-  ) async {
-    if (ledgerentries != 'True') return;
-
-    final url_ledgerentry = Uri.parse(HttpURL!);
-
-    Map<String, String> headers_ledgerentry = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body_ledgerentry = jsonEncode({
-      'collection': ledgercollection,
-      'masterid': masterid,
-    });
-
-    final response_ledgerentry = await http.post(
-      url_ledgerentry,
-      body: body_ledgerentry,
-      headers: headers_ledgerentry,
-    );
-
-    if (response_ledgerentry.statusCode == 200) {
-      final List<dynamic> values_list_ledgerentry = jsonDecode(
-        response_ledgerentry.body,
-      );
-
-      print('ledger entries -> ${values_list_ledgerentry}');
-      if (values_list_ledgerentry != null) {
-        ledgerentries_list.addAll(
-          values_list_ledgerentry
-              .map((json) => LedgerEntries.fromJson(json))
-              .toList(),
-        );
-
-        if (!ledgerentries_list.isEmpty) {
-          setState(() {
-            isVisibleLedgerEntry = true;
-          });
-        }
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(response_ledgerentry.body);
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-
-      showAppMessage(context, error);
-    }
-  }
-
-  Future<void> _fetchBills(String billscollection, String masterid) async {
-    if (billsentries != 'True') return;
-
-    final url_bills = Uri.parse(HttpURL!);
-
-    Map<String, String> headers_bills = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body_bills = jsonEncode({
-      'collection': billscollection,
-      'masterid': masterid,
-    });
-
-    final response_bills = await http.post(
-      url_bills,
-      body: body_bills,
-      headers: headers_bills,
-    );
-
-    if (response_bills.statusCode == 200) {
-      List<dynamic> values_list_bills = jsonDecode(response_bills.body);
-      print('bills -> ${values_list_bills}');
-
-      if (values_list_bills != null) {
-        if (!values_list_bills.isEmpty) {
-          bills_list.addAll(
-            values_list_bills.map((json) => Bills.fromJson(json)).toList(),
-          );
-          if (bills_list.isNotEmpty) {
-            for (var item in values_list_bills) {
-              String billnoo = item['billno'].toString();
-              String billamountt = item['amount'].toString();
-              String billtypee = item['billtype'].toString();
-              String billduedatee = item['duedate'].toString();
-              String billdatee = item['billdate'].toString();
-
-              if (billtypee == "On Account") {
-                setState(() {
-                  isTopPanelBillsVisible = false;
-                  isDueDateBillsVisible = false;
-                });
-                billtype = billtypee;
-                billamount = formatAmount(billamountt);
-              } else if (billtypee == "Advance") {
-                setState(() {
-                  isTopPanelBillsVisible = true;
-                  isDueDateBillsVisible = false;
-                });
-                billno = billnoo;
-                billtype = billtypee;
-                billamount = formatAmount(billamountt);
-              } else if (billtypee == "Agst Ref" || billtypee == "New Ref") {
-                setState(() {
-                  isTopPanelBillsVisible = true;
-                  isDueDateBillsVisible = true;
-                });
-
-                if (billduedatee == "null") {
-                  billduedate = "N/A";
-                } else {
-                  try {
-                    int days = int.parse(billduedatee.split(' ')[0]);
-
-                    DateTime billdate_date = DateTime.parse(billdatee);
-
-                    // Add the days to the billdate
-                    DateTime dueDate = billdate_date.add(
-                      Duration(days: days),
-                    );
-                    DateFormat dateFormat = DateFormat('dd-MMM-yy');
-                    String duedateafter_string = dateFormat.format(dueDate);
-
-                    billduedate = duedateafter_string;
-                  } catch (e) {
-                    billduedate = billduedatee;
-                  }
-                }
-                billno = billnoo;
-                billtype = billtypee;
-                billamount = formatAmount(billamountt);
-              }
-            }
-
-            setState(() {
-              isVisibleBills = true;
-            });
-          }
-        }
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(response_bills.body);
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-
-      showAppMessage(context, error);
-    }
-  }
-
-  Future<void> _fetchInventoryEntries(
-    String inventorycollections,
-    String masterid,
-  ) async {
-    if (inventoryentries != 'True') return;
-
-    final url_inventoryentry = Uri.parse(HttpURL!);
-
-    Map<String, String> headers_inventoryentry = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body_inventoryentry = jsonEncode({
-      'collection': inventorycollections,
-      'masterid': masterid,
-    });
-
-    final response_inventoryentry = await http.post(
-      url_inventoryentry,
-      body: body_inventoryentry,
-      headers: headers_inventoryentry,
-    );
-
-    if (response_inventoryentry.statusCode == 200) {
-      final List<dynamic> values_list_inventoryentry = jsonDecode(
-        response_inventoryentry.body,
-      );
-      if (values_list_inventoryentry != null) {
-        inventoryentries_list.addAll(
-          values_list_inventoryentry
-              .map((json) => InventoryEntries.fromJson(json))
-              .toList(),
-        );
-
-        if (!inventoryentries_list.isEmpty) {
-          setState(() {
-            isVisibleInventoryEntry = true;
-          });
-        }
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(response_inventoryentry.body);
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-
-      showAppMessage(context, error);
-    }
-  }
-
-  Future<void> _fetchCostCenter(
-    String costcentercollections,
-    String masterid,
-  ) async {
-    if (costcentreentries != 'True') return;
-
-    final url_costcenter = Uri.parse(HttpURL!);
-
-    Map<String, String> headers_costcenter = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body_costcenter = jsonEncode({
-      'collection': costcentercollections,
-      'masterid': masterid,
-    });
-
-    final response_costcenter = await http.post(
-      url_costcenter,
-      body: body_costcenter,
-      headers: headers_costcenter,
-    );
-
-    if (response_costcenter.statusCode == 200) {
-      final List<dynamic> values_list_costcenter = jsonDecode(
-        response_costcenter.body,
-      );
-
-      if (values_list_costcenter != null) {
-        costcenter_list.addAll(
-          values_list_costcenter
-              .map((json) => CostCenter.fromJson(json))
-              .toList(),
-        );
-
-        if (!costcenter_list.isEmpty) {
-          setState(() {
-            isVisibleCostCenter = true;
-          });
-        }
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(response_costcenter.body);
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = 'Something went wrong!!!';
-      }
-
-      showAppMessage(context, error);
-    }
-  }
-
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
-      _useTallyApi = serial_no == null || serial_no!.isEmpty;
     });
 
-    ledgerentries = prefs.getString("ledgerentries") ?? 'False';
-    inventoryentries = prefs.getString("inventoryentries") ?? 'False';
-    billsentries = prefs.getString("billsentries") ?? 'False';
-    costcentreentries = prefs.getString("costcentreentries") ?? 'False';
-
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    HttpURL =
-        '$hostname/api/voucher/getcollection/$company_lowercase/$serial_no';
 
     String? email_nav = prefs.getString('email_nav');
     String? name_nav = prefs.getString('name_nav');
@@ -782,7 +402,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
       isUserVisible = false;
     }
 
-    fetchData("LedgerEntry", "Bills", "Inventory", "CostCentre", masterid);
+    fetchData(masterid);
   }
 
   List<Widget> _buildLedgerWithBillsList() {

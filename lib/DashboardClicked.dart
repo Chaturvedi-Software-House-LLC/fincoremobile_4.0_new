@@ -13,7 +13,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'Dashboard.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'TransactionClicked.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -326,13 +325,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String startDateString = "", endDateString = "", vchtypes = "";
 
-  String selectedSortOption = '', token = '';
-
-  /// True for a tally-oauth-only session (Phase 6) - `serial_no` is always
-  /// `""` for those (never a real legacy serial), vs. a real value for a
-  /// legacy-paired session. Drives every fetch function below to call its
-  /// tally-api sibling instead of the legacy implementation.
-  bool _useTallyApi = false;
+  String selectedSortOption = '';
 
   int counter = 0;
 
@@ -657,11 +650,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   /// vouchers). Dispatches to the tally-api sibling for a tally-oauth-only
   /// session.
   Future<void> fetchLedgerGroups() {
-    if (_useTallyApi) return _fetchLedgerGroupsTallyApi();
-    return _fetchLedgerGroupsLegacy();
+    return _fetchLedgerGroupsTallyApi();
   }
 
-  /// tally-api equivalent of [_fetchLedgerGroupsLegacy] - the base
+  /// The base
   /// `/ledgers` list already returns per-ledger `openingBalance`/
   /// `closingBalance` directly (no separate "get ledger group totals"
   /// endpoint needed), filtered here to ledgers whose group's
@@ -745,79 +737,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         isVisibleNoDataFound = true;
       });
       debugPrint('DashboardClicked tally-api fetchLedgerGroups failed: $e');
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _fetchLedgerGroupsLegacy() async {
-    setState(() {
-      filteredLedgerGroupList.clear();
-      ledgerGroupList.clear();
-      _isLoading = true;
-      _isLedgerGroupVisible = false;
-      _isSalesListVisible = false;
-    });
-
-    if (_selectedvoucher == "All Voucher Types") {
-      _selectedvoucher = "";
-    }
-
-    try {
-      final url = Uri.parse(HttpURL_sale_purc_cash!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'ledgroup': "cash-in-hand,bank accounts",
-        'startdate': startDateString,
-        'enddate': endDateString,
-        'vchtypes': '',
-        'opening': 'true',
-        'vchname': _selectedvoucher, // parent dropdown
-        'isGroupByLedger': true, // key to trigger group mode
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-      print('led group list -> ${response.body}');
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> decoded = jsonDecode(utf8.decode(response.bodyBytes));
-
-        // 🧮 Extract opening and list
-        String opening = decoded['opening'].toString();
-        final List<dynamic> values = decoded['values'] ?? [];
-
-        setState(() {
-          opening_value = opening; // reuse your existing method
-          ledgerGroupList = values.map((e) => LedgerGroup.fromJson(e)).toList();
-          filteredLedgerGroupList = ledgerGroupList;
-          print('led group list -> ${ledgerGroupList[0]}');
-
-          _isLedgerGroupVisible = true;
-          _isSalesListVisible = false;
-          _isOutstandingListVisible = false;
-          isVisibleNoDataFound = false;
-        });
-      } else {
-        setState(() {
-          _isLedgerGroupVisible = false;
-          _isSalesListVisible = false;
-          _isOutstandingListVisible = false;
-          isVisibleNoDataFound = true;
-        });
-        print("❌ Ledger group API failed: ${response.statusCode}");
-      }
-    } catch (e) {
-      setState(() {
-        _isLedgerGroupVisible = false;
-        _isSalesListVisible = false;
-        _isOutstandingListVisible = false;
-        isVisibleNoDataFound = true;
-      });
-      print("⚠️ Error in fetchLedgerGroups: $e");
     } finally {
       setState(() => _isLoading = false);
     }
@@ -1318,19 +1237,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   String HttpURL = "";
 
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
-
-  String? HttpURL_sale_purc_cash,
-      HttpURL_receipt_payment,
-      HttpURL_receivable_payable,
-      HttpURL_sale_purc_cash_parent,
-      HttpURL_receivable_payable_parent;
 
   dynamic _selectedvoucher = "";
   List<String> spinner_list = [];
@@ -2376,14 +2285,12 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   /// Voucher-type filter dropdown for Sales/Purchase/Cash/Receipt/Payment
-  /// tiles. Dispatches to the tally-api sibling for a tally-oauth-only
-  /// session (see `_useTallyApi`'s doc comment) - same signature both ways.
+  /// tiles.
   Future<void> fetchParent(final String type) {
-    if (_useTallyApi) return _fetchParentTallyApi();
-    return _fetchParentLegacy(type);
+    return _fetchParentTallyApi();
   }
 
-  /// tally-api equivalent of [_fetchParentLegacy] - sources the dropdown
+  /// Sources the dropdown
   /// from the `/voucher-types` master list (every voucher type in the
   /// company) rather than legacy's `getvoucherNames` (only voucher types
   /// that actually have vouchers in some unscoped set) - a reasonable
@@ -2415,52 +2322,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  Future<void> _fetchParentLegacy(final String type) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    spinner_list.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_sale_purc_cash_parent!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'vchtypes': type, 'orderby': 'vchname'});
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        if (vchtypes == "Receivable" || vchtypes == "Payable") {
-          spinner_list.add(allparties);
-          _selectedvoucher = allparties;
-        } else {
-          spinner_list.add(allvchtypes);
-          _selectedvoucher = allvchtypes;
-        }
-        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        for (var item in data) {
-          String vchname = item['vchname'];
-          spinner_list.add(vchname);
-        }
-        setState(() {
-          _selectedvoucher = spinner_list[0];
-          _voucherController.text = _selectedvoucher;
-          fetchListData();
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
   /// Ledger filter dropdown for Receivable/Payable tiles. Dispatches to the
   /// tally-api sibling for a tally-oauth-only session.
   Future<void> fetchParent_Receivable_Payable(
@@ -2469,16 +2330,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     final String select,
     final String parent,
   ) {
-    if (_useTallyApi) return _fetchParentReceivablePayableTallyApi();
-    return _fetchParentReceivablePayableLegacy(
-      orderby,
-      isdebit,
-      select,
-      parent,
-    );
+    return _fetchParentReceivablePayableTallyApi();
   }
 
-  /// tally-api equivalent of [_fetchParentReceivablePayableLegacy] - every
+  /// Every
   /// ledger in the company (`/ledgers`), not scoped to ledgers that
   /// actually have outstanding bills - a reasonable substitute, not a
   /// byte-for-byte match.
@@ -2504,62 +2359,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  Future<void> _fetchParentReceivablePayableLegacy(
-    final String orderby,
-    final String isdebit,
-    final String select,
-    final String parent,
-  ) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    spinner_list.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_receivable_payable_parent!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'orderby': orderby,
-        'isDebit': isdebit,
-        'select': select,
-        'parent': parent,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        if (vchtypes == "Receivable" || vchtypes == "Payable") {
-          spinner_list.add(allparties);
-          _selectedvoucher = allparties;
-        } else {
-          spinner_list.add(allvchtypes);
-          _selectedvoucher = allvchtypes;
-        }
-
-        List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        for (var item in data) {
-          String ledger = item['ledger'];
-          spinner_list.add(ledger);
-        }
-        setState(() {
-          _selectedvoucher = spinner_list[0];
-          _voucherController.text = _selectedvoucher;
-          fetchListData();
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
   /// Main Sales/Purchase/Cash voucher list. Dispatches to the tally-api
   /// sibling for a tally-oauth-only session.
   Future<void> fetchSales_purchase_cash(
@@ -2571,27 +2370,16 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     final String vchname,
     final String ledger,
   ) {
-    if (_useTallyApi) {
-      return _fetchSalesPurchaseCashTallyApi(
-        ledgroup: ledgroup,
-        startdate: startdate,
-        enddate: enddate,
-        vchname: vchname,
-        ledger: ledger,
-      );
-    }
-    return _fetchSalesPurchaseCashLegacy(
-      ledgroup,
-      startdate,
-      enddate,
-      vchtypes,
-      opening,
-      vchname,
-      ledger,
+    return _fetchSalesPurchaseCashTallyApi(
+      ledgroup: ledgroup,
+      startdate: startdate,
+      enddate: enddate,
+      vchname: vchname,
+      ledger: ledger,
     );
   }
 
-  /// tally-api equivalent of [_fetchSalesPurchaseCashLegacy]. Classifies
+  /// Classifies
   /// vouchers by `voucherTypeName` using the same reservedName pairs
   /// tally-api's own `reports/dashboard/summary` uses for the Sales/
   /// Purchase KPI totals (`Sales`+`Credit Note` / `Purchase`+`Debit Note`) -
@@ -2728,237 +2516,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  // new function fetchSales_purchase_cash
-  Future<void> _fetchSalesPurchaseCashLegacy(
-    final String ledgroup,
-    final String startdate,
-    final String enddate,
-    final String vchtypes,
-    final String opening,
-    final String vchname,
-    final String ledger,
-  ) async {
-    // ✅ keep same behavior: start loading + reset sort visibility
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    // ✅ clear lists same as your existing code
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_sale_purc_cash!);
-      final headers = <String, String>{
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      };
-
-      final body = jsonEncode({
-        'ledgroup': ledgroup,
-        'startdate': startdate,
-        'enddate': enddate,
-        'vchtypes': vchtypes,
-        'opening': opening,
-        'vchname': vchname,
-        'ledger': ledger,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        // ✅ heavy parsing moved off UI thread
-        final parsed = await compute(_parseSalesTotalResponse, response.body);
-
-        if (!mounted) return;
-
-        // ✅ single setState with final results
-        setState(() {
-          opening_value = parsed.opening;
-
-          sales_purc_cash_list
-            ..clear()
-            ..addAll(parsed.items);
-
-          filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-
-          print('list ->>> ${response.body}');
-
-          isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
-          isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
-
-          _isLoading = false;
-        });
-
-        // ✅ keep exact sorting behavior (same options)
-        if (filteredItems_sale_purc_cash.isNotEmpty) {
-          switch (selectedSortOption) {
-            case 'Default':
-              sortByDefault();
-              break;
-            case 'Newest to Oldest':
-              sortByDateHightoLow();
-              break;
-            case 'Oldest to Newest':
-              sortByDateLowtoHigh();
-              break;
-            case 'A->Z':
-              sortByAlphabetAtoZ();
-              break;
-            case 'Z->A':
-              sortByAlphabetZtoA();
-              break;
-            case 'Amount High to Low':
-              sortByAmountHightoLow();
-              break;
-            case 'Amount Low to High':
-              sortByAmountLowtoHigh();
-              break;
-          }
-        }
-
-        if (_isTopPartiesView) {
-          _computeTopParties();
-        }
-
-        return;
-      }
-
-      // non-200 => show no data (same end-result behavior)
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
-  // old function fetchSales_purchase_cash
-  /*
-  Future<void> fetchSales_purchase_cash(final String ledgroup, final String startdate, final String enddate, final String vchtypes,final String opening,final String vchname) async {
-    setState(()
-    {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    try
-    {
-      final url = Uri.parse(HttpURL_sale_purc_cash!);
-
-      Map<String,String> headers = {
-        'Authorization' : 'Bearer $token',
-        "Content-Type": "application/json"
-      };
-
-      var body = jsonEncode( {
-        'ledgroup': ledgroup,
-        'startdate': startdate,
-        'enddate': enddate,
-        'vchtypes': vchtypes,
-        'opening': opening,
-        'vchname' : vchname
-      });
-
-      final response = await http.post(
-          url,
-          body: body,
-          headers:headers
-      );
-
-      if (response.statusCode == 200)
-      {
-        print('$vchtypes -> ${response.body}');
-        Map<String, dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        String opening = data['opening'].toString();
-        setState(()
-        {
-          opening_value = opening;
-        });
-
-        String values = jsonEncode(data['values']);
-
-        final List<dynamic> values_list = jsonDecode(values);
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          sales_purc_cash_list.addAll(values_list.map((json) => Sale_purc_cash.fromJson(json)).toList());
-          filteredItems_sale_purc_cash = sales_purc_cash_list;
-
-        } else
-        {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-    catch (e)
-    {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if(sales_purc_cash_list.isEmpty)
-      {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      }
-      else
-        {
-          isSortVisible = true;
-          switch (selectedSortOption) {
-            case 'Default':
-              sortByDefault(); // Call the sorting function
-              break;
-            case 'Newest to Oldest':
-              sortByDateHightoLow(); // Call the sorting function
-              break;
-            case 'Oldest to Newest':
-              sortByDateLowtoHigh(); // Call the sorting function
-              break;
-            case 'A->Z':
-              sortByAlphabetAtoZ(); // Call the sorting function
-              break;
-            case 'Z->A':
-              sortByAlphabetZtoA(); // Call the sorting function
-              break;
-            case 'Amount High to Low':
-              sortByAmountHightoLow(); // Call the sorting function
-              break;
-            case 'Amount Low to High':
-              sortByAmountLowtoHigh(); // Call the sorting function
-              break;
-          }
-        }
-      _isLoading = false;
-    });
-  }
-*/
-
   // new function fetchReceivable_payable
 
   /// Receivable/Payable outstanding-bills list. Dispatches to the
@@ -2970,19 +2527,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     final String isdebit,
     final String ledger,
   ) {
-    if (_useTallyApi) {
-      return _fetchReceivablePayableTallyApi(isdebit: isdebit, ledger: ledger);
-    }
-    return _fetchReceivablePayableLegacy(
-      orderby,
-      startdate,
-      enddate,
-      isdebit,
-      ledger,
-    );
+    return _fetchReceivablePayableTallyApi(isdebit: isdebit, ledger: ledger);
   }
 
-  /// tally-api equivalent of [_fetchReceivablePayableLegacy], via
+  /// Via
   /// `LedgerRepository.outstandingBills` - company-wide when [ledger] is
   /// empty ("All Parties"), scoped to one ledger's masterId (resolved by
   /// name) otherwise. `isdebit == 'true'` selects Receivable (positive
@@ -3081,228 +2629,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     }
   }
 
-  Future<void> _fetchReceivablePayableLegacy(
-    final String orderby,
-    final String startdate,
-    final String enddate,
-    final String isdebit,
-    final String ledger,
-  ) async {
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_receivable_payable!);
-      final headers = <String, String>{
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      };
-
-      final body = jsonEncode({
-        'orderby': orderby,
-        'startdate': startdate,
-        'enddate': enddate,
-        'isDebit': isdebit,
-        'ledger': ledger,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final parsed = await compute(
-          _parseReceivableTotalResponse,
-          response.body,
-        );
-
-        if (!mounted) return;
-
-        setState(() {
-          opening_value = parsed.opening;
-
-          receivable_payable_list
-            ..clear()
-            ..addAll(parsed.items);
-
-          filteredItems_receivable_payable = List.from(receivable_payable_list);
-          print('list ->>> ${response.body}');
-
-          isVisibleNoDataFound = filteredItems_receivable_payable.isEmpty;
-          isSortVisible = filteredItems_receivable_payable.isNotEmpty;
-
-          _isLoading = false;
-        });
-
-        // ✅ keep same sorting behavior
-        if (filteredItems_receivable_payable.isNotEmpty) {
-          switch (selectedSortOption) {
-            case 'Default':
-              sortByDefault();
-              break;
-            case 'Newest to Oldest':
-              sortByDateHightoLow();
-              break;
-            case 'Oldest to Newest':
-              sortByDateLowtoHigh();
-              break;
-            case 'A->Z':
-              sortByAlphabetAtoZ();
-              break;
-            case 'Z->A':
-              sortByAlphabetZtoA();
-              break;
-            case 'Amount High to Low':
-              sortByAmountHightoLow();
-              break;
-            case 'Amount Low to High':
-              sortByAmountLowtoHigh();
-              break;
-          }
-        }
-        if (_isAgeingView) {
-          _computeAgeingBuckets();
-          if (_isPartyAgeingView) {
-            _computePartyAgeing();
-          }
-        }
-        return;
-      }
-
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
-  // old function fetchReceivable_payable
-  /*
-    Future<void> fetchReceivable_payable(final String orderby, final String startdate, final String enddate, final String isdebit,final String ledger) async {
-      setState(() {
-        _isLoading = true;
-        isSortVisible = false;
-      });
-
-      receivable_payable_list.clear();
-      filteredItems_receivable_payable.clear();
-
-      sales_purc_cash_list.clear();
-      filteredItems_sale_purc_cash.clear();
-
-      try
-      {
-        final url = Uri.parse(HttpURL_receivable_payable!);
-        Map<String,String> headers = {
-          'Authorization' : 'Bearer $token',
-          "Content-Type": "application/json"
-        };
-
-        var body = jsonEncode({
-          'orderby': orderby,
-          'startdate': startdate,
-          'enddate': enddate,
-          'isDebit': isdebit,
-          'ledger': ledger,
-        });
-
-        final response = await http.post(
-            url,
-            body: body,
-            headers:headers
-        );
-
-        if (response.statusCode == 200)
-        {
-          print(response.body);
-
-          Map<String, dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-          String opening = data['opening'].toString();
-          setState(() {
-            opening_value = opening;
-          });
-          String values = jsonEncode(data['values']);
-
-          final List<dynamic> values_list = jsonDecode(values);
-          if (values_list != null) {
-            isVisibleNoDataFound = false;
-
-            receivable_payable_list.addAll(values_list.map((json) => Receivable_payable.fromJson(json)).toList());
-
-            filteredItems_receivable_payable = receivable_payable_list;
-          } else {
-
-            throw Exception('Failed to fetch data');
-          }
-          setState(() {
-            _isLoading = false;
-          });
-
-        }
-      }
-      catch (e)
-      {
-        setState(() {
-          _isLoading = false;
-        });
-        print(e);
-      }
-
-      setState(() {
-        if(receivable_payable_list.isEmpty)
-        {
-          isVisibleNoDataFound = true;
-          isSortVisible = false;
-        }
-        else
-        {
-          isSortVisible = true;
-          switch (selectedSortOption) {
-            case 'Default':
-              sortByDefault(); // Call the sorting function
-              break;
-            case 'Newest to Oldest':
-              sortByDateHightoLow(); // Call the sorting function
-              break;
-            case 'Oldest to Newest':
-              sortByDateLowtoHigh(); // Call the sorting function
-              break;
-            case 'A->Z':
-              sortByAlphabetAtoZ(); // Call the sorting function
-              break;
-            case 'Z->A':
-              sortByAlphabetZtoA(); // Call the sorting function
-              break;
-            case 'Amount High to Low':
-              sortByAmountHightoLow(); // Call the sorting function
-              break;
-            case 'Amount Low to High':
-              sortByAmountLowtoHigh(); // Call the sorting function
-              break;
-          }
-        }
-        _isLoading = false;
-      });
-
-    }
-  */
-
   /// Receipt/Payment voucher list. Dispatches to the tally-api sibling for
   /// a tally-oauth-only session.
   Future<void> fetchReceipt_Payment(
@@ -3311,18 +2637,15 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     final String vchtypes,
     final String vchname,
   ) {
-    if (_useTallyApi) {
-      return _fetchReceiptPaymentTallyApi(
-        startdate: startdate,
-        enddate: enddate,
-        vchtypes: vchtypes,
-        vchname: vchname,
-      );
-    }
-    return _fetchReceiptPaymentLegacy(startdate, enddate, vchtypes, vchname);
+    return _fetchReceiptPaymentTallyApi(
+      startdate: startdate,
+      enddate: enddate,
+      vchtypes: vchtypes,
+      vchname: vchname,
+    );
   }
 
-  /// tally-api equivalent of [_fetchReceiptPaymentLegacy] - filters
+  /// Filters
   /// [VoucherRepository.listInRange] by `voucherTypeName == vchtypes`
   /// ("Receipt"/"Payment"), same simplification as
   /// `_fetchSalesPurchaseCashTallyApi` for the displayed "ledger" field.
@@ -3429,220 +2752,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       debugPrint('DashboardClicked tally-api receipt/payment fetch failed: $e');
     }
   }
-
-  // new function fetchReceipt_Payment
-
-  Future<void> _fetchReceiptPaymentLegacy(
-    final String startdate,
-    final String enddate,
-    final String vchtypes,
-    final String vchname,
-  ) async {
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_receipt_payment!);
-      final headers = <String, String>{
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      };
-
-      final body = jsonEncode({
-        'startdate': startdate,
-        'enddate': enddate,
-        'vchtypes': vchtypes,
-        'vchname': vchname,
-      });
-
-      print('url ->> $url');
-      print('token ->> $token');
-      print('body ->> $body');
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        // ✅ heavy parsing moved off UI thread
-        final items = await compute(
-          _parseReceiptPaymentResponse,
-          response.body,
-        );
-
-        if (!mounted) return;
-
-        setState(() {
-          sales_purc_cash_list
-            ..clear()
-            ..addAll(items);
-
-          filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-          print('list length ->>> ${filteredItems_sale_purc_cash.length}');
-
-          isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
-          isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
-
-          _isLoading = false;
-        });
-
-        // ✅ same sorting behavior
-        if (filteredItems_sale_purc_cash.isNotEmpty) {
-          switch (selectedSortOption) {
-            case 'Default':
-              sortByDefault();
-              break;
-            case 'Newest to Oldest':
-              sortByDateHightoLow();
-              break;
-            case 'Oldest to Newest':
-              sortByDateLowtoHigh();
-              break;
-            case 'A->Z':
-              sortByAlphabetAtoZ();
-              break;
-            case 'Z->A':
-              sortByAlphabetZtoA();
-              break;
-            case 'Amount High to Low':
-              sortByAmountHightoLow();
-              break;
-            case 'Amount Low to High':
-              sortByAmountLowtoHigh();
-              break;
-          }
-        }
-
-        return;
-      }
-
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
-  // old function fetchReceipt_Payment
-  /*
-  Future<void> fetchReceipt_Payment(final String startdate, final String enddate, final String vchtypes,final String vchname) async {
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-
-
-    });
-
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    try
-    {
-
-      final url = Uri.parse(HttpURL_receipt_payment!);
-
-      Map<String,String> headers = {
-        'Authorization' : 'Bearer $token',
-        "Content-Type": "application/json"
-      };
-
-      var body = jsonEncode( {
-        'startdate': startdate,
-        'enddate': enddate,
-        'vchtypes': vchtypes,
-        'vchname' : vchname
-      });
-
-      final response = await http.post(
-          url,
-          body: body,
-          headers:headers
-      );
-
-      if (response.statusCode == 200)
-      {
-
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          sales_purc_cash_list.addAll(values_list.map((json) => Sale_purc_cash.fromJson(json)).toList());
-          filteredItems_sale_purc_cash = sales_purc_cash_list;
-
-        } else {
-
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
-
-      }
-    }
-    catch (e)
-    {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if(sales_purc_cash_list.isEmpty)
-      {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      }
-      else
-      {
-        isSortVisible = true;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
-
-  }
-*/
 
   String convertDateFormat(String dateStr) {
     try {
@@ -4141,13 +3250,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
-      _useTallyApi = serial_no == null || serial_no!.isEmpty;
     });
 
     try {
@@ -4159,17 +3263,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
       selectedSortOption = 'Default';
     }
 
-    HttpURL_sale_purc_cash_parent =
-        '$hostname/api/voucher/getvoucherNames/$company_lowercase/$serial_no';
-    HttpURL_receivable_payable_parent =
-        '$hostname/api/ledger/getOutstandingList/$company_lowercase/$serial_no';
-
-    HttpURL_sale_purc_cash =
-        '$hostname/api/ledger/getTotal/$company_lowercase/$serial_no';
-    HttpURL_receipt_payment =
-        '$hostname/api/voucher/getVouchers/$company_lowercase/$serial_no';
-    HttpURL_receivable_payable =
-        '$hostname/api/ledger/getOutstandingOpening/$company_lowercase/$serial_no';
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
     String? email_nav = prefs.getString('email_nav');

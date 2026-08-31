@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:FincoreGo/ItemsDrillDown.dart';
 import 'package:FincoreGo/currencyFormat.dart';
@@ -13,7 +12,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'CompanySelectTallyOauth.dart';
-import 'package:http/http.dart' as http;
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
@@ -45,8 +43,7 @@ class ItemsClicked extends StatefulWidget {
       lastpurcrate,
       alias;
   /// The stock item's tally-api `masterId` - `stockItemSummary`/
-  /// `stockItemMovement` are both masterId-keyed. Nullable only so a
-  /// legacy-paired session (which has no such id) still compiles/renders.
+  /// `stockItemMovement` are both masterId-keyed.
   final int? stockItemMasterId;
   const ItemsClicked({
     required this.itemname,
@@ -86,11 +83,10 @@ class _ItemsClickedPageState extends State<ItemsClicked>
       item_rate = "",
       inventory_closing = "",
       lastpurcrate = "",
-      alias = "",
-      token = '';
+      alias = "";
   int? stockItemMasterId;
   String startDateString = "", endDateString = "";
-  String totalsales = "", HttpURL_Main = "", HttpURL_months_sales = "";
+  String totalsales = "";
   String vchtypes = "purchase" + "," + "sales";
   bool isVisibleNoAccess = false;
   bool isItemDescVisible = false,
@@ -165,12 +161,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   DateTime _endDate = DateTime.now().add(Duration(days: 7));
   String? datetype;
   late String? startdate_pref;
-  String HttpURL = "";
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
   List<String> spinner_list = [];
@@ -246,11 +237,10 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     }
   }
 
-  /// Dispatches to the tally-api path when this screen was reached from a
-  /// migrated Items list (`stockItemMasterId` present - a tally-oauth-only
-  /// session, see the migration plan's Phase 7), else keeps the legacy
-  /// implementation exactly as before. Same signature both ways, so all 9
-  /// call sites (one per date-range shortcut) are untouched.
+  /// Fetches sales/purchase summary data via the tally-api backend. Keeps
+  /// its original 5-arg signature (`vchtypes`/`item_name`/`groupby` are no
+  /// longer used internally) so all 9 call sites (one per date-range
+  /// shortcut) stay untouched.
   Future<void> fetchMainData(
     String vchtypes,
     String item_name,
@@ -258,25 +248,14 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     String enddate_string,
     String groupby,
   ) async {
-    if (stockItemMasterId != null) {
-      return _fetchMainDataTallyApi(startdate_string, enddate_string);
-    }
-    return _fetchMainDataLegacy(
-      vchtypes,
-      item_name,
-      startdate_string,
-      enddate_string,
-      groupby,
-    );
+    return _fetchMainDataTallyApi(startdate_string, enddate_string);
   }
 
-  /// tally-api equivalent of [_fetchMainDataLegacy] below - populates the
-  /// exact same `sales_*`/`purchase_*`/`list_sale`/`list_purchase` state
-  /// fields the existing UI already renders. `lastsaledate`/`lastsaleprice`
-  /// (and their purchase equivalents) are deliberately left untouched here,
-  /// matching legacy's own behavior of sourcing those two fields from the
-  /// widget's constructor params (already fetched by Items.dart) rather
-  /// than the summary response.
+  /// Populates the `sales_*`/`purchase_*`/`list_sale`/`list_purchase` state
+  /// fields the UI renders. `lastsaledate`/`lastsaleprice` (and their
+  /// purchase equivalents) are deliberately left untouched here, sourced
+  /// instead from the widget's constructor params (already fetched by
+  /// Items.dart) rather than the summary response.
   Future<void> _fetchMainDataTallyApi(
     String startdate_string,
     String enddate_string,
@@ -381,266 +360,11 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     }
   }
 
-  Future<void> _fetchMainDataLegacy(
-    String vchtypes,
-    String item_name,
-    String startdate_string,
-    String enddate_string,
-    String groupby,
-  ) async {
-    if (salesummary_visible || purchasesummary_visible) {
-      isDateVisible = true;
-      list_sale.clear();
-      list_purchase.clear();
-
-      setState(() {
-        _isLoading = true;
-        isPurchaseClickableCard = false;
-        isSalesClickableCard = false;
-        isVisibleSalesList = false;
-        isClicked_Salesicon = false;
-        isVisiblePurchaseList = false;
-        isClicked_Purchaseicon = false;
-      });
-
-      sales_noofinvoices = 'Not Available';
-      sales_totalnetsales = '0';
-      sales_lastsaledate = 'Not Available';
-      sales_lastsaleprice = 'Not Available';
-      sales_totalsalesqty = 'Not Available';
-      sales_minrate = 'Not Available';
-      sales_maxrate = 'Not Available';
-
-      purchase_noofinvoices = 'Not Available';
-      purchase_totalnetpurchase = '0';
-      purchase_lastpurchasedate = 'Not Available';
-      purchase_lastpurchaseprice = 'Not Available';
-      purchase_totalpurchaseqty = 'Not Available';
-      purchase_minrate = 'Not Available';
-      purchase_maxrate = 'Not Available';
-      try {
-        final url = Uri.parse(HttpURL_Main);
-
-        Map<String, String> headers = {
-          'Authorization': 'Bearer $token',
-          "Content-Type": "application/json",
-        };
-
-        var body = jsonEncode({
-          'vchtypes': vchtypes,
-          'item': item_name,
-          'startdate': startdate_string,
-          'enddate': enddate_string,
-          'groupby': groupby,
-        });
-
-        final response = await http.post(url, body: body, headers: headers);
-        if (response.statusCode == 200) {
-          String responsee = response.body;
-          if (responsee == "Connection Failed!!") {
-            isPurchaseClickableCard = false;
-            isSalesClickableCard = false;
-
-            isVisibleSalesList = false;
-            isClicked_Salesicon = false;
-
-            isVisiblePurchaseList = false;
-            isClicked_Purchaseicon = false;
-            sales_noofinvoices = 'Not Available';
-            sales_totalnetsales = '0';
-            sales_lastsaledate = 'Not Available';
-            sales_lastsaleprice = 'Not Available';
-            sales_totalsalesqty = 'Not Available';
-            sales_minrate = 'Not Available';
-            sales_maxrate = 'Not Available';
-
-            purchase_noofinvoices = 'Not Available';
-            purchase_totalnetpurchase = '0';
-            purchase_lastpurchasedate = 'Not Available';
-            purchase_lastpurchaseprice = 'Not Available';
-            purchase_totalpurchaseqty = 'Not Available';
-            purchase_minrate = 'Not Available';
-            purchase_maxrate = 'Not Available';
-          } else if (responsee == '[]') {
-            isPurchaseClickableCard = false;
-            isSalesClickableCard = false;
-            isVisibleSalesList = false;
-            isClicked_Salesicon = false;
-            isVisiblePurchaseList = false;
-            isClicked_Purchaseicon = false;
-            sales_noofinvoices = 'Not Available';
-            sales_totalnetsales = '0';
-            sales_lastsaledate = 'Not Available';
-            sales_lastsaleprice = 'Not Available';
-            sales_totalsalesqty = 'Not Available';
-            sales_minrate = 'Not Available';
-            sales_maxrate = 'Not Available';
-
-            purchase_noofinvoices = 'Not Available';
-            purchase_totalnetpurchase = '0';
-            purchase_lastpurchasedate = 'Not Available';
-            purchase_lastpurchaseprice = 'Not Available';
-            purchase_totalpurchaseqty = 'Not Available';
-            purchase_minrate = 'Not Available';
-            purchase_maxrate = 'Not Available';
-          } else {
-            final List<dynamic> data_list = jsonDecode(responsee);
-
-            if (data_list != null) {
-              for (var entry in data_list.asMap().entries) {
-                dynamic item = entry.value;
-
-                String vchtype = item['vchtype'].toString();
-
-                if (vchtype == 'Sales') {
-                  isSalesClickableCard = true;
-                  sales_noofinvoices = item['noofinvoice'].toString();
-                  sales_totalnetsales = formatTotal(
-                    item['totalAmount'],
-                    decimals: decimal!,
-                  );
-
-                  sales_lastsaledate = convertDateFormat(item_lastsaledate);
-                  sales_lastsaleprice = formatBackendValue(
-                    item_rate,
-                    decimals: decimal!,
-                  );
-                  sales_totalsalesqty = item['totalQty'].toString();
-                  sales_minrate = formatRate(
-                    item['minRate'].toString(),
-                    decimals: decimal!,
-                  );
-                  sales_maxrate = formatRate(
-                    item['maxRate'].toString(),
-                    decimals: decimal!,
-                  );
-
-                  final url_sales = Uri.parse(HttpURL_months_sales);
-
-                  Map<String, String> headers_month_sales = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var body_month_sales = jsonEncode({
-                    'vchtype': 'sales',
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'item': item_name,
-                    'groupby': 'mname',
-                    'orderby': 'v.vchdate',
-                  });
-
-                  final response_month_sales = await http.post(
-                    url_sales,
-                    body: body_month_sales,
-                    headers: headers_month_sales,
-                  );
-
-                  if (response_month_sales.statusCode == 200) {
-                    final List<dynamic> sales_months_list = jsonDecode(
-                      response_month_sales.body,
-                    );
-                    if (sales_months_list != null) {
-                      for (var entry in sales_months_list.asMap().entries) {
-                        int index = entry.key;
-
-                        list_sale.add(
-                          Sale_Purc.fromJson(sales_months_list[index]),
-                        );
-                      }
-                    }
-                  }
-                } else if (vchtype == 'Purchase') {
-                  isPurchaseClickableCard = true;
-                  purchase_noofinvoices = item['noofinvoice'].toString();
-                  purchase_totalnetpurchase = formatTotal(
-                    item['totalAmount'].toString(),
-                    decimals: decimal!,
-                  );
-                  purchase_lastpurchasedate = convertDateFormat(
-                    item_lastpurchdate,
-                  );
-                  purchase_lastpurchaseprice = formatBackendValue(
-                    lastpurcrate,
-                    decimals: decimal!,
-                  );
-                  purchase_totalpurchaseqty = item['totalQty'].toString();
-                  purchase_minrate = formatRate(
-                    item['minRate'].toString(),
-                    decimals: decimal!,
-                  );
-                  purchase_maxrate = formatRate(
-                    item['maxRate'].toString(),
-                    decimals: decimal!,
-                  );
-
-                  final url_purchase = Uri.parse(HttpURL_months_sales);
-
-                  Map<String, String> headers_month_purchase = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var body_month_purchase = jsonEncode({
-                    'vchtype': 'purchase',
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'item': item_name,
-                    'groupby': 'mname',
-                    'orderby': 'v.vchdate',
-                  });
-
-                  final response_month_purchase = await http.post(
-                    url_purchase,
-                    body: body_month_purchase,
-                    headers: headers_month_purchase,
-                  );
-
-                  if (response_month_purchase.statusCode == 200) {
-                    final List<dynamic> purchase_months_list = jsonDecode(
-                      response_month_purchase.body,
-                    );
-                    if (purchase_months_list != null) {
-                      for (var entry in purchase_months_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-
-                        list_purchase.add(
-                          Sale_Purc.fromJson(purchase_months_list[index]),
-                        );
-                      }
-                    }
-                  }
-                } else {}
-              }
-            }
-          }
-        }
-
-        setState(() {
-          _isLoading = false;
-        });
-      } catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
-        print(e);
-      }
-    } else {
-      isDateVisible = false;
-    }
-  }
-
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
 
-    hostname = prefs.getString('hostname');
     company = prefs.getString('company_name');
-    company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-    serial_no = prefs.getString('serial_no');
     username = prefs.getString('username');
-    token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     _selecteddate = prefs.getString('datetype') ?? date_range.first;
 
     decimal = prefs.getInt('decimalplace') ?? 2;
@@ -723,11 +447,6 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     }
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    HttpURL_Main =
-        '$hostname/api/item/getSummary/$company_lowercase/$serial_no';
-    HttpURL_months_sales =
-        '$hostname/api/item/getTotalAmount/$company_lowercase/$serial_no';
 
     String? email_nav = prefs.getString('email_nav');
     String? name_nav = prefs.getString('name_nav');

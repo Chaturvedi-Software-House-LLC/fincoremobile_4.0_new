@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -16,7 +15,6 @@ import 'PartyClickedSalePurcOrder.dart';
 import 'PartyClickedSoldPurchaseClicked.dart';
 import 'PartyDrillDown.dart';
 import 'PartyTotalClickedRest.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -125,12 +123,7 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   String startDateString = "", endDateString = "";
   String totalsales = "";
-  String vchtypes = "purchase" + "," + "sales", token = '';
-  String HttpURL_SummaryContent = "",
-      HttpURL_months = "",
-      HttpURL_receivablepayable_total = "",
-      HttpURL_receivablepayable = "",
-      HttpURL_salespurchaseorder = "";
+  String vchtypes = "purchase" + "," + "sales";
 
   bool isExpanded_Sales = false;
   String lastsaledate = "",
@@ -345,13 +338,7 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   late String? startdate_pref;
 
-  String HttpURL_sold = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
 
@@ -1075,154 +1062,7 @@ class _PartyClickedPageState extends State<PartyClicked>
     ], text: 'Sharing $reportname Report of $company');
   }
 
-  Future<void> fetchsold(
-    final String vchtype,
-    final String ledger,
-    final String startdate,
-    final String enddate,
-  ) async {
-    setState(() {
-      item_count = "0";
-      _isLoading = true;
-      isVisibleSoldList = false;
-      isVisibleNoDataFound = false;
-      _isSearchViewVisible = false;
-      searchController.clear();
-    });
-
-    filteredItems_sold.clear();
-    sold_list.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_sold);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'vchtype': vchtype,
-        'ledger': ledger,
-        'startdate': startdate,
-        'enddate': enddate,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        debugPrint('fetch sold response -> ${response.body}');
-
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          sold_list.addAll(
-            values_list.map((json) => Sold_Purchased.fromJson(json)).toList(),
-          );
-          filteredItems_sold = sold_list;
-
-          setState(() {
-            item_count = filteredItems_sold.length.toString();
-            isVisibleSoldList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
-      setState(() {
-        isVisibleSoldList = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      isVisibleNoDataFound = false;
-      if (sold_list.isEmpty) {
-        item_count = "0";
-        isVisibleSoldList = false;
-
-        isVisibleNoDataFound = true;
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> fetchpurchase(
-    final String vchtype,
-    final String ledger,
-    final String startdate,
-    final String enddate,
-  ) async {
-    setState(() {
-      item_count = "0";
-      _isLoading = true;
-      isVisiblePurchaseList = false;
-      isVisibleNoDataFound = false;
-      _isSearchViewVisible = false;
-      searchController.clear();
-    });
-
-    filteredItems_purchase.clear();
-    purchase_list.clear();
-
-    try {
-      final url = Uri.parse(HttpURL_sold!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'vchtype': vchtype,
-        'ledger': ledger,
-        'startdate': startdate,
-        'enddate': enddate,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          purchase_list.addAll(
-            values_list.map((json) => Sold_Purchased.fromJson(json)).toList(),
-          );
-          filteredItems_purchase = purchase_list;
-
-          setState(() {
-            item_count = filteredItems_purchase.length.toString();
-            isVisiblePurchaseList = true;
-            _isLoading = false;
-          });
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
-      setState(() {
-        isVisiblePurchaseList = false;
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (purchase_list.isEmpty) {
-        item_count = "0";
-        isVisiblePurchaseList = false;
-        isVisibleNoDataFound = true;
-      }
-      _isLoading = false;
-    });
-  }
-
-  /// tally-api equivalent of [fetchsold]/[fetchpurchase] above - only
+  /// tally-api equivalent of legacy `fetchsold`/`fetchpurchase` - only
   /// reached when this party has no Summary-visibility flags set at all
   /// (a "pure" customer/supplier, see `fetchSummary()`).
   ///
@@ -1640,653 +1480,10 @@ class _PartyClickedPageState extends State<PartyClicked>
     }
   }
 
-  Future<void> fetchSummaryData(
-    String ledger,
-    String startdate_string,
-    String enddate_string,
-    String groupby,
-  ) async {
-    months_list_sales.clear();
-    months_list_purchase.clear();
-    months_list_receipt.clear();
-    months_list_payment.clear();
-    months_list_creditnote.clear();
-    months_list_debitnote.clear();
-    months_list_journal.clear();
-
-    row1_receivable = formatRemainingOverdue("0");
-    row2_receivable = formatRemainingOverdue("0");
-    row3_receivable = formatRemainingOverdue("0");
-    row4_receivable = formatRemainingOverdue("0");
-    row5_receivable = formatRemainingOverdue("0");
-    row6_receivable = formatRemainingOverdue("0");
-
-    row1_payable = formatRemainingOverdue("0");
-    row2_payable = formatRemainingOverdue("0");
-    row3_payable = formatRemainingOverdue("0");
-    row4_payable = formatRemainingOverdue("0");
-    row5_payable = formatRemainingOverdue("0");
-    row6_payable = formatRemainingOverdue("0");
-
-    setState(() {
-      _isLoading = true;
-      isClicked_Summary = true;
-      isClicked_Sold = false;
-      isClicked_Purchase = false;
-      isSearchLayoutVisible = false;
-      searchController.clear();
-      isVisibleNoDataFound = false;
-
-      SalesVisibility = false;
-      PurchaseVisibility = false;
-      ReceiptVisibility = false;
-      PaymentVisibility = false;
-      CreditnoteVisibility = false;
-      DebitnoteVisibility = false;
-      JournalVisibility = false;
-      ReceivableVisibility = false;
-      PayableVisibility = false;
-      PurchaseOrderVisibility = false;
-      SalesOrderVisibility = false;
-    });
-
-    try {
-      final url = Uri.parse(HttpURL_SummaryContent!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'ledger': ledger,
-        'startdate': startdate_string,
-        'enddate': enddate_string,
-        'groupby': groupby,
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        String responsee = response.body;
-
-        print('response ->> ${response.body}');
-        if (responsee == '[]') {
-          setState(() {
-            SalesVisibility = false;
-            PurchaseVisibility = false;
-            ReceiptVisibility = false;
-            PaymentVisibility = false;
-            CreditnoteVisibility = false;
-            DebitnoteVisibility = false;
-            JournalVisibility = false;
-            isVisibleNoDataFound = true;
-          });
-        } else if (responsee == 'Connection Failed') {
-          setState(() {
-            SalesVisibility = false;
-            PurchaseVisibility = false;
-            ReceiptVisibility = false;
-            PaymentVisibility = false;
-            CreditnoteVisibility = false;
-            DebitnoteVisibility = false;
-            JournalVisibility = false;
-            isVisibleNoDataFound = true;
-          });
-        } else {
-          final List<dynamic> data_list = jsonDecode(responsee);
-          // print(data_list);
-
-          if (data_list != null) {
-            for (var entry in data_list.asMap().entries) {
-              dynamic item = entry.value;
-
-              String vchtype = item['vchtype'].toString();
-
-              if (vchtype == 'Sales') {
-                if (salesparty == 'True') {
-                  setState(() {
-                    SalesVisibility = true;
-                  });
-
-                  totalsaleamt = item['totalAmount'].toString();
-                  avgsalesinvoiceamt = item['averageAmount'].toString();
-                  noofsalesinvoice = item['totalInvoice'].toString();
-                  lastsaledate = item['lastdate'].toString();
-
-                  final url_sales = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headers_sales = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var body_sales = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final response_sales = await http.post(
-                    url_sales,
-                    body: body_sales,
-                    headers: headers_sales,
-                  );
-
-                  if (response_sales.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      response_sales.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_sales.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'Purchase') {
-                if (purchaseparty == 'True') {
-                  setState(() {
-                    PurchaseVisibility = true;
-                  });
-
-                  totalpurchaseamt = item['totalAmount'].toString();
-                  avgpurchaseinvoiceamt = item['averageAmount'].toString();
-                  noofpurchaseinvoice = item['totalInvoice'].toString();
-                  lastpurchasedate = item['lastdate'].toString();
-
-                  final url_purchase = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headers_purchase = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var body_purchase = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final response_purchase = await http.post(
-                    url_purchase,
-                    body: body_purchase,
-                    headers: headers_purchase,
-                  );
-
-                  if (response_purchase.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      response_purchase.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_purchase.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'Receipt') {
-                if (receiptparty == 'True') {
-                  setState(() {
-                    ReceiptVisibility = true;
-                  });
-
-                  totalreceiptamt = item['totalAmount'].toString();
-                  avgreceiptinvoiceamt = item['averageAmount'].toString();
-                  noofreceiptinvoice = item['totalInvoice'].toString();
-                  lastreceiptdate = item['lastdate'].toString();
-
-                  final urll = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headerss = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var bodyy = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final responseee = await http.post(
-                    urll,
-                    body: bodyy,
-                    headers: headerss,
-                  );
-
-                  if (responseee.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      responseee.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_receipt.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'Payment') {
-                if (paymentparty == 'True') {
-                  setState(() {
-                    PaymentVisibility = true;
-                  });
-
-                  totalpaymentamt = item['totalAmount'].toString();
-                  avgpaymentinvoiceamt = item['averageAmount'].toString();
-                  noofpaymentinvoice = item['totalInvoice'].toString();
-                  lastpaymentdate = item['lastdate'].toString();
-
-                  final urll = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headerss = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var bodyy = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final responseee = await http.post(
-                    urll,
-                    body: bodyy,
-                    headers: headerss,
-                  );
-
-                  if (responseee.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      responseee.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_payment.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'CreditNote') {
-                if (creditnoteparty == 'True') {
-                  setState(() {
-                    CreditnoteVisibility = true;
-                  });
-
-                  totalcreditnoteamt = item['totalAmount'].toString();
-                  avgcreditnoteinvoiceamt = item['averageAmount'].toString();
-                  noofcreditnoteinvoice = item['totalInvoice'].toString();
-                  lastcreditnotedate = item['lastdate'].toString();
-
-                  final urll = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headerss = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var bodyy = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final responseee = await http.post(
-                    urll,
-                    body: bodyy,
-                    headers: headerss,
-                  );
-
-                  if (responseee.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      responseee.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_creditnote.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'DebitNote') {
-                if (debitnoteparty == 'True') {
-                  setState(() {
-                    DebitnoteVisibility = true;
-                  });
-
-                  totaldebitnoteamt = item['totalAmount'].toString();
-                  avgdebitnoteinvoiceamt = item['averageAmount'].toString();
-                  noofdebitnoteinvoice = item['totalInvoice'].toString();
-                  lastdebitnotedate = item['lastdate'].toString();
-
-                  final urll = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headerss = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var bodyy = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final responseee = await http.post(
-                    urll,
-                    body: bodyy,
-                    headers: headerss,
-                  );
-
-                  if (responseee.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      responseee.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_debitnote.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'Journal') {
-                if (journalparty == 'True') {
-                  setState(() {
-                    JournalVisibility = true;
-                  });
-
-                  totaljournalamt = item['totalAmount'].toString();
-                  avgjournalinvoiceamt = item['averageAmount'].toString();
-                  noofjournalinvoice = item['totalInvoice'].toString();
-                  lastjournaldate = item['lastdate'].toString();
-
-                  final urll = Uri.parse(HttpURL_months!);
-
-                  Map<String, String> headerss = {
-                    'Authorization': 'Bearer $token',
-                    "Content-Type": "application/json",
-                  };
-
-                  var bodyy = jsonEncode({
-                    'ledger': ledger,
-                    'startdate': startdate_string,
-                    'enddate': enddate_string,
-                    'groupby': 'mname',
-                    'vchtype': vchtype,
-                    'orderby': 'vchtype,vchdate',
-                  });
-
-                  final responseee = await http.post(
-                    urll,
-                    body: bodyy,
-                    headers: headerss,
-                  );
-
-                  if (responseee.statusCode == 200) {
-                    final List<dynamic> month_list = jsonDecode(
-                      responseee.body,
-                    );
-
-                    if (month_list != null) {
-                      for (var entry in month_list.asMap().entries) {
-                        int index = entry.key;
-                        dynamic item = entry.value;
-                        months_list_journal.add(
-                          months.fromJson(month_list[index]),
-                        );
-                      }
-                    }
-                  }
-                }
-              } else if (vchtype == 'DelNote') {
-                // Intentionally ignored. Delivery Note is not shown in this summary UI.
-                continue;
-              } else if (vchtype == 'SalesOrder') {
-                // Intentionally ignored. Delivery Note is not shown in this summary UI.
-                continue;
-              }
-            }
-          }
-        }
-
-        if (receivableparty == 'True' || payableparty == 'True') {
-          // Ageing-bucket accumulators must start fresh for every reload
-          // (new party, date-range change, etc.) - see
-          // formatOnAccountWithBillNo for why these can't just live as
-          // locals inside that function.
-          _sumReceivable0 = 0;
-          _sumReceivable30 = 0;
-          _sumReceivable60 = 0;
-          _sumReceivable90 = 0;
-          _sumReceivable120 = 0;
-          _sumReceivable180 = 0;
-          _sumPayable0 = 0;
-          _sumPayable30 = 0;
-          _sumPayable60 = 0;
-          _sumPayable90 = 0;
-          _sumPayable120 = 0;
-          _sumPayable180 = 0;
-          _currentReceivableOnAccount = 0;
-          _currentPayableOnAccount = 0;
-
-          // receivable payable total calculation
-          final url_recpaytotal = Uri.parse(HttpURL_receivablepayable_total!);
-
-          Map<String, String> headers_recpaytotal = {
-            'Authorization': 'Bearer $token',
-            "Content-Type": "application/json",
-          };
-
-          var body_recpaytotal = jsonEncode({
-            'ledger': ledger,
-            'billdate': enddate_string,
-            "opening": 'true',
-          });
-
-          final response_recpaytotal = await http.post(
-            url_recpaytotal,
-            body: body_recpaytotal,
-            headers: headers_recpaytotal,
-          );
-
-          debugPrint(
-            'response receivable/payable total-> ${response_recpaytotal.body}',
-          );
-
-          if (response_recpaytotal.statusCode == 200) {
-            final dynamic decoded = jsonDecode(response_recpaytotal.body);
-
-            void handleItem(Map<String, dynamic> item) {
-              final String outstanding = (item['outstanding'] ?? '0')
-                  .toString();
-              formatRecPayTotal(outstanding);
-            }
-
-            if (decoded is List) {
-              for (final item in decoded) {
-                if (item is Map<String, dynamic>) {
-                  handleItem(item);
-                }
-              }
-            } else if (decoded is Map<String, dynamic>) {
-              handleItem(decoded);
-            }
-          }
-
-          // receivale payable values
-
-          final url_recpay = Uri.parse(HttpURL_receivablepayable!);
-          Map<String, String> headers_recpay = {
-            'Authorization': 'Bearer $token',
-            "Content-Type": "application/json",
-          };
-
-          var body_recpay = jsonEncode({
-            'ledger': ledger,
-            'billdate': enddate_string,
-            'showAll': 'true',
-            'orderby': 'billno',
-          });
-
-          final response_recpay = await http.post(
-            url_recpay,
-            body: body_recpay,
-            headers: headers_recpay,
-          );
-
-          debugPrint('response receivable/payable-> ${response_recpay.body}');
-
-          if (response_recpay.statusCode == 200) {
-            final List<dynamic> recpay_list = jsonDecode(response_recpay.body);
-            // print(response_recpay.body);
-
-            if (recpay_list != null) {
-              for (var entry in recpay_list.asMap().entries) {
-                // int index = entry.key;
-                dynamic item = entry.value;
-
-                String outstanding = item['outstanding'].toString();
-                String billno = item['billno'].toString();
-                String overdue = item['overdue'].toString();
-                int overdue_int = 0;
-
-                if (overdue == 'null') {
-                } else {
-                  overdue_int = int.parse(overdue);
-                }
-
-                if (billno == 'null') {
-                  formatOnAccount(outstanding, overdue_int);
-                  if (overdue_int > 0) {
-                    formatOnAccountWithBillNo(overdue_int, outstanding);
-                  }
-                } else {
-                  formatOnAccountWithBillNo(overdue_int, outstanding);
-                }
-              }
-            }
-          }
-        }
-
-        if (pendingpurchaseorderparty == 'True' ||
-            pendingsalesorderparty == 'True') {
-          // pending sales/purchase order
-
-          final url_salepurc = Uri.parse(HttpURL_salespurchaseorder!);
-
-          Map<String, String> headers_salepurc = {
-            'Authorization': 'Bearer $token',
-            "Content-Type": "application/json",
-          };
-
-          var body_salepurc = jsonEncode({
-            'ledger': ledger,
-            'enddate': enddate_string,
-            'vchtypes': 'sales,purchase',
-            'ordervchs': 'salesorder,purcorder',
-            'select': 'true',
-            'groupby': 'vchtype',
-          });
-
-          final response_salepurc = await http.post(
-            url_salepurc,
-            body: body_salepurc,
-            headers: headers_salepurc,
-          );
-
-          debugPrint(
-            'response sales/purchase order -> ${response_salepurc.body}',
-          );
-
-          if (response_salepurc.statusCode == 200) {
-            if (response_salepurc.body == '[]') {
-            } else if (response_salepurc.body.contains('Connection')) {
-              showAppMessage(context, "Error in Fetching Sale/Purchase Order");
-            } else {
-              final List<dynamic> salepurc_list = jsonDecode(
-                response_salepurc.body,
-              );
-
-              if (salepurc_list != null) {
-                for (var entry in salepurc_list.asMap().entries) {
-                  int index = entry.key;
-                  dynamic item = entry.value;
-
-                  String vchtype = item['vchtype'].toString();
-                  String totalAmount = item['totalAmount'].toString();
-
-                  formatSalePurc(totalAmount, vchtype);
-                }
-              }
-            }
-          }
-        }
-      }
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
-  /// tally-api equivalent of [fetchSummaryData] above - populates the exact
+  /// tally-api equivalent of legacy `fetchSummaryData` - populates the exact
   /// same state fields the existing UI (`SummaryExpansionCard`,
   /// `ReceivableBreakdownCard`/`PayableBreakdownCard`, `PendingOrderTile`)
-  /// already renders, so no widget-tree changes were needed. Used instead
-  /// of the legacy function whenever `ledgerMasterId` is available (a
-  /// tally-oauth-only session - see the migration plan's Phase 7).
+  /// already renders, so no widget-tree changes were needed.
   ///
   /// Sourced from three tally-api report endpoints
   /// (`LedgerRepository.ledgerSummary`/`outstandingTotal`/
@@ -2552,33 +1749,21 @@ class _PartyClickedPageState extends State<PartyClicked>
         isClicked_Summary = false;
         isSearchLayoutVisible = true;
 
-        if (ledgerMasterId != null) {
-          _fetchSoldPurchaseTallyApi('Purchase');
-        } else {
-          fetchpurchase("Purchase", partyname, startDateString, endDateString);
-        }
+        _fetchSoldPurchaseTallyApi('Purchase');
       } else if (party_customers == 'True') {
         isClicked_Summary = false;
         isClicked_Sold = true;
         isClicked_Purchase = false;
         isSearchLayoutVisible = true;
 
-        if (ledgerMasterId != null) {
-          _fetchSoldPurchaseTallyApi('Sales');
-        } else {
-          fetchsold("Sales", partyname, startDateString, endDateString);
-        }
+        _fetchSoldPurchaseTallyApi('Sales');
       }
     } else {
       setState(() {
         isVisibleSummaryBtn = true;
         isClicked_Summary = true;
       });
-      if (ledgerMasterId != null) {
-        _fetchSummaryDataTallyApi(startDateString, endDateString);
-      } else {
-        fetchSummaryData(partyname, startDateString, endDateString, "vchtype");
-      }
+      _fetchSummaryDataTallyApi(startDateString, endDateString);
     }
   }
 
@@ -2586,12 +1771,8 @@ class _PartyClickedPageState extends State<PartyClicked>
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
       _selecteddate = prefs.getString('datetype') ?? date_range.first;
 
       decimal = prefs.getInt('decimalplace') ?? 2;
@@ -2688,19 +1869,6 @@ class _PartyClickedPageState extends State<PartyClicked>
       isVisibleSoldBtn = false;
     }
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    HttpURL_SummaryContent =
-        '$hostname/api/ledger/getSummary/$company_lowercase/$serial_no';
-    HttpURL_months =
-        '$hostname/api/ledger/getMonthSummary/$company_lowercase/$serial_no';
-    HttpURL_receivablepayable_total =
-        '$hostname/api/ledger/getOutstandings/$company_lowercase/$serial_no';
-    HttpURL_receivablepayable =
-        '$hostname/api/ledger/getOutstandingList/$company_lowercase/$serial_no';
-    HttpURL_salespurchaseorder =
-        '$hostname/api/ledger/getOrderSummary/$company_lowercase/$serial_no';
-    HttpURL_sold =
-        '$hostname/api/ledger/getItemSummary/$company_lowercase/$serial_no';
 
     String? email_nav = prefs.getString('email_nav');
     String? name_nav = prefs.getString('name_nav');
@@ -3640,18 +2808,9 @@ class _PartyClickedPageState extends State<PartyClicked>
                                             isClicked_Sold = true;
                                             isClicked_Purchase = false;
                                             isSearchLayoutVisible = true;
-                                            if (ledgerMasterId != null) {
-                                              _fetchSoldPurchaseTallyApi(
-                                                'Sales',
-                                              );
-                                            } else {
-                                              fetchsold(
-                                                "Sales",
-                                                partyname,
-                                                startDateString,
-                                                endDateString,
-                                              );
-                                            }
+                                            _fetchSoldPurchaseTallyApi(
+                                              'Sales',
+                                            );
                                           });
                                         },
                                       ),
@@ -3668,18 +2827,9 @@ class _PartyClickedPageState extends State<PartyClicked>
                                             isClicked_Sold = false;
                                             isClicked_Summary = false;
                                             isSearchLayoutVisible = true;
-                                            if (ledgerMasterId != null) {
-                                              _fetchSoldPurchaseTallyApi(
-                                                'Purchase',
-                                              );
-                                            } else {
-                                              fetchpurchase(
-                                                "Purchase",
-                                                partyname,
-                                                startDateString,
-                                                endDateString,
-                                              );
-                                            }
+                                            _fetchSoldPurchaseTallyApi(
+                                              'Purchase',
+                                            );
                                           });
                                         },
                                       ),

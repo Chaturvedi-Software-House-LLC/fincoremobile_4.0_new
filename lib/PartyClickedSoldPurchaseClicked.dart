@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'constants.dart';
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/currencyFormat.dart';
@@ -7,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -96,7 +94,7 @@ class _PartyClickedSoldPurchaseClickedPageState
   int counter = 0;
   double total_double = 0;
 
-  String total_main = "0", token = '';
+  String total_main = "0";
 
   bool isSortVisible = false;
 
@@ -150,13 +148,7 @@ class _PartyClickedSoldPurchaseClickedPageState
 
   late String? startdate_pref, enddate_pref;
 
-  String HttpURL = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
 
@@ -732,11 +724,7 @@ class _PartyClickedSoldPurchaseClickedPageState
     filteredItems.clear();
 
     try {
-      if (ledgerMasterId != null) {
-        await _fetchDataTallyApi(item, ledger, startdate, enddate, type);
-      } else {
-        await _fetchDataLegacy(item, ledger, startdate, enddate, type, select, orderby);
-      }
+      await _fetchDataTallyApi(item, ledger, startdate, enddate, type);
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -770,53 +758,6 @@ class _PartyClickedSoldPurchaseClickedPageState
       }
       _isLoading = false;
     });
-  }
-
-  Future<void> _fetchDataLegacy(
-    final String item,
-    final String ledger,
-    final String startdate,
-    final String enddate,
-    final String type,
-    final String select,
-    final String orderby,
-  ) async {
-    final url = Uri.parse(HttpURL!);
-
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({
-      'startdate': startdate,
-      'enddate': enddate,
-      'party': ledger,
-      'vchtype': type,
-      'select': select,
-      'orderby': orderby,
-      'item': item,
-    });
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      print(type);
-      final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-      if (values_list != null) {
-        isVisibleNoDataFound = false;
-
-        item_list.addAll(
-          values_list.map((json) => Data.fromJson(json)).toList(),
-        );
-        filteredItems = item_list;
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-      setState(() {
-        _isLoading = false;
-      });
-    }
   }
 
   /// tally-api path: filters [VoucherRepository]-backed vouchers to this
@@ -875,12 +816,8 @@ class _PartyClickedSoldPurchaseClickedPageState
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
 
     String? currencyCode = '';
@@ -927,8 +864,6 @@ class _PartyClickedSoldPurchaseClickedPageState
     } catch (e) {
       selectedSortOption = 'Default';
     }
-
-    HttpURL = '$hostname/api/item/getTotalAmount/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
