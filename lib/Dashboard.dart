@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 import 'package:FincoreGo/PendingDeliveryNoteEntry.dart';
@@ -21,7 +20,6 @@ import 'PendingSalesOrderEntry.dart';
 import 'SerialSelect.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/entry_widgets.dart';
 import 'api/api_exception.dart';
@@ -1966,67 +1964,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> fetchUserData(
-    String username,
-    String serial_no,
-    String secbtn,
-  ) async {
-    final url = Uri.parse('$BASE_URL_config/api/login/get');
-
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $authTokenBase',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({
-      'serialno': serial_no,
-      'username': username,
-      'admin': secbtn,
-    });
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      final user_data = jsonDecode(utf8.decode(response.bodyBytes));
-
-      if (user_data != null) {
-        List<dynamic> myArray = user_data;
-
-        for (int i = 0; i < myArray.length; i++) {
-          if (SecuritybtnAcessHolder == "True") {
-            setState(() {
-              email = myArray[i]['email'];
-              name = myArray[i]['name'];
-            });
-          } else if (SecuritybtnAcessHolder == "False") {
-            setState(() {
-              name = myArray[i]["customer_name"];
-              email = myArray[i]["user_name"];
-            });
-          }
-        }
-        prefs.setString('name_nav', name);
-        prefs.setString('email_nav', email);
-      } else {
-        prefs.remove('name_nav');
-        prefs.remove('email_nav');
-        throw Exception('Failed to fetch data');
-      }
-    } else {
-      Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-      String error = '';
-
-      if (data.containsKey('error')) {
-        setState(() {
-          error = data['error'];
-        });
-      } else {
-        error = AppLocalizations.of(context).errorSomethingWentWrong;
-      }
-      showAppMessage(context, error);
-    }
-  }
-
   // One label+icon+value row for the dialog's info section (e.g. "Serial
   // No: 772976358", "Expires on: 26-Jul-2026") - same shape both dialogs
   // use, just with different icons/colors/values.
@@ -2702,30 +2639,11 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-      // `username` (legacy prefs key) is never set for a tally-oauth-only
-      // session (Phase 6) - this used to force-unwrap it and throw here,
-      // aborting the rest of _initSharedPreferences() (including the
-      // fetchDashData() call further down) before it ever ran. fetchUserData
-      // itself is a legacy `/api/login/get` lookup with no tally-oauth
-      // equivalent, so there's nothing useful to call for this session type -
-      // name/email just stay whatever they were already (unset).
-      if (username != null) {
-        fetchUserData(username!, serial_no ?? '', val);
-      }
-    }
+    // `name_nav`/`email_nav` are populated straight from tally-oauth's own
+    // login response (see AuthRepository.loginToTallyOauth) - no legacy
+    // backend lookup is made here anymore.
+    name = prefs.getString('name_nav') ?? prefs.getString('name') ?? '';
+    email = prefs.getString('email_nav') ?? '';
     if (SecuritybtnAcessHolder == "True") {
       isRolesVisible = true;
       isUserVisible = true;

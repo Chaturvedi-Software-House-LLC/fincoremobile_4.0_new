@@ -75,9 +75,20 @@ class AuthRepository {
       final firstName = user['firstName']?.toString() ?? '';
       final lastName = user['lastName']?.toString() ?? '';
       final fullName = '$firstName $lastName'.trim();
+      final resolvedName = fullName.isNotEmpty ? fullName : displayUserName;
+      await prefs.setString('name', resolvedName);
+
+      // `name_nav`/`email_nav` are the *only* keys ~30 screens (Dashboard,
+      // Items, Party*, Transactions*, AssistantChat, admin screens, etc.)
+      // actually read for the signed-in user's display name/email - each of
+      // them falls back to its own legacy `/api/login/get` lookup whenever
+      // these are unset. Populating them here from the real tally-oauth
+      // response means every one of those call sites resolves correctly
+      // without ever reaching its legacy fallback.
+      await prefs.setString('name_nav', resolvedName);
       await prefs.setString(
-        'name',
-        fullName.isNotEmpty ? fullName : displayUserName,
+        'email_nav',
+        (email != null && email.isNotEmpty) ? email : displayUserName,
       );
     }
   }
