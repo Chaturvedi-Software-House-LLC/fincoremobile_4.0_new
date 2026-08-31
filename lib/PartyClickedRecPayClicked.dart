@@ -1,11 +1,9 @@
-import 'dart:convert';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -113,7 +111,7 @@ class _PartyTotalClickedRecPayClickedPageState
     'Amount Low to High',
   ];
 
-  String selectedSortOption = '', token = '';
+  String selectedSortOption = '';
 
   bool isSortVisible = false;
   final ScrollController _scrollFabController = ScrollController();
@@ -159,13 +157,7 @@ class _PartyTotalClickedRecPayClickedPageState
 
   late String? startdate_pref, enddate_pref;
 
-  String HttpURL_CreditLimit = "", HttpURL = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "", username = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
 
@@ -898,17 +890,10 @@ class _PartyTotalClickedRecPayClickedPageState
     return formattedDate;
   }
 
-  Future<void> fetchCreditlimit(final String ledger) async {
-    if (ledgerMasterId != null) {
-      return _fetchCreditlimitTallyApi();
-    }
-    return _fetchCreditlimitLegacy(ledger);
-  }
-
-  /// tally-api path: `creditLimit`/`creditPeriod` are already columns on
-  /// the base `/ledgers` list row - no separate endpoint like legacy's
-  /// `getLedger` is needed.
-  Future<void> _fetchCreditlimitTallyApi() async {
+  /// `creditLimit`/`creditPeriod` are already columns on the base
+  /// `/ledgers` list row - no separate endpoint like legacy's `getLedger`
+  /// is needed.
+  Future<void> fetchCreditlimit() async {
     setState(() {
       _isLoading = true;
     });
@@ -938,67 +923,15 @@ class _PartyTotalClickedRecPayClickedPageState
     }
   }
 
-  Future<void> _fetchCreditlimitLegacy(final String ledger) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final url = Uri.parse(HttpURL_CreditLimit);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({'ledger': ledger});
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          for (var item in values_list) {
-            String creditlimitt = item['creditlimit'].toString();
-            String creditperiodd = item['creditPeriod'].toString();
-
-            if (creditlimitt == 'null') {
-              creditlimitt = "0";
-            }
-            if (creditperiodd == "null") {
-              creditperiod = "0";
-              creditlimit = creditlimitt;
-            } else {
-              if (creditperiodd.contains("Days")) {
-                setState(() {
-                  isVisibleDays = false;
-                });
-              } else {
-                setState(() {
-                  isVisibleDays = true;
-                });
-              }
-              creditlimit = creditlimitt;
-
-              creditperiod = creditperiodd;
-            }
-          }
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-      }
-    } catch (e) {
-      print(e);
-    }
-  }
-
-  Future<void> fetchData(
-    final String orderby,
-    final String ledger,
-    final String groupby,
-    final String enddate,
-    final String variabletype,
-    final String isDebit,
-  ) async {
+  /// `reports/ledgers/outstanding-bills` already returns every open bill
+  /// for this ledger with a server-computed `overdueDays` - no separate
+  /// "showAll"/ageing-bucket param needed, since the ageing bucket split
+  /// happens entirely client-side in this screen already
+  /// (`_ageingBuckets`/`_selectedAgeingBucket`). `isDebit == 'true'` (set by
+  /// the caller for the Receivable tile) keeps only bills with a positive
+  /// balance; the Payable tile (isDebit == '') keeps the rest - matching
+  /// `DashboardClicked.dart`'s `_fetchReceivablePayableTallyApi` convention.
+  Future<void> fetchData(final String isDebit) async {
     setState(() {
       _isLoading = true;
       _isListVisible = true;
@@ -1010,11 +943,26 @@ class _PartyTotalClickedRecPayClickedPageState
     _selectedAgeingBucket = null;
 
     try {
-      if (ledgerMasterId != null) {
-        await _fetchDataTallyApi(isDebit);
-      } else {
-        await _fetchDataLegacy(orderby, ledger, groupby, enddate, variabletype, isDebit);
-      }
+      final bills = await LedgerRepository.instance.outstandingBills(
+        ledgerMasterId: ledgerMasterId,
+      );
+
+      final rows = bills.where((bill) {
+        final balance = parseMoneyField(bill['finalBalance']);
+        return isDebit == 'true' ? balance > 0 : balance <= 0;
+      }).map((bill) {
+        return Data.fromJson({
+          'billno': bill['name'] ?? '',
+          'overdue': bill['overdueDays']?.toString() ?? '0',
+          'outstanding': parseMoneyField(bill['finalBalance']).abs(),
+          'billdate': bill['date'] ?? '',
+          'duedate': bill['dueDate'] ?? 'null',
+        });
+      }).toList();
+
+      isVisibleNoDataFound = false;
+      item_list.addAll(rows);
+      filteredItems = item_list;
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -1056,109 +1004,13 @@ class _PartyTotalClickedRecPayClickedPageState
     });
   }
 
-  /// tally-api path: `reports/ledgers/outstanding-bills` already returns
-  /// every open bill for this ledger with a server-computed `overdueDays` -
-  /// no separate "showAll"/ageing-bucket param needed, since the ageing
-  /// bucket split happens entirely client-side in this screen already
-  /// (`_ageingBuckets`/`_selectedAgeingBucket`). `isDebit == 'true'` (set by
-  /// the caller for the Receivable tile) keeps only bills with a positive
-  /// balance; the Payable tile (isDebit == '') keeps the rest - matching
-  /// `DashboardClicked.dart`'s `_fetchReceivablePayableTallyApi` convention.
-  Future<void> _fetchDataTallyApi(final String isDebit) async {
-    final bills = await LedgerRepository.instance.outstandingBills(
-      ledgerMasterId: ledgerMasterId,
-    );
-
-    final rows = bills.where((bill) {
-      final balance = parseMoneyField(bill['finalBalance']);
-      return isDebit == 'true' ? balance > 0 : balance <= 0;
-    }).map((bill) {
-      return Data.fromJson({
-        'billno': bill['name'] ?? '',
-        'overdue': bill['overdueDays']?.toString() ?? '0',
-        'outstanding': parseMoneyField(bill['finalBalance']).abs(),
-        'billdate': bill['date'] ?? '',
-        'duedate': bill['dueDate'] ?? 'null',
-      });
-    }).toList();
-
-    isVisibleNoDataFound = false;
-    item_list.addAll(rows);
-    filteredItems = item_list;
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _fetchDataLegacy(
-    final String orderby,
-    final String ledger,
-    final String groupby,
-    final String enddate,
-    final String variabletype,
-    final String isDebit,
-  ) async {
-    try {
-      final url = Uri.parse(HttpURL!);
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      var body = jsonEncode({
-        'billdate': enddate,
-        'ledger': ledger,
-        'isDebit': isDebit,
-        'orderby': orderby,
-        'groupby': groupby,
-        'overdue': variabletype,
-        // PartyClicked.dart's own call to this same endpoint passes
-        // showAll:true and gets back the correct, consolidated current
-        // outstanding bill(s) - without it, this screen was getting a
-        // different (stale-looking, mostly-already-settled) historical
-        // per-bill list instead, which is why the real overdue bill and
-        // its ageing bucket didn't match what PartyClicked.dart showed.
-        'showAll': 'true',
-      });
-
-      final response = await http.post(url, body: body, headers: headers);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-        if (values_list != null) {
-          isVisibleNoDataFound = false;
-
-          item_list.addAll(
-            values_list.map((json) => Data.fromJson(json)).toList(),
-          );
-          filteredItems = item_list;
-        } else {
-          throw Exception('Failed to fetch data');
-        }
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
     await _loadAgeingThresholds();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
 
     String? currencyCode = '';
@@ -1203,12 +1055,6 @@ class _PartyTotalClickedRecPayClickedPageState
       selectedSortOption = 'Default';
     }
 
-    HttpURL_CreditLimit =
-        '$hostname/api/ledger/getLedger/$company_lowercase/$serial_no';
-
-    HttpURL =
-        '$hostname/api/ledger/getOutstandingList/$company_lowercase/$serial_no';
-
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 
     String? email_nav = prefs.getString('email_nav');
@@ -1238,14 +1084,8 @@ class _PartyTotalClickedRecPayClickedPageState
 
     overdue_value = variable + variabletype;
 
-    fetchCreditlimit(ledger);
+    fetchCreditlimit();
 
-    String variable_type_2 = variabletype;
-    if (variable_type_2 == "All") {
-      variable_type_2 = "";
-    } else {
-      variable_type_2 = variabletype;
-    }
     String isDebit = "";
     if (type == "Payable") {
       isDebit = "";
@@ -1290,14 +1130,7 @@ class _PartyTotalClickedRecPayClickedPageState
         duedate: '2025-10-02',
       ),
     ];*/
-    fetchData(
-      "billno",
-      ledger,
-      "billno",
-      endDateString,
-      variable_type_2,
-      isDebit,
-    );
+    fetchData(isDebit);
   }
 
   @override

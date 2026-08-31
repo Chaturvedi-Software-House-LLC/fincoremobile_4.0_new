@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'widgets/scroll_fab.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -77,8 +75,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
       endDateString = "",
       type = "",
       ledger = "",
-      total = "",
-      token = '';
+      total = "";
   final int? ledgerMasterId;
 
   int counter = 0;
@@ -124,13 +121,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
   late String startdate_text = "", enddate_text = "";
   String? datetype;
 
-  String HttpURL = "";
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
+  String? company = "";
   List<dynamic> myData = [];
   bool _isLoading = false;
 
@@ -561,6 +552,14 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     final String enddate,
     final String vchtype,
   ) async {
+    if (ledgerMasterId == null) {
+      setState(() {
+        _isLoading = false;
+        isVisibleNoDataFound = true;
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _isListVisible = true;
@@ -571,11 +570,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     filteredItems.clear();
 
     try {
-      if (ledgerMasterId != null) {
-        await _fetchDataTallyApi(startdate, enddate, vchtype);
-      } else {
-        await _fetchDataLegacy(ledger, startdate, enddate, vchtype);
-      }
+      await _fetchDataTallyApi(startdate, enddate, vchtype);
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -615,47 +610,6 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
       }
       _isLoading = false;
     });
-  }
-
-  Future<void> _fetchDataLegacy(
-    final String ledger,
-    final String startdate,
-    final String enddate,
-    final String vchtype,
-  ) async {
-    final url = Uri.parse(HttpURL!);
-
-    Map<String, String> headers = {
-      'Authorization': 'Bearer $token',
-      "Content-Type": "application/json",
-    };
-
-    var body = jsonEncode({
-      'startdate': startdate,
-      'enddate': enddate,
-      'ledger': ledger,
-      'vchtypes': vchtype,
-    });
-
-    final response = await http.post(url, body: body, headers: headers);
-
-    if (response.statusCode == 200) {
-      print(response.body);
-      final List<dynamic> values_list = jsonDecode(utf8.decode(response.bodyBytes));
-      if (values_list != null) {
-        isVisibleNoDataFound = false;
-
-        item_list.addAll(
-          values_list.map((json) => Data.fromJson(json)).toList(),
-        );
-        filteredItems = item_list;
-      } else {
-        throw Exception('Failed to fetch data');
-      }
-      setState(() {
-        _isLoading = false;
-      });
-    }
   }
 
   /// tally-api path: filters [VoucherRepository]-backed vouchers to this
@@ -708,12 +662,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     prefs = await SharedPreferences.getInstance();
 
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
     });
 
     try {
@@ -727,8 +676,6 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     } catch (e) {
       selectedSortOption = 'Default';
     }
-
-    HttpURL = '$hostname/api/ledger/getTotal/$company_lowercase/$serial_no';
 
     SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
 

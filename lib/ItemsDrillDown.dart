@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -139,8 +137,7 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
   late SharedPreferences prefs;
 
   // Prefs / auth
-  String? hostname, company, serial_no, company_lowercase, username;
-  String HttpURL = '', token = '';
+  String? company, username;
   String email = '', name = '';
   String? SecuritybtnAcessHolder;
   bool isDashEnable = true,
@@ -185,23 +182,6 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
     return all;
   }
 
-  /// Builds the POST body, injecting locked-dimension filters.
-  Map<String, dynamic> _buildBody(String groupby, String orderby) {
-    final body = <String, dynamic>{
-      'startdate': widget.startdate_string,
-      'enddate': widget.enddate_string,
-      'item': widget.item_name,
-      'vchtype': widget.type,
-      'groupby': groupby,
-      'orderby': orderby,
-    };
-    if (widget.lockedLedger != null) body['party'] = widget.lockedLedger;
-    if (widget.lockedCostcenter != null)
-      body['costcentre'] = widget.lockedCostcenter;
-    if (widget.lockedVchname != null) body['vchname'] = widget.lockedVchname;
-    return body;
-  }
-
   String _formatCostCenter(String v) => v == 'null' ? '*Not Applicable' : v;
 
   String _convertDate(String dateStr) =>
@@ -225,19 +205,11 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
   }
 
   Future<void> _fetchGroup(String group) async {
-    String groupby, orderby;
     switch (group) {
       case 'Ledger':
-        groupby = orderby = 'Partyledger';
-        break;
       case 'Bills':
-        groupby = orderby = 'vchno';
-        break;
       case 'Voucher Type':
-        groupby = orderby = 'vchname';
-        break;
       case 'Cost Center':
-        groupby = orderby = 'costcentre';
         break;
       default:
         return;
@@ -263,9 +235,13 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
     _clearLists();
 
     try {
+      // No legacy fallback: tally-oauth-only sessions always carry a
+      // stockItemMasterId, so a null one here means a legacy-paired session
+      // with no tally-api master id - same "not available" empty-state
+      // convention used elsewhere in this migration (see ItemsClicked.dart).
       final List<dynamic> raw = widget.stockItemMasterId != null
           ? await _fetchGroupTallyApi(group)
-          : await _fetchGroupLegacy(groupby, orderby);
+          : const [];
       if (raw.isNotEmpty) {
         isVisibleNoDataFound = false;
         switch (group) {
@@ -304,23 +280,6 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
       isSortVisible = !empty;
       _applySortOption(selectedSortOption);
     });
-  }
-
-  Future<List<dynamic>> _fetchGroupLegacy(
-    String groupby,
-    String orderby,
-  ) async {
-    final response = await http.post(
-      Uri.parse(HttpURL),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(_buildBody(groupby, orderby)),
-    );
-
-    if (response.statusCode != 200) return const [];
-    return jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>;
   }
 
   /// This item's contribution to [voucher] - summed for "Bills"/"Voucher
@@ -868,16 +827,10 @@ class _ItemsDrillDownState extends State<ItemsDrillDown>
   Future<void> _initSharedPreferences() async {
     prefs = await SharedPreferences.getInstance();
     setState(() {
-      hostname = prefs.getString('hostname');
       company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
       username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';  // absent for tally-oauth-only sessions (Phase 6) - was a crashing force-unwrap
       SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
       isRolesVisible = isUserVisible = SecuritybtnAcessHolder == 'True';
-      HttpURL =
-          '$hostname/api/item/getTotalAmount/$company_lowercase/$serial_no';
     });
 
     try {
