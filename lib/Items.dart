@@ -293,6 +293,16 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   int _itemsTotalPages = 1;
   bool _isLoadingMoreItems = false;
 
+  // Bumped every time `fetchall_items` (re)starts (e.g. switching parent
+  // group while a previous group's page-walk is still in flight) - every
+  // page-load result below is stamped with the generation active when it
+  // *started* and discarded on arrival if a newer one has since begun,
+  // same rationale/pattern as Transactions.dart's `_txRequestGen` (see that
+  // field's doc comment) - otherwise an older, slower group's pages could
+  // still land in `all_items_list` after a newer group selection already
+  // cleared and repopulated it.
+  int _itemsRequestGen = 0;
+
   late NumberFormat currencyFormat;
 
   bool isVisibleFilterby = false;
@@ -1337,8 +1347,11 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   /// Starts (or restarts, e.g. on parent-group change) incremental paging
-  /// of the "All Items" tab and loads its first page.
+  /// of the "All Items" tab and loads its first page. Bumps
+  /// [_itemsRequestGen] so a still-in-flight older group's page load can
+  /// never land after this one - see that field's doc comment.
   Future<void> fetchall_items(final String parent) async {
+    _itemsRequestGen++;
     setState(() {
       item_count = "0";
       _isLoading = true;
@@ -1373,6 +1386,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     if (_isLoadingMoreItems) return;
     if (parent == null && _itemsPage > _itemsTotalPages) return;
 
+    final myGen = _itemsRequestGen;
     setState(() => _isLoadingMoreItems = true);
 
     try {
@@ -1386,6 +1400,12 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
         limit: _itemsPageLimit,
         stockGroupMasterId: groupMasterId,
       );
+      if (myGen != _itemsRequestGen) {
+        // Superseded while awaiting - a newer group selection already
+        // cleared/restarted the list; don't apply this stale page.
+        setState(() => _isLoadingMoreItems = false);
+        return;
+      }
       all_items_list.addAll(result.items.map(items.fromJson));
       _itemsTotalPages = result.totalPages;
       _itemsPage++;
@@ -4011,9 +4031,17 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   /// Narrower than before on the "All Items" tab: tally-api's
   /// `/stock-items` list has no server-side name-search query param, so
   /// this only searches pages already loaded by infinite scroll
-  /// (`all_items_list`), not the whole company's items - matching more as
-  /// the user scrolls further. Fast/Slow Moving and Inactive Items are
-  /// unaffected - those still load their full result set up front.
+  /// (`all_items_list`), not the whole company's items. Fast/Slow Moving
+  /// and Inactive Items are unaffected - those still load their full
+  /// result set up front.
+  ///
+  /// A plain "search what's loaded" filter alone would wrongly report "no
+  /// match" for an item that exists but sits on a page not yet scrolled
+  /// into view - [_autoLoadPagesForItemSearch] below keeps loading pages in
+  /// the background while a query has zero matches so far, same pattern as
+  /// Transactions.dart's equivalent (see that class's doc comment for the
+  /// live-text-reread rationale: closing over a frozen query would starve
+  /// itself on fast typing).
   void _onSearchChanged(String value) {
     final query = value.toLowerCase();
     setState(() {
@@ -4031,6 +4059,45 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             .toList();
       }
     });
+
+    if (_isAllList &&
+        query.isNotEmpty &&
+        filteredItems_all_items.isEmpty &&
+        _itemsPage <= _itemsTotalPages) {
+      _autoLoadPagesForItemSearch();
+    }
+  }
+
+  bool _isAutoSearchLoadingItems = false;
+
+  Future<void> _autoLoadPagesForItemSearch() async {
+    if (_isAutoSearchLoadingItems) return;
+    _isAutoSearchLoadingItems = true;
+    try {
+      while (true) {
+        final query = searchController.text.toLowerCase();
+        if (query.isEmpty || _itemsPage > _itemsTotalPages) break;
+        final hasMatch = all_items_list.any(
+          (e) => e.itemname.toLowerCase().contains(query),
+        );
+        if (hasMatch) break;
+
+        await _loadNextItemsPage();
+
+        final stillQuery = searchController.text.toLowerCase();
+        if (stillQuery.isEmpty) break;
+        setState(() {
+          filteredItems_all_items = all_items_list
+              .where((e) => e.itemname.toLowerCase().contains(stillQuery))
+              .toList();
+          item_count = filteredItems_all_items.length.toString();
+          isVisibleNoDataFound =
+              filteredItems_all_items.isEmpty && _itemsPage > _itemsTotalPages;
+        });
+      }
+    } finally {
+      _isAutoSearchLoadingItems = false;
+    }
   }
 
   Widget buildNeumorphicTab({

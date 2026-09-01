@@ -196,6 +196,60 @@ class _TransactionsPageState extends State<Transactions>
   // one-tap filter is more useful day-to-day than another chart.
   String _quickFilter = 'All';
 
+  // Client-side-only search-across-unloaded-pages guard: tally-api's
+  // `/vouchers` has no search-by-number filter (only page/limit/since/
+  // voucherTypeMasterId/from/to - see VoucherRepository's doc comment), and
+  // this screen only loads pages incrementally as the user scrolls (see
+  // this class's paging-state doc comment) - so a plain client-side search
+  // over `transactions_list` would wrongly report "no results" for a
+  // voucher that exists but sits on a page not yet loaded. [_applyTransactionFilters]
+  // instead keeps loading pages in the background (bounded by the current
+  // date/voucher-type filter's own page count, not the whole company) while
+  // a search query has zero matches so far, stopping as soon as a match
+  // appears or every page in range has been checked.
+  // Single-flight guard for the loop below - but the loop itself always
+  // re-reads `searchController.text` live on every iteration rather than
+  // closing over the query that started it, so it self-adjusts to
+  // whatever's currently typed instead of exiting stale on the next
+  // keystroke. A version keyed to a frozen query string would starve
+  // itself on fast typing: each new character re-triggers
+  // [_applyTransactionFilters], the guard drops that new call while the
+  // previous (now-stale) query's loop is still mid-page-fetch, and that
+  // loop exits as soon as it notices the text changed - net result, the
+  // final query the user actually typed never gets its own loop started.
+  bool _isAutoSearchLoading = false;
+
+  Future<void> _autoLoadPagesForSearch() async {
+    if (_isAutoSearchLoading) return;
+    _isAutoSearchLoading = true;
+    try {
+      while (true) {
+        final query = searchController.text.trim().toLowerCase();
+        if (query.isEmpty || _txCursor == null) break;
+        final hasMatch = transactions_list.any(
+          (t) => t.vchno.toLowerCase().contains(query),
+        );
+        if (hasMatch) break;
+
+        await _loadNextTransactionsPage(silent: true);
+
+        final stillQuery = searchController.text.trim().toLowerCase();
+        if (stillQuery.isEmpty) break;
+        final matches = transactions_list.where(
+          (t) => t.vchno.toLowerCase().contains(stillQuery),
+        );
+        setState(() {
+          filteredItems_transactions = matches.toList();
+          transactions_count = filteredItems_transactions.length.toString();
+          isVisibleNoDataFound =
+              filteredItems_transactions.isEmpty && _txCursor == null;
+        });
+      }
+    } finally {
+      _isAutoSearchLoading = false;
+    }
+  }
+
   void _applyTransactionFilters() {
     Iterable<transactions> items = transactions_list;
 
@@ -214,6 +268,12 @@ class _TransactionsPageState extends State<Transactions>
       filteredItems_transactions = items.toList();
       transactions_count = filteredItems_transactions.length.toString();
     });
+
+    if (query.isNotEmpty &&
+        filteredItems_transactions.isEmpty &&
+        _txCursor != null) {
+      _autoLoadPagesForSearch();
+    }
   }
 
   Widget _buildQuickFilterChips() {
@@ -286,21 +346,30 @@ class _TransactionsPageState extends State<Transactions>
   List<transactions> transactions_list = [];
 
   // --- Incremental (infinite-scroll) paging state for the tally-api list.
-  // tally-api's `/vouchers` list has NO server-side date-range filter at
-  // all (see VoucherRepository's doc comment) - only pagination plus an
-  // optional voucherTypeMasterId equality filter. Since a voucher's own
-  // masterId roughly tracks creation order in Tally, a recent date range's
-  // matches (the common case: "Today"/"This Month"/etc) usually sit on the
-  // LAST pages, not the first - so this walks pages backward from the end
-  // instead of forward from page 2, and auto-chains through empty pages on
-  // the very first load only (bounded by _txTotalPages) so a merely-empty
-  // early page doesn't flash a false "no data found".
+  // tally-api's `/vouchers` list now takes `from`/`to` server-side (added
+  // after this screen was first migrated, when the endpoint had no date
+  // filter at all and this had to walk every page client-side instead -
+  // see VoucherRepository's doc comment), so paging is now a plain forward
+  // walk over the already-date-filtered result set.
   static const int _txPageLimit = 30;
   int _txTotalPages = 1;
-  int? _txCursor; // next page to fetch walking backward; null = exhausted
+  int? _txCursor; // next page to fetch; null = exhausted
   bool _isLoadingMoreTx = false;
   DateTime? _txFrom, _txTo;
   int? _txVoucherTypeMasterId;
+
+  // Bumped every time a new date-range/voucher-type fetch starts (including
+  // the initial one from `initState`, which can still be mid-flight when
+  // the user changes the filter again before it finishes). Every async
+  // result below (the initial page and every incremental page load) is
+  // stamped with the generation active when it *started* and discarded on
+  // arrival if a newer fetch has since begun - without this, an older,
+  // slower-to-complete fetch's pages kept landing in `transactions_list`
+  // after a newer filter selection's own results, corrupting the display
+  // with the wrong date range's rows. Invisible with a small dataset (every
+  // fetch resolved near-instantly); a real, reproducible bug once a fetch
+  // takes multiple page round-trips.
+  int _txRequestGen = 0;
 
   // The Overview/trend chart aggregates the COMPLETE date-filtered voucher
   // set (a monthly total that's missing most of the range would be
@@ -1435,15 +1504,24 @@ class _TransactionsPageState extends State<Transactions>
 
     transactions_list.clear();
 
+    int myGen = _txRequestGen;
     try {
-      await _fetchAllTransactionsTallyApi(startdate, enddate, vchname);
+      myGen = await _fetchAllTransactionsTallyApi(startdate, enddate, vchname);
     } catch (e) {
-      setState(() {
-        _isAllList = false;
-        _isLoading = false;
-      });
+      if (myGen == _txRequestGen) {
+        setState(() {
+          _isAllList = false;
+          _isLoading = false;
+        });
+      }
       print(e);
     }
+
+    // A newer date-range/voucher-type selection superseded this call while
+    // it was in flight - let that newer call's own tail update the UI
+    // instead of this stale one clobbering it (see _txRequestGen's doc
+    // comment).
+    if (myGen != _txRequestGen) return;
 
     setState(() {
       if (transactions_list.isEmpty) {
@@ -1536,12 +1614,10 @@ class _TransactionsPageState extends State<Transactions>
     return rows;
   }
 
-  /// [_mapVouchersToTransactions], first narrowed to vouchers whose own
-  /// `date` falls within [from]..[to] (inclusive) - tally-api's `/vouchers`
-  /// list has no server-side date-range filter (see VoucherRepository's
-  /// doc comment), so every incrementally-loaded raw page has to be
-  /// date-filtered client-side like this, same as [VoucherRepository.
-  /// listInRange] already does for a full fetch.
+  /// [_mapVouchersToTransactions] - the raw page is already server-side
+  /// filtered to [from]..[to] via `VoucherRepository.listPage`'s `from`/`to`
+  /// params, so [from]/[to] here only guard against a voucher whose `date`
+  /// fails to parse at all (defensive, not a real filter pass any more).
   List<transactions> _filterMapVoucherPage(
     List<Map<String, dynamic>> rawVouchers,
     DateTime from,
@@ -1557,14 +1633,26 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   /// tally-api path: starts (or restarts, e.g. on date-range/voucher-type
-  /// change) incremental backward paging over `/vouchers` and loads enough
-  /// of it to show a first result (see this class's paging-state doc
-  /// comment for why "backward" and why it auto-chains here specifically).
-  Future<void> _fetchAllTransactionsTallyApi(
+  /// change) forward incremental paging over `/vouchers`, now that it
+  /// accepts `from`/`to` server-side - the result set page 1 returns is
+  /// already exactly this date range, so no auto-chaining/backward-walking
+  /// is needed any more (see this class's paging-state doc comment).
+  ///
+  /// Bumps [_txRequestGen] and stamps every mutation below with the
+  /// generation active when this call started, so a still-in-flight older
+  /// fetch (e.g. the initial load kicked off from `initState` with a
+  /// leftover date range, superseded moments later by the user picking a
+  /// different one) can never land its pages after this newer fetch has
+  /// already started/finished - see that field's doc comment.
+  /// Returns the request generation this call was assigned, so the caller
+  /// ([fetchall_transactions]) can tell whether it's still the active one
+  /// before running its own tail.
+  Future<int> _fetchAllTransactionsTallyApi(
     final String startdate,
     final String enddate,
     final String vchname,
   ) async {
+    final myGen = ++_txRequestGen;
     final from = parseCompactDate(startdate);
     final to = parseCompactDate(enddate);
     final voucherTypeMasterId = (vchname.isEmpty || vchname == 'All Transactions')
@@ -1580,18 +1668,14 @@ class _TransactionsPageState extends State<Transactions>
       page: 1,
       limit: _txPageLimit,
       voucherTypeMasterId: voucherTypeMasterId,
+      from: from,
+      to: to,
     );
+    if (myGen != _txRequestGen) return myGen; // superseded while awaiting
+
     _txTotalPages = first.totalPages;
     transactions_list.addAll(_filterMapVoucherPage(first.items, from, to));
-    _txCursor = _txTotalPages;
-
-    // Auto-chain backward (skipping page 1 - already covered above) only
-    // while nothing has matched yet, so a merely-empty early page doesn't
-    // flash a false "no data found" - bounded by _txTotalPages, so a
-    // genuinely empty range still terminates.
-    while (transactions_list.isEmpty && (_txCursor ?? 1) > 1) {
-      await _loadNextTransactionsPage(silent: true);
-    }
+    _txCursor = _txTotalPages > 1 ? 2 : null;
 
     isVisibleNoDataFound = false;
     filterPostDatedTransactions();
@@ -1602,18 +1686,22 @@ class _TransactionsPageState extends State<Transactions>
       _isAllList = true;
       _isLoading = false;
     });
+    return myGen;
   }
 
-  /// Loads one more page (30 rows) walking backward from [_txTotalPages],
-  /// date-filtering and appending matches to `transactions_list`. Called
-  /// silently (no spinner/setState) by the auto-chain in
-  /// [_fetchAllTransactionsTallyApi]'s initial load, and normally by the
-  /// scroll-near-bottom listener for every page after that.
+  /// Loads one more page (30 rows) walking forward from page 2 onward
+  /// within the already date/voucher-type-filtered server-side result set,
+  /// appending matches to `transactions_list`. Called by the
+  /// scroll-near-bottom listener. Captures [_txRequestGen] at call time and
+  /// discards the result if a newer fetch has since started (see that
+  /// field's doc comment) - otherwise a slow page load for a since-
+  /// abandoned date range could still land after the user switched filters.
   Future<void> _loadNextTransactionsPage({bool silent = false}) async {
     if (_isLoadingMoreTx) return;
+    final myGen = _txRequestGen;
     final page = _txCursor;
-    if (page == null || page <= 1) {
-      _txCursor = null; // page 1 already covered by the initial fetch
+    if (page == null || page > _txTotalPages) {
+      _txCursor = null; // exhausted
       return;
     }
 
@@ -1623,11 +1711,21 @@ class _TransactionsPageState extends State<Transactions>
         page: page,
         limit: _txPageLimit,
         voucherTypeMasterId: _txVoucherTypeMasterId,
+        from: _txFrom,
+        to: _txTo,
       );
+      if (myGen != _txRequestGen) {
+        // Superseded while awaiting - don't apply this page, but still
+        // clear the loading flag the newer fetch didn't set (it started
+        // its own, unrelated to this one).
+        if (!silent) setState(() => _isLoadingMoreTx = false);
+        return;
+      }
+
       transactions_list.addAll(
         _filterMapVoucherPage(result.items, _txFrom!, _txTo!),
       );
-      _txCursor = page - 1;
+      _txCursor = page + 1 <= _txTotalPages ? page + 1 : null;
 
       if (!silent) {
         filterPostDatedTransactions();
@@ -1635,19 +1733,20 @@ class _TransactionsPageState extends State<Transactions>
         setState(() {
           _isLoadingMoreTx = false;
           transactions_count = filteredItems_transactions.length.toString();
-          isVisibleNoDataFound =
-              transactions_list.isEmpty && (_txCursor ?? 1) <= 1;
+          isVisibleNoDataFound = transactions_list.isEmpty && _txCursor == null;
         });
       }
     } catch (e) {
-      if (!silent) setState(() => _isLoadingMoreTx = false);
+      if (!silent && myGen == _txRequestGen) {
+        setState(() => _isLoadingMoreTx = false);
+      }
     }
   }
 
   void _onTransactionsScroll() {
     if (_isTrendTabSelected) return;
     if (_isLoadingMoreTx) return;
-    if (_txCursor == null || _txCursor! <= 1) return;
+    if (_txCursor == null) return;
     if (!_scrollFabController.hasClients) return;
     final position = _scrollFabController.position;
     if (position.pixels >= position.maxScrollExtent - 400) {

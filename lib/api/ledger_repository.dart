@@ -108,7 +108,10 @@ class LedgerRepository {
     return LedgerPage(
       items: (result.data as List).cast<Map<String, dynamic>>(),
       page: page,
-      totalPages: (result.meta?['totalPages'] as int?) ?? 1,
+      // tally-api's pagination meta names this field `lastPage`, not
+      // `totalPages` (see pagination_helper.dart's fetchAllPages doc
+      // comment for the same bug/fix).
+      totalPages: (result.meta?['lastPage'] as int?) ?? 1,
     );
   }
 

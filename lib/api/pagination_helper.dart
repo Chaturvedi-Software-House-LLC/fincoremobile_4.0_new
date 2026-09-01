@@ -19,7 +19,13 @@ Future<List<Map<String, dynamic>>> fetchAllPages(
   do {
     final result = await fetchPage(page);
     items.addAll((result.data as List).cast<Map<String, dynamic>>());
-    totalPages = (result.meta?['totalPages'] as int?) ?? 1;
+    // tally-api's pagination meta names this field `lastPage`, never
+    // `totalPages` (see PaginatedResult on the backend) - reading the wrong
+    // key here silently defaulted every "fetch all pages" call to just
+    // page 1, capping every list at `limit` (100) items regardless of how
+    // many actually exist. Invisible with a small test dataset (page 1 was
+    // everything); a real bug against any list with more than 100 rows.
+    totalPages = (result.meta?['lastPage'] as int?) ?? 1;
     page++;
   } while (page <= totalPages);
 

@@ -295,6 +295,24 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
           (company['license'] as Map<String, dynamic>?)?['validUntil']
               as String?;
 
+      // The real Tally serial number (`$$LicenseInfo:SerialNumber`) this
+      // license was bound to by a tally-connector, once it's synced one -
+      // this is the SAME `serial_no` value every existing
+      // `vanSalesSerialNo.contains(serial_no)` check across the app
+      // (Van Allocation, Delivery Note visibility, price-level lookup,
+      // Receipt's outstanding-bills card) already keys off, so once
+      // tally-admin-api exposes it here (see docs/requests/2026-09-01-
+      // expose-tally-serial-on-company-response.md in that repo - not
+      // shipped yet at the time this was written), a Spectra company that
+      // only ever existed on the new backend is recognized correctly with
+      // no further changes needed anywhere else. Falls back to '' (today's
+      // hardcoded value) when the field is absent/null, so this is a no-op
+      // until that backend field ships.
+      final tallySerialNumber =
+          (company['license'] as Map<String, dynamic>?)?['tallySerialNumber']
+              as String? ??
+          '';
+
       // The only auth tally-api gets for this session - awaited and
       // error-handled, not best-effort, unlike SerialSelect's
       // fire-and-forget equivalent.
@@ -313,7 +331,7 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
       if (licenseExpiry != null) {
         await prefs.setString('license_expiry', licenseExpiry);
       }
-      await prefs.setString('serial_no', '');
+      await prefs.setString('serial_no', tallySerialNumber);
       await prefs.setString('base_currency', '');
       await prefs.setString('company_trn', '');
       await prefs.setString('company_address', '');

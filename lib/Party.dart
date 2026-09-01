@@ -138,6 +138,16 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   bool _pagingHasMore = false;
   bool _isLoadingMoreParties = false;
 
+  // Bumped every time `_startPartyPaging` (re)starts (e.g. switching the
+  // group-filter dropdown while a previous filter's page-walk is still in
+  // flight) - every page-load result below is stamped with the generation
+  // active when it *started* and discarded on arrival if a newer one has
+  // since begun, same pattern as Transactions.dart's `_txRequestGen` (see
+  // that field's doc comment) - otherwise a stale filter's pages could
+  // still land in `parties_list` after a newer selection already cleared
+  // and repopulated it.
+  int _partyRequestGen = 0;
+
   String formatEmail(String email) {
     if (email == 'null') {
       email = '-';
@@ -443,6 +453,15 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
   /// searches the pages already fetched by infinite scroll, not the whole
   /// company's parties - matching more of them as the user scrolls further
   /// (or searches after scrolling down) rather than all at once.
+  ///
+  /// [_autoLoadPartyPagesForSearch] below keeps loading pages in the
+  /// background while a query has zero matches so far and more pages
+  /// remain (`_pagingHasMore`), so a party that exists but sits on a page
+  /// not yet loaded isn't wrongly reported as "no match" - same pattern as
+  /// Transactions.dart's equivalent (see that class's doc comment for the
+  /// live-text-reread rationale). Naturally a no-op on the Inactive Parties
+  /// tab, which never sets `_pagingHasMore` true (its full result set is
+  /// already loaded up front).
   void _applyPartySearchFilter() {
     final value = searchController.text.toLowerCase();
     filteredItems_parties = value.isEmpty
@@ -452,11 +471,52 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
               .toList();
     party_count = filteredItems_parties.length.toString();
     party_text = filteredItems_parties.length == 1 ? "Party" : "Parties";
+
+    if (value.isNotEmpty &&
+        filteredItems_parties.isEmpty &&
+        _pagingHasMore) {
+      _autoLoadPartyPagesForSearch();
+    }
+  }
+
+  bool _isAutoSearchLoadingParties = false;
+
+  Future<void> _autoLoadPartyPagesForSearch() async {
+    if (_isAutoSearchLoadingParties) return;
+    _isAutoSearchLoadingParties = true;
+    try {
+      while (true) {
+        final query = searchController.text.toLowerCase();
+        if (query.isEmpty || !_pagingHasMore) break;
+        final hasMatch = parties_list.any(
+          (item) => item.partyname.toLowerCase().contains(query),
+        );
+        if (hasMatch) break;
+
+        await _loadNextPartyPage();
+
+        final stillQuery = searchController.text.toLowerCase();
+        if (stillQuery.isEmpty) break;
+        setState(() {
+          filteredItems_parties = parties_list
+              .where((item) => item.partyname.toLowerCase().contains(stillQuery))
+              .toList();
+          party_count = filteredItems_parties.length.toString();
+          party_text = filteredItems_parties.length == 1 ? "Party" : "Parties";
+          isVisibleNoDataFound = filteredItems_parties.isEmpty && !_pagingHasMore;
+        });
+      }
+    } finally {
+      _isAutoSearchLoadingParties = false;
+    }
   }
 
   /// Resets and starts (or restarts) the "All Parties" tab's incremental
-  /// paging queue over [groupIds], then loads the first page.
+  /// paging queue over [groupIds], then loads the first page. Bumps
+  /// [_partyRequestGen] so a still-in-flight older filter's page load can
+  /// never land after this one - see that field's doc comment.
   Future<void> _startPartyPaging(List<int> groupIds) async {
+    _partyRequestGen++;
     setState(() {
       party_count = "0";
       party_text = "Party";
@@ -498,6 +558,7 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
       return;
     }
 
+    final myGen = _partyRequestGen;
     setState(() => _isLoadingMoreParties = true);
 
     try {
@@ -508,6 +569,12 @@ class _PartyPageState extends State<Party> with TickerProviderStateMixin {
           limit: _partyPageLimit,
           groupMasterId: groupId,
         );
+        if (myGen != _partyRequestGen) {
+          // Superseded while awaiting - a newer filter selection already
+          // cleared/restarted the list; don't apply this stale page.
+          setState(() => _isLoadingMoreParties = false);
+          return;
+        }
         parties_list.addAll(result.items.map(party.fromJson));
 
         if (result.hasMore) {
