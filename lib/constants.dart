@@ -96,6 +96,18 @@ bool isUniGasSerial(String? serialNo) {
   return currentSerial == uniGasSerialNumber;
 }
 
+/// UniGas vehicle/godown values are stored as "#PKS09 - 77753" or
+/// "#PKS09-77753" (vehicle code + plate number, with or without spaces
+/// around the hyphen). Print formats only show the vehicle code, i.e. the
+/// part before the first '-'.
+String uniGasVehicleCodeOnly(String? vehicleValue) {
+  final trimmed = vehicleValue?.trim() ?? '';
+  if (trimmed.isEmpty) return trimmed;
+  final separatorIndex = trimmed.indexOf('-');
+  if (separatorIndex == -1) return trimmed;
+  return trimmed.substring(0, separatorIndex).trim();
+}
+
 void closeKeyboard(BuildContext context) {
   FocusScope.of(context).unfocus();
 }

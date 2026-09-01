@@ -3447,9 +3447,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                 ),
               ),
               pw.SizedBox(height: 10),
-              spaceBetweenLine('Delivered by:', cleanOrNotAvailable(name)),
-              pw.SizedBox(height: 2),
-              spaceBetweenLine('Vehicle:', cleanOrNotAvailable(vehicleName)),
+              spaceBetweenLine(
+                'Vehicle:',
+                cleanOrNotAvailable(uniGasVehicleCodeOnly(vehicleName)),
+              ),
               pw.SizedBox(height: 10),
               pw.Container(
                 width: double.infinity,

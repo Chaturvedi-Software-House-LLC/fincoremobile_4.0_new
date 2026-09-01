@@ -90,6 +90,33 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   final TextEditingController receiverMobileController = TextEditingController();
   Uint8List? receiverSignatureBytes;
 
+  // UniGas only - Driver Name is entered by the user on this screen
+  // (mandatory before saving) instead of being taken from the logged-in
+  // user's name.
+  final TextEditingController driverNameController = TextEditingController();
+
+  // Standard validation for a person's name field: required, letters
+  // (incl. accented) with spaces/hyphens/apostrophes/periods only, and a
+  // sane length range.
+  static final RegExp _namePattern = RegExp(r"^[a-zA-ZÀ-ɏ' .-]+$");
+
+  String? _validateNameField(String? value, String fieldLabel) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return '$fieldLabel is required';
+    }
+    if (trimmed.length < 2) {
+      return '$fieldLabel must be at least 2 characters';
+    }
+    if (trimmed.length > 50) {
+      return '$fieldLabel must not exceed 50 characters';
+    }
+    if (!_namePattern.hasMatch(trimmed)) {
+      return '$fieldLabel can only contain letters, spaces, hyphens and apostrophes';
+    }
+    return null;
+  }
+
   TextEditingController _bankcashnameController = TextEditingController();
 
   final TextEditingController _vchnoController = TextEditingController();
@@ -2446,6 +2473,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       receiverNameController.clear();
       receiverMobileController.clear();
       receiverSignatureBytes = null;
+      driverNameController.clear();
 
       isChequeVisible = false;
 
@@ -2821,10 +2849,13 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                     pw.SizedBox(height: 4),
                     spaceBetweenLine(
                       'Vehicle No. :',
-                      cleanOrNotAvailable(vehicleName),
+                      cleanOrNotAvailable(uniGasVehicleCodeOnly(vehicleName)),
                     ),
                     pw.SizedBox(height: 4),
-                    spaceBetweenLine('Driver Name:', cleanOrNotAvailable(name)),
+                    spaceBetweenLine(
+                      'Driver Name:',
+                      cleanOrNotAvailable(driverNameController.text.trim()),
+                    ),
                     if (controller_narration.text.trim().isNotEmpty) ...[
                       pw.SizedBox(height: 6),
                       pw.RichText(
@@ -3249,6 +3280,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     // UniGas only: Receiver Name is mandatory before saving.
     if (isUniGasSerial && receiverNameController.text.trim().isEmpty) {
       showAppMessage(context, "Please enter the Receiver's Name before saving");
+      return;
+    }
+
+    // UniGas only: Driver Name is mandatory before saving.
+    if (isUniGasSerial && driverNameController.text.trim().isEmpty) {
+      showAppMessage(context, "Please enter the Driver's Name before saving");
       return;
     }
 
@@ -7493,6 +7530,14 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                             title: "Receiver Information",
                             iconGradient: [Colors.teal, Colors.tealAccent],
                             children: [
+                              EntryFormField(
+                                label: "Driver Name *",
+                                icon: Icons.local_shipping_outlined,
+                                iconGradient: [Colors.teal, Colors.tealAccent],
+                                controller: driverNameController,
+                                validator: (value) =>
+                                    _validateNameField(value, 'Driver Name'),
+                              ),
                               EntryFormField(
                                 label: "Receiver Name *",
                                 icon: Icons.person_outline,

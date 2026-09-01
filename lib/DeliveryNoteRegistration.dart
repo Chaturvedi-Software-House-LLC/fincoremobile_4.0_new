@@ -2889,9 +2889,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                 ],
               ),
               pw.SizedBox(height: 10),
-              spaceBetweenLine('Delivered by:', cleanOrNotAvailable(name)),
-              pw.SizedBox(height: 2),
-              spaceBetweenLine('Vehicle:', cleanOrNotAvailable(vehicleName)),
+              spaceBetweenLine(
+                'Vehicle:',
+                cleanOrNotAvailable(uniGasVehicleCodeOnly(vehicleName)),
+              ),
               pw.SizedBox(height: 10),
               pw.Text(
                 'I confirm that quantity in this delivery is correct with good condition and quality',
@@ -3301,8 +3302,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
               ]),
               pw.SizedBox(height: 10),
               bulkBox([
-                kv('Vehicle No.:', cleanOrNotAvailable(vehicleName)),
-                kv('Driver / Operator:', cleanOrNotAvailable(name)),
+                kv(
+                  'Vehicle No.:',
+                  cleanOrNotAvailable(uniGasVehicleCodeOnly(vehicleName)),
+                ),
               ]),
               pw.SizedBox(height: 10),
               pw.Text(
