@@ -191,6 +191,12 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
 
   List<String> vchnos = [];
 
+  /// This entry's own voucher number as loaded by `loadData()` - excluded
+  /// from [vchnos] in `fetchvchnos()` so re-saving with the number
+  /// unchanged never flags itself as a duplicate (see that method's
+  /// doc-comment).
+  String? _originalVoucherNumber;
+
   late AnimationController _animationController;
   late Animation<double> _animation;
 
@@ -474,27 +480,18 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
   /// generated/validated voucher numbers from Tally's own voucher sequence
   /// for this vchtype/date-range).
   ///
-  /// **Voucher-numbering gap** (same as SalesRegistration.dart's
-  /// `fetchvchnos`): tally-api's `VoucherEntry` table is an app-originated
-  /// table with no auto-numbering of its own and no visibility into Tally's
-  /// real voucher sequence. [vchnos] is populated from the voucher numbers
-  /// of this screen's own previously-created `VoucherEntry` rows (same
-  /// vchtype, same date range) instead, purely to keep
-  /// [checkVchNoExistence]'s duplicate-number validation working when the
-  /// user edits the voucher number field (`isVchEditable`) - unlike
-  /// SalesRegistration's version, this screen never auto-fills
-  /// `_vchnoController` from this list (the existing entry's own number,
-  /// loaded by `loadData()`, is left as-is unless the user edits it).
-  /// This entry's own [id] is excluded from the pool so re-saving with its
-  /// unchanged voucher number never flags itself as a duplicate.
+  /// Now backed by tally-api's `GET .../voucher-entries/voucher-numbers`
+  /// (see `VoucherEntryRepository.voucherNumbers`'s doc-comment), which
+  /// unions this app's own draft `VoucherEntry` numbers with the real
+  /// Tally-synced `Voucher.number`s for this vchtype/date-range - purely to
+  /// keep [checkVchNoExistence]'s duplicate-number validation working when
+  /// the user edits the voucher number field (`isVchEditable`); this screen
+  /// never auto-fills `_vchnoController` from this list (the existing
+  /// entry's own number, loaded by `loadData()`, is left as-is unless the
+  /// user edits it). This entry's own [_originalVoucherNumber] is excluded
+  /// from the pool (one occurrence) so re-saving with its unchanged voucher
+  /// number never flags itself as a duplicate.
   Future<void> fetchvchnos(String vchname) async {
-    final DateTime rangeStart = yearStartDate;
-    final DateTime rangeEndExclusive = DateTime(
-      yearEndDate.year,
-      yearEndDate.month,
-      yearEndDate.day,
-    ).add(const Duration(days: 1));
-
     vchnos.clear();
     setState(() {
       _isLoading = true;
@@ -502,23 +499,28 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
 
     try {
       final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
-      final entries = await VoucherEntryRepository.instance.listAll();
+
+      if (voucherTypeMasterId != null) {
+        final String fromParam = DateFormat('yyyy-MM-dd').format(yearStartDate);
+        final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
+
+        final fetched = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
+
+        // Exclude one occurrence of this entry's own original number so
+        // re-saving with it unchanged never flags itself as a duplicate.
+        vchnos = List<String>.from(fetched);
+        final ownNumber = _originalVoucherNumber;
+        if (ownNumber != null) {
+          final ownIndex = vchnos.indexOf(ownNumber);
+          if (ownIndex != -1) vchnos.removeAt(ownIndex);
+        }
+      }
 
       setState(() {
-        vchnos = [
-          for (final entry in entries)
-            if (entry['id'] != id)
-              if (voucherTypeMasterId == null ||
-                  entry['voucherTypeMasterId'] == voucherTypeMasterId)
-                if (_entryDateWithinRange(
-                  entry['date']?.toString(),
-                  rangeStart,
-                  rangeEndExclusive,
-                ))
-                  if ((entry['voucherNumber'] as String?)?.isNotEmpty ?? false)
-                    entry['voucherNumber'] as String,
-        ];
-
         vchnos.sort((a, b) {
           RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
           int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
@@ -715,21 +717,6 @@ class _ModifySalesEntryPageState extends State<ModifySalesEntry>
       }
     }
     return null;
-  }
-
-  /// Whether [isoDate] (a `YYYY-MM-DD` voucher-entry date) falls in
-  /// `[start, endExclusive)`. Used by [fetchvchnos] to scope the "existing
-  /// voucher numbers" pool to the same date range the date-range picker
-  /// selects.
-  bool _entryDateWithinRange(
-    String? isoDate,
-    DateTime start,
-    DateTime endExclusive,
-  ) {
-    if (isoDate == null) return false;
-    final date = DateTime.tryParse(isoDate);
-    if (date == null) return false;
-    return !date.isBefore(start) && date.isBefore(endExclusive);
   }
 
   /// Reshapes one tally-api stock-items row into the legacy key names this
@@ -4054,6 +4041,7 @@ _itemController.text = _selecteditem;
         final String oldrefno = (data['reference'] as String?) ?? '';
 
         _vchnoController.text = oldvchno;
+        _originalVoucherNumber = oldvchno;
         controller_narration.text = oldnarration;
         controller_refno.text = oldrefno;
 

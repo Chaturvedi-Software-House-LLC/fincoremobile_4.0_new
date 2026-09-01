@@ -4499,17 +4499,25 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           if (!partyledgerdata.contains(ledgerName)) {
             partyledgerdata.add(ledgerName);
           }
-          // tally-api's Ledger master has no per-party "assigned price
-          // level" field (legacy's `price_level` on each partyLedgers row)
-          // - Tally's Price List is only linked to (stock item, price
-          // level NAME, date), never to a specific ledger. There is no
-          // clean equivalent, so every party ledger maps to `null` here;
-          // the van-sales auto-rate-by-price-level flow
-          // (fetchPriceLevelDetailsForSelectedItem) already treats a null
-          // price level as "fall back to manual rate entry", so this is a
-          // silent, graceful degradation rather than a crash - flagged
-          // here as a known gap versus legacy.
-          partyLedgerPriceLevelMap[ledgerName] = null;
+          // Legacy only ever populated per-party price levels for van-sales
+          // (UniGas/Spectra) serials - every other account's `getSalesData`
+          // response used the "OLD RESPONSE FORMAT" branch with no
+          // `price_level` field at all (see this migration's reference
+          // commit, lib/DeliveryNoteRegistration.dart pre-tally-api). tally-api's
+          // `/ledgers` list carries `priceLevel` on every row regardless of
+          // account, so this must still be gated by [isVanSalesSerial] here
+          // rather than always reading it, to keep non-Spectra accounts
+          // exactly as before (no auto price-level lookup). A blank string
+          // collapses to null, matching the van-sales auto-rate flow
+          // (fetchPriceLevelDetailsForSelectedItem)'s existing "no price
+          // level -> fall back to manual rate entry" branch.
+          if (isVanSalesSerial) {
+            final String? rawPriceLevel = ledger['priceLevel']?.toString();
+            partyLedgerPriceLevelMap[ledgerName] =
+                (rawPriceLevel == null || rawPriceLevel.trim().isEmpty)
+                ? null
+                : rawPriceLevel.trim();
+          }
         }
         partyledgerdata.sort(
           (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
@@ -4662,20 +4670,14 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     });
   }
 
-  /// tally-api migration: replaces legacy's `GET /api/entry/nos/:company/:serial`
-  /// (server-generated next voucher number, scoped to one voucher type +
-  /// date range) with a client-side suggestion. **Known gap**: tally-api's
-  /// `voucher-entries` table (see api/voucher_entry_repository.dart's
-  /// doc-comment) is app-originated and has no auto-numbering sequence of
-  /// its own - there is no server endpoint that hands back "the next
-  /// number". Instead, this fetches every voucher entry already created
-  /// through this same app for [vchname] in the selected date range via
-  /// `VoucherEntryRepository.listAll()`, collects their `voucherNumber`s,
-  /// and feeds them into the existing `generateNextVchNo()` pattern-
-  /// matching logic exactly as legacy's server-returned list did - the
-  /// suggestion is then still user-editable in the Voucher No. field
-  /// (gated by the existing `canEditVoucherNo` permission flag), never
-  /// silently auto-assigned.
+  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
+  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
+  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
+  /// `Voucher.number`s for this vchtype/date-range, replacing the earlier
+  /// client-side-only approach (`listAll()` + filter) that only ever saw
+  /// this app's own drafts. The suggestion is then still user-editable in
+  /// the Voucher No. field (gated by the existing `canEditVoucherNo`
+  /// permission flag), never silently auto-assigned.
   Future<void> fetchvchnos(String vchname) async {
     final DateTime rangeStart = parseCompactDate(startfrom);
     final DateTime rangeEnd = yearEndDate;
@@ -4686,26 +4688,23 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     });
 
     try {
-      final entries = await VoucherEntryRepository.instance.listAll();
+      final int? voucherTypeMasterId = _masterIdByName(
+        _voucherTypesRaw,
+        vchname,
+      );
 
-      final matching = entries.where((e) {
-        if (e['voucherTypeName']?.toString() != vchname) return false;
-        final date = DateTime.tryParse(e['date']?.toString() ?? '');
-        if (date == null) return false;
-        return !date.isBefore(
-              DateTime(rangeStart.year, rangeStart.month, rangeStart.day),
-            ) &&
-            !date.isAfter(
-              DateTime(rangeEnd.year, rangeEnd.month, rangeEnd.day, 23, 59, 59),
-            );
-      });
+      if (voucherTypeMasterId != null) {
+        final String fromParam = DateFormat('yyyy-MM-dd').format(rangeStart);
+        final String toParam = DateFormat('yyyy-MM-dd').format(rangeEnd);
+
+        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
+      }
 
       setState(() {
-        vchnos = matching
-            .map((e) => e['voucherNumber']?.toString() ?? '')
-            .where((v) => v.isNotEmpty)
-            .toList();
-
         // SORT first
         vchnos.sort((a, b) {
           RegExp regExp = RegExp(r'(\d+)(?!.*\d)');

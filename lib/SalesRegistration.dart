@@ -21,7 +21,6 @@ import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
 import 'widgets/signature_capture.dart';
 import 'api/api_exception.dart';
-import 'api/ledger_repository.dart';
 import 'api/voucher_entry_repository.dart';
 import 'api/voucher_entry_dropdowns_repository.dart';
 import 'api/price_level_repository.dart';
@@ -4641,21 +4640,18 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   ///
   /// `currencies` has no equivalent in this bundle (Sales/Receipt dropdown
   /// data is currency-agnostic) - fetched separately, same as before.
-  /// `creditPeriod` (UniGas per-party lookup) is likewise absent from this
-  /// bundle's `partyLedgers` - `LedgerRepository.listLedgers()` is still
-  /// fetched alongside it, but only when `isUniGasSerial`, purely to
-  /// resolve that one field.
   ///
-  /// **Known gap**: legacy's per-party `price_level` (UniGas's automatic
-  /// price-level-by-customer lookup) has no equivalent field on tally-api's
-  /// Ledger master at all - `partyLedgerPriceLevelMap` is therefore left
-  /// empty for every party post-migration, so
-  /// `fetchPriceLevelDetailsForSelectedItem`/`_resolvePriceLevelRateForItem`
-  /// always fall through to their existing "no price level" branch (rate
-  /// field stays manually editable) - not a silent data loss, but a real
-  /// UX regression for UniGas users versus legacy's automatic price-level
-  /// resolution. `credit_period` DOES have an equivalent (`Ledger.creditPeriod`)
-  /// and is still populated normally.
+  /// `sales-data`'s `partyLedgers` rows now always include `priceLevel`/
+  /// `creditPeriod` directly (added after this screen's initial migration -
+  /// see tally-api's `voucher-entry-dropdowns.service.ts`), so both UniGas
+  /// fields are read straight off each party ledger row below - no separate
+  /// `LedgerRepository.listLedgers()` call needed any more (the earlier,
+  /// UniGas-only extra fetch this doc comment used to describe is gone).
+  /// This closes the price-level UX regression flagged when this screen was
+  /// first migrated: `fetchPriceLevelDetailsForSelectedItem`/
+  /// `_resolvePriceLevelRateForItem` now resolve a real per-party price
+  /// level again instead of always falling through to the "no price level"
+  /// branch.
   Future<void> loadData() async {
     vchtypenamedata.clear();
     itemdata.clear();
@@ -4694,16 +4690,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
             '/currencies?page=$page&limit=100',
           ),
         ),
-        // Only needed to resolve creditPeriod (see this method's doc
-        // comment) - not part of the dropdown bundle above.
-        isUniGasSerial
-            ? LedgerRepository.instance.listLedgers()
-            : Future.value(<Map<String, dynamic>>[]),
       ]);
 
       final salesData = results[0] as Map<String, dynamic>;
       final currencies = results[1] as List<Map<String, dynamic>>;
-      final creditPeriodLedgers = results[2] as List<Map<String, dynamic>>;
 
       final voucherTypes = (salesData['vchTypes'] as List)
           .cast<Map<String, dynamic>>();
@@ -4720,13 +4710,11 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       final godowns = (salesData['godowns'] as List)
           .cast<Map<String, dynamic>>();
 
-      final creditPeriodByLedgerName = <String, String?>{
-        for (final l in creditPeriodLedgers)
-          l['name'] as String:
-              (l['creditPeriod'] as String?)?.trim().isEmpty ?? true
-              ? null
-              : (l['creditPeriod'] as String).trim(),
-      };
+      /// Trims a raw `priceLevel`/`creditPeriod` string from `partyLedgers`,
+      /// collapsing blank to `null` - matches the old
+      /// `creditPeriodByLedgerName` trimming behavior this replaces.
+      String? trimOrNull(String? raw) =>
+          (raw?.trim().isEmpty ?? true) ? null : raw!.trim();
 
       String? voucherTypeToFetch;
 
@@ -4779,11 +4767,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
               partyledgerdata.add(ledgerName);
             }
 
-            // No price-level-per-ledger field exists on tally-api's Ledger
-            // master - see this method's doc comment "Known gap" above.
-            partyLedgerPriceLevelMap[ledgerName] = null;
-            partyLedgerCreditPeriodMap[ledgerName] =
-                creditPeriodByLedgerName[ledgerName];
+            partyLedgerPriceLevelMap[ledgerName] = trimOrNull(
+              ledger['priceLevel'] as String?,
+            );
+            partyLedgerCreditPeriodMap[ledgerName] = trimOrNull(
+              ledger['creditPeriod'] as String?,
+            );
           }
         } else {
           partyledgerdata = [
@@ -5285,23 +5274,19 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   /// generated the next voucher number from Tally's own voucher sequence
   /// for this vchtype/date-range).
   ///
-  /// **Voucher-numbering gap**: tally-api's `VoucherEntry` table (see
-  /// `voucher_entry_repository.dart`'s doc comment) is an app-originated
-  /// table with no auto-numbering of its own - it doesn't see Tally's real
-  /// voucher sequence at all. This keeps the existing UX as close to
-  /// legacy as possible by suggesting a next number computed the exact
-  /// same way (`generateNextVchNo`, unchanged) but from the voucher numbers
-  /// of this screen's own previously-created `VoucherEntry` rows (same
-  /// vchtype, same date range) instead of Tally's - and, as before, the
-  /// suggestion lands in `_vchnoController`, which stays a plain editable
-  /// text field the user can always override (`checkVchNoExistence` still
-  /// flags a clash against this same [vchnos] list before submit).
+  /// Now backed by tally-api's `GET .../voucher-entries/voucher-numbers`
+  /// (added after this screen's initial migration - see
+  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment), which unions
+  /// this app's own draft `VoucherEntry` numbers with the real Tally-synced
+  /// `Voucher.number`s for this vchtype/date-range - a strictly better
+  /// source than the earlier client-side-only approach (fetching every
+  /// `VoucherEntry` via `listAll()`), since a number already used in real
+  /// Tally data is now correctly excluded from the suggestion too. The
+  /// suggestion still lands in `_vchnoController` via the unchanged
+  /// `generateNextVchNo`, and stays a plain editable text field the user
+  /// can always override (`checkVchNoExistence` still flags a clash
+  /// against this same [vchnos] list before submit).
   Future<void> fetchvchnos(String vchname) async {
-    final DateTime rangeStart = parseCompactDate(startfrom);
-    final DateTime rangeEndExclusive = parseCompactDate(
-      DateFormat('yyyyMMdd').format(yearEndDate),
-    ).add(const Duration(days: 1));
-
     vchnos.clear();
     setState(() {
       _isLoading = true;
@@ -5309,22 +5294,21 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
     try {
       final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
-      final entries = await VoucherEntryRepository.instance.listAll();
+
+      if (voucherTypeMasterId != null) {
+        final String fromParam = DateFormat('yyyy-MM-dd').format(
+          parseCompactDate(startfrom),
+        );
+        final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
+
+        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
+      }
 
       setState(() {
-        vchnos = [
-          for (final entry in entries)
-            if (voucherTypeMasterId == null ||
-                entry['voucherTypeMasterId'] == voucherTypeMasterId)
-              if (_entryDateWithinRange(
-                entry['date']?.toString(),
-                rangeStart,
-                rangeEndExclusive,
-              ))
-                if ((entry['voucherNumber'] as String?)?.isNotEmpty ?? false)
-                  entry['voucherNumber'] as String,
-        ];
-
         // SORT first
         vchnos.sort((a, b) {
           RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
@@ -5333,7 +5317,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           return numA.compareTo(numB);
         });
 
-        debugPrint('vch nos from tally-api VoucherEntry -> $vchnos');
+        debugPrint('vch nos from tally-api voucher-numbers -> $vchnos');
 
         // GENERATE NEXT
         String nextVch = generateNextVchNo(vchnos);
@@ -5351,21 +5335,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     setState(() {
       _isLoading = false;
     });
-  }
-
-  /// Whether [isoDate] (a `YYYY-MM-DD` voucher-entry date) falls in
-  /// `[start, endExclusive)`. Used by [fetchvchnos] to scope the "existing
-  /// voucher numbers" pool to the same date range legacy's `from`/`to`
-  /// params did.
-  bool _entryDateWithinRange(
-    String? isoDate,
-    DateTime start,
-    DateTime endExclusive,
-  ) {
-    if (isoDate == null) return false;
-    final date = DateTime.tryParse(isoDate);
-    if (date == null) return false;
-    return !date.isBefore(start) && date.isBefore(endExclusive);
   }
 
   void _updateUnitDropdown(dynamic _selectedItem) {

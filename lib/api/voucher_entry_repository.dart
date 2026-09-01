@@ -72,6 +72,40 @@ class VoucherEntryRepository {
         (page) => _client.getForCompany('/voucher-entries?page=$page&limit=100'),
       );
 
+  /// `GET .../voucher-entries/voucher-numbers` - server-side "voucher
+  /// numbers already in use" for [voucherTypeMasterId] in `[from, to]`,
+  /// unioning this app's own draft `VoucherEntry.voucherNumber`s with the
+  /// real Tally-synced `Voucher.number`s. Replaces the older client-side
+  /// approach (fetching every `VoucherEntry` via [listAll] and filtering by
+  /// voucher type/date) that every Registration/Modify screen's
+  /// `fetchvchnos()` used to hand-roll - that approach only ever saw this
+  /// app's own drafts, so it could suggest/allow a number Tally itself
+  /// already has, causing a real collision once the outbound-push-to-Tally
+  /// job (still not built - see this class's own doc-comment) eventually
+  /// ships. [from]/[to] are `YYYY-MM-DD`; [to] is optional (defaults to
+  /// unbounded on the server).
+  Future<List<String>> voucherNumbers({
+    required int voucherTypeMasterId,
+    required String from,
+    String? to,
+  }) async {
+    final query = <String, String>{
+      'voucherTypeMasterId': '$voucherTypeMasterId',
+      'from': from,
+      if (to != null) 'to': to,
+    };
+    final queryString = query.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final result = await _client.getForCompany(
+      '/voucher-entries/voucher-numbers?$queryString',
+    );
+    final data = result.data as Map<String, dynamic>;
+    return (data['voucherNumbers'] as List? ?? const [])
+        .map((v) => v.toString())
+        .toList();
+  }
+
   /// Bill allocations against [ledgerMasterId] from this app's own
   /// not-yet-synced-to-Tally entries (`GET .../voucher-entries/pending-bills`)
   /// - e.g. a Sales entry created in FincoreGo that hasn't reached Tally

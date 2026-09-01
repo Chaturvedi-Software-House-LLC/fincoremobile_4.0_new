@@ -3405,44 +3405,34 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     });
   }
 
+  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
+  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
+  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
+  /// `Voucher.number`s for this vchtype/this year's date window, replacing
+  /// the earlier client-side-only approach (`listAll()` + filter) that only
+  /// ever saw this app's own drafts. The field stays user-editable via the
+  /// existing lock/edit toggle (isVchEditable).
   Future<void> fetchvchnos(String vchname) async {
     vchnos.clear();
     setState(() {
       _isLoading = true;
     });
 
-    // tally-api's VoucherEntry has no server-side auto-numbering (see
-    // VoucherEntryRepository's doc-comment on the "known gap") - this
-    // fetches every existing voucher-entry, narrows it to this voucher type
-    // and this year's date window (matching legacy's own from/to range),
-    // and reuses generateNextVchNo() to suggest the next number exactly as
-    // before. The field stays user-editable via the existing lock/edit
-    // toggle (isVchEditable) since there's no server sequence to defer to.
     try {
-      final entries = await VoucherEntryRepository.instance.listAll();
-      final matching = entries.where((e) {
-        if (e['voucherTypeName'] != vchname) return false;
-        final date = DateTime.tryParse(e['date']?.toString() ?? '');
-        if (date == null) return false;
-        return !date.isBefore(yearStartDate) &&
-            !date.isAfter(
-              DateTime(
-                yearEndDate.year,
-                yearEndDate.month,
-                yearEndDate.day,
-                23,
-                59,
-                59,
-              ),
-            );
-      });
+      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
+
+      if (voucherTypeMasterId != null) {
+        final String fromParam = DateFormat('yyyy-MM-dd').format(yearStartDate);
+        final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
+
+        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
+      }
 
       setState(() {
-        vchnos = matching
-            .map((e) => (e['voucherNumber'] as String?) ?? '')
-            .where((v) => v.isNotEmpty)
-            .toList();
-
         // SORT first
         vchnos.sort((a, b) {
           RegExp regExp = RegExp(r'(\d+)(?!.*\d)');

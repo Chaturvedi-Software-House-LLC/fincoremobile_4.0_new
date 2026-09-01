@@ -257,14 +257,6 @@ class _PartyClickedPageState extends State<PartyClicked>
       SalesOrderVisibility = false,
       PurchaseOrderVisibility = false;
 
-  // tally-api has no Sales/Purchase Order concept at all (confirmed via
-  // exhaustive search of tally-api's src/tally-sync - see the migration
-  // plan's Phase 7 "Tier 3" notes) - true only when a tally-oauth session
-  // (ledgerMasterId != null) would otherwise have shown the Pending Order
-  // tile (permission flags say so) but there's no data to show. Drives an
-  // explicit "not available" tile instead of a silent gap.
-  bool _pendingOrderUnavailable = false;
-
   String pendingsalesorder = "0", pendingpurchaseorder = "0";
 
   dynamic _selecteddate;
@@ -1485,13 +1477,12 @@ class _PartyClickedPageState extends State<PartyClicked>
   /// `ReceivableBreakdownCard`/`PayableBreakdownCard`, `PendingOrderTile`)
   /// already renders, so no widget-tree changes were needed.
   ///
-  /// Sourced from three tally-api report endpoints
+  /// Sourced from tally-api report endpoints
   /// (`LedgerRepository.ledgerSummary`/`outstandingTotal`/
-  /// `outstandingBills`) plus one client-side aggregation
-  /// (`VoucherRepository.listInRange` bucketed by `monthly_bucket_helper.dart`,
-  /// since no ledger-scoped monthly-trend endpoint exists on tally-api
-  /// today). Pending Sales/Purchase Order has no tally-api equivalent at
-  /// all (see `_pendingOrderUnavailable`) - never fetched here.
+  /// `outstandingBills`/`pendingOrderTotal`) plus one client-side
+  /// aggregation (`VoucherRepository.listInRange` bucketed by
+  /// `monthly_bucket_helper.dart`, since no ledger-scoped monthly-trend
+  /// endpoint exists on tally-api today).
   Future<void> _fetchSummaryDataTallyApi(
     String startdate_string,
     String enddate_string,
@@ -1541,8 +1532,6 @@ class _PartyClickedPageState extends State<PartyClicked>
       PayableVisibility = false;
       PurchaseOrderVisibility = false;
       SalesOrderVisibility = false;
-      _pendingOrderUnavailable =
-          pendingsalesorderparty == 'True' || pendingpurchaseorderparty == 'True';
     });
 
     try {
@@ -1720,6 +1709,31 @@ class _PartyClickedPageState extends State<PartyClicked>
           // no equivalent concept in this endpoint's response.
           formatOnAccountWithBillNo(overdueDays ?? 0, outstanding);
         }
+      }
+
+      // Pending Sales/Purchase Order - now backed by tally-api's real
+      // `reports/orders/summary` (added after this screen was first
+      // migrated, when the endpoint didn't exist yet - see
+      // `LedgerRepository.pendingOrderTotal`'s doc-comment). Reuses the
+      // same `formatSalePurc` the legacy response fed, so the tile/PDF
+      // export rendering below needed no changes.
+      if (pendingsalesorderparty == 'True') {
+        final row = await LedgerRepository.instance.pendingOrderTotal(
+          ledgerMasterId,
+          isSales: true,
+          from: from,
+          to: to,
+        );
+        formatSalePurc((row?['totalAmount'] ?? 'null').toString(), 'SalesOrder');
+      }
+      if (pendingpurchaseorderparty == 'True') {
+        final row = await LedgerRepository.instance.pendingOrderTotal(
+          ledgerMasterId,
+          isSales: false,
+          from: from,
+          to: to,
+        );
+        formatSalePurc((row?['totalAmount'] ?? 'null').toString(), 'PurcOrder');
       }
 
       setState(() => _isLoading = false);
@@ -3300,26 +3314,6 @@ class _PartyClickedPageState extends State<PartyClicked>
                                     currencyCode: _currencyCode,
                                     decimal: decimal,
                                     onTap: () => navigateToOrder('purcorder'),
-                                  ),
-
-                                // tally-api has no Sales/Purchase Order
-                                // concept at all (see _pendingOrderUnavailable's
-                                // doc comment) - shown explicitly rather than
-                                // silently omitted, so the gap is visible.
-                                if (_pendingOrderUnavailable)
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 8,
-                                    ),
-                                    child: Text(
-                                      'Pending Sales/Purchase Order is not '
-                                      'available yet on the new backend.',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 13,
-                                        color: Colors.grey.shade600,
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
                                   ),
                               ],
                             ),

@@ -77,6 +77,12 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
 
   late DateTime now = DateTime.now();
 
+  // Party-wise outstanding bills is a Spectra/UniGas-only feature (per the
+  // legacy backend) - `showOutstandingBills` itself stays a manual
+  // kill-switch (never actually flipped in this codebase), so every call
+  // site below additionally requires `isUniGasSerial` rather than folding
+  // the check into this flag's own value (which can't see `serial_no` yet
+  // at field-declaration time, before `initState()` loads it from prefs).
   bool showOutstandingBills = true; // temporary hide
 
   bool isVchEditable = false; // state variable
@@ -400,7 +406,9 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
   }
 
   Widget buildOutstandingCard() {
-    if (!showOutstandingBills) return const SizedBox.shrink();
+    if (!showOutstandingBills || !isUniGasSerial) {
+      return const SizedBox.shrink();
+    }
     if (!showOutstandingCard) return const SizedBox.shrink();
 
     final int totalBills = outstandingBills.length;
@@ -3922,7 +3930,7 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
         _dateController.text = receiptdatetxt;
         if (_selectedparty != null &&
             _selectedparty.toString().trim().isNotEmpty) {
-          if (showOutstandingBills) {
+          if (showOutstandingBills && isUniGasSerial) {
             fetchPartyOutstanding(_selectedparty.toString());
           }
         }
@@ -6311,6 +6319,13 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
     }
   }
 
+  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
+  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
+  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
+  /// `Voucher.number`s for this vchtype/date-range, replacing the earlier
+  /// client-side-only approach (`listAll()` + filter) that only ever saw
+  /// this app's own drafts. The field stays exactly as user-editable/
+  /// lockable as before (see canEditVoucherNo further down).
   Future<void> fetchvchnos(String vchname) async {
     // Format the dates as yyyyMMdd
     String formattedStartDateVchNo =
@@ -6323,41 +6338,20 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
       _isLoading = true;
     });
 
-    // tally-api has no auto-numbering endpoint for VoucherEntry (it's an
-    // app-originated table, not Tally's own sequence - see this
-    // migration's final report, "Voucher-numbering decision"). Legacy's
-    // GET /api/entry/nos/:company/:serial returned every existing voucher
-    // number for this voucher type/date-range so generateNextVchNo() could
-    // suggest the next one; the same suggestion is reproduced here by
-    // pulling every VoucherEntry already created via this app
-    // (VoucherEntryRepository.listAll()) and filtering client-side to the
-    // same voucher type + date range. The field stays exactly as
-    // user-editable/lockable as before (see canEditVoucherNo further down)
-    // - this only changes where the "existing numbers" list comes from.
     try {
       final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
 
       if (voucherTypeMasterId != null) {
         final DateTime startDate = parseCompactDate(formattedStartDateVchNo);
         final DateTime endDate = parseCompactDate(formattedEndDateVchNo);
+        final String fromParam = DateFormat('yyyy-MM-dd').format(startDate);
+        final String toParam = DateFormat('yyyy-MM-dd').format(endDate);
 
-        final entries = await VoucherEntryRepository.instance.listAll();
-
-        vchnos = entries
-            .where((e) {
-              if (e['voucherTypeMasterId'] != voucherTypeMasterId) {
-                return false;
-              }
-              final date = DateTime.tryParse(e['date']?.toString() ?? '');
-              if (date == null) return false;
-              return !date.isBefore(startDate) &&
-                  !date.isAfter(
-                    DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59),
-                  );
-            })
-            .map((e) => e['voucherNumber']?.toString() ?? '')
-            .where((v) => v.isNotEmpty)
-            .toList();
+        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
       }
 
       setState(() {
@@ -6786,7 +6780,8 @@ class _ReceiptRegistrationPageState extends State<ReceiptRegistration>
                                       _selectedparty = suggestion;
                                       _partyController.text = _selectedparty;
                                     });
-                                    if (showOutstandingBills) {
+                                    if (showOutstandingBills &&
+                                        isUniGasSerial) {
                                       fetchPartyOutstanding(suggestion);
                                     }
                                   },

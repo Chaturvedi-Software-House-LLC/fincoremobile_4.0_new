@@ -247,40 +247,52 @@ class LedgerRepository {
   // including voucherTypeName) plus client-side ledgerEntries matching is
   // used for that instead - see PartyClicked.dart's `_fetchLedgerMonthly`.
 
-  /// `reports/ledgers/:ledgerMasterId/pending-orders` - item-wise pending
-  /// quantity/amount for this party's Sales Orders or Purchase Orders not
-  /// yet fully fulfilled by a later Delivery Note/Receipt Note. Replaces
-  /// legacy's `getOrderSummary`, consumed by
-  /// `PartyClickedSalePurcOrder.dart`. Rows: `{stockItemMasterId,
-  /// stockItemName, pendingQuantity, pendingAmount}` - amounts are
-  /// `formatMoney`-formatted strings, parse with `parseMoneyField`.
-  ///
-  /// **Known limitation** (server-side, not fixable here): fulfilment
-  /// matching only works for batch-tracked stock items - tally-api's
-  /// 2026-08-21 schema-hardening migration moved `orderNumber` off a plain
-  /// inventory-entry column into the per-line `batchAllocations` JSON
-  /// array, so a non-batch-tracked item's fulfilling voucher is never
-  /// matched and its orders always show fully pending even once fulfilled.
+  /// `reports/orders/summary?groupBy=item` (tally-api's actual
+  /// `order-reports` feature, added after this method was first written
+  /// against a `reports/ledgers/:id/pending-orders` route that never
+  /// existed - fixed here to hit the real endpoint without touching any
+  /// call site's method signature) - item-wise pending quantity/amount for
+  /// this party's Sales Orders or Purchase Orders. Replaces legacy's
+  /// `getOrderSummary`, consumed by `PartyClickedSalePurcOrder.dart`. Rows
+  /// are reshaped onto that screen's existing keys: `{stockItemMasterId,
+  /// stockItemName, pendingQuantity, pendingAmount}` (from the summary
+  /// endpoint's `stockMasterId`/`totalQuantity`/`totalAmount`) -
+  /// `totalAmount`/`totalQuantity` there are already `formatMoney`-
+  /// formatted strings, still safe to run through `parseMoneyField`.
   Future<List<Map<String, dynamic>>> pendingOrdersByItem(
     int ledgerMasterId, {
     required bool isSales,
     DateTime? from,
     DateTime? to,
   }) async {
-    final query = StringBuffer('?voucherType=${isSales ? 'sales' : 'purchase'}');
+    final query = StringBuffer(
+      '?groupBy=item&trackLedgerMasterId=$ledgerMasterId'
+      '&orderType=${Uri.encodeQueryComponent(isSales ? 'Sales Order' : 'Purchase Order')}',
+    );
     if (from != null) query.write('&from=${_dateOnly(from)}');
     if (to != null) query.write('&to=${_dateOnly(to)}');
-    final result = await _client.getForCompany(
-      '/reports/ledgers/$ledgerMasterId/pending-orders$query',
-    );
-    return (result.data as List).cast<Map<String, dynamic>>();
+    final result = await _client.getForCompany('/reports/orders/summary$query');
+    final rows = (result.data as List).cast<Map<String, dynamic>>();
+    return [
+      for (final row in rows)
+        {
+          'stockItemMasterId': row['stockMasterId'],
+          'stockItemName': row['stockItemName'],
+          'pendingQuantity': row['totalQuantity'],
+          'pendingAmount': row['totalAmount'],
+        },
+    ];
   }
 
-  /// `reports/ledgers/:ledgerMasterId/pending-orders/:stockItemMasterId` -
-  /// order-wise breakdown of [pendingOrdersByItem] for one specific stock
-  /// item. Replaces legacy's per-item order drill-down, consumed by
-  /// `PartyClickedSalePurcOrderClicked.dart`. Rows: `{voucherMasterId,
-  /// voucherNumber, date, pendingQuantity, pendingAmount}`.
+  /// `reports/orders?trackLedgerMasterId=&stockMasterId=` (paginated,
+  /// fetched in full) - order-wise breakdown of [pendingOrdersByItem] for
+  /// one specific stock item. Replaces legacy's per-item order drill-down,
+  /// consumed by `PartyClickedSalePurcOrderClicked.dart`. Rows are reshaped
+  /// onto that screen's existing keys: `{voucherNumber, pendingQuantity,
+  /// pendingAmount, date}` (from the real endpoint's `name`/
+  /// `closingQuantity`/`closingAmount`/`date` - `closingQuantity`/
+  /// `closingAmount` are this order's still-outstanding/"pending" balance,
+  /// per `Order`'s own schema doc-comment).
   Future<List<Map<String, dynamic>>> pendingOrdersByVoucher(
     int ledgerMasterId,
     int stockItemMasterId, {
@@ -288,12 +300,47 @@ class LedgerRepository {
     DateTime? from,
     DateTime? to,
   }) async {
-    final query = StringBuffer('?voucherType=${isSales ? 'sales' : 'purchase'}');
+    final query = StringBuffer(
+      '?trackLedgerMasterId=$ledgerMasterId&stockMasterId=$stockItemMasterId'
+      '&orderType=${Uri.encodeQueryComponent(isSales ? 'Sales Order' : 'Purchase Order')}',
+    );
     if (from != null) query.write('&from=${_dateOnly(from)}');
     if (to != null) query.write('&to=${_dateOnly(to)}');
-    final result = await _client.getForCompany(
-      '/reports/ledgers/$ledgerMasterId/pending-orders/$stockItemMasterId$query',
+    final rows = await fetchAllPages(
+      (page) => _client.getForCompany(
+        '/reports/orders$query&page=$page&limit=100',
+      ),
     );
-    return (result.data as List).cast<Map<String, dynamic>>();
+    return [
+      for (final row in rows)
+        {
+          'voucherNumber': row['name'],
+          'pendingQuantity': row['closingQuantity'],
+          'pendingAmount': row['closingAmount'],
+          'date': row['date'],
+        },
+    ];
+  }
+
+  /// `reports/orders/summary?groupBy=ledger` scoped to one party - the
+  /// single aggregate `{totalAmount, totalQuantity, orderCount}` row for
+  /// this party's Sales Orders or Purchase Orders, or `null` when there are
+  /// none. Consumed by `PartyClicked.dart`'s Pending Sales/Purchase Order
+  /// summary tile.
+  Future<Map<String, dynamic>?> pendingOrderTotal(
+    int ledgerMasterId, {
+    required bool isSales,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final query = StringBuffer(
+      '?groupBy=ledger&trackLedgerMasterId=$ledgerMasterId'
+      '&orderType=${Uri.encodeQueryComponent(isSales ? 'Sales Order' : 'Purchase Order')}',
+    );
+    if (from != null) query.write('&from=${_dateOnly(from)}');
+    if (to != null) query.write('&to=${_dateOnly(to)}');
+    final result = await _client.getForCompany('/reports/orders/summary$query');
+    final rows = (result.data as List).cast<Map<String, dynamic>>();
+    return rows.isNotEmpty ? rows.first : null;
   }
 }

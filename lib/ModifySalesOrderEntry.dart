@@ -212,6 +212,11 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
 
   List<String> vchnos = [];
 
+  /// This entry's own voucher number as loaded by `loadData()` - excluded
+  /// from [vchnos] in `fetchvchnos()` so re-saving with the number
+  /// unchanged never flags itself as a duplicate.
+  String? _originalVoucherNumber;
+
   late AnimationController _animationController;
   late Animation<double> _animation;
 
@@ -488,16 +493,18 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
     }
   }
 
-  // tally-api migration: tally-api's VoucherEntry has no server-side
-  // auto-numbering (see VoucherEntryRepository's doc-comment on the "known
-  // gap") - this fetches every existing voucher-entry and narrows it to
-  // this voucher type and the selected date window, the same way
-  // SalesOrderRegistration.dart's fetchvchnos() does, so checkVchNoExistence()
-  // below has a same-shaped `vchnos` list to validate the (still
-  // user-editable, via isVchEditable) voucher-number field against. Unlike
-  // that create-screen version, this Modify screen does not auto-fill the
-  // field from `vchnos` - the field already holds the existing entry's own
-  // voucher number, set by loadData().
+  // Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
+  // `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
+  // app's own draft `VoucherEntry` numbers with the real Tally-synced
+  // `Voucher.number`s for this vchtype/date-range, replacing the earlier
+  // client-side-only approach (`listAll()` + filter) that only ever saw
+  // this app's own drafts, so checkVchNoExistence() below has a correct
+  // `vchnos` list to validate the (still user-editable, via isVchEditable)
+  // voucher-number field against. This screen does not auto-fill the field
+  // from `vchnos` - the field already holds the existing entry's own
+  // voucher number, set by loadData(). This entry's own
+  // [_originalVoucherNumber] is excluded (one occurrence) so re-saving with
+  // it unchanged never flags itself as a duplicate.
   Future<void> fetchvchnos(String vchname) async {
     vchnos.clear();
     setState(() {
@@ -505,30 +512,27 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
     });
 
     try {
-      final entries = await VoucherEntryRepository.instance.listAll();
-      final matching = entries.where((e) {
-        if (e['voucherTypeName'] != vchname) return false;
-        final date = DateTime.tryParse(e['date']?.toString() ?? '');
-        if (date == null) return false;
-        return !date.isBefore(yearStartDate) &&
-            !date.isAfter(
-              DateTime(
-                yearEndDate.year,
-                yearEndDate.month,
-                yearEndDate.day,
-                23,
-                59,
-                59,
-              ),
-            );
-      });
+      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
+
+      if (voucherTypeMasterId != null) {
+        final String fromParam = DateFormat('yyyy-MM-dd').format(yearStartDate);
+        final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
+
+        final fetched = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
+
+        vchnos = List<String>.from(fetched);
+        final ownNumber = _originalVoucherNumber;
+        if (ownNumber != null) {
+          final ownIndex = vchnos.indexOf(ownNumber);
+          if (ownIndex != -1) vchnos.removeAt(ownIndex);
+        }
+      }
 
       setState(() {
-        vchnos = matching
-            .map((e) => (e['voucherNumber'] as String?) ?? '')
-            .where((v) => v.isNotEmpty)
-            .toList();
-
         vchnos.sort((a, b) {
           RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
           int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
@@ -3285,6 +3289,7 @@ class _ModifySalesOrderEntryPageState extends State<ModifySalesOrderEntry>
     final String oldrefno = (data['reference'] as String?) ?? '';
 
     _vchnoController.text = oldvchno;
+    _originalVoucherNumber = oldvchno;
     _selectedvchtypename = oldvchname;
     fetchvchnos(_selectedvchtypename);
 

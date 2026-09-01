@@ -139,6 +139,11 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
   List<String> vchnos = [];
 
+  /// This entry's own voucher number as loaded by `loadData()` - excluded
+  /// from [vchnos] in `fetchvchnos()` so re-saving with the number
+  /// unchanged never flags itself as a duplicate.
+  String? _originalVoucherNumber;
+
   bool isVchEditable = false; // state variable
 
   late DateTime now = DateTime.now();
@@ -212,6 +217,14 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     }
   }
 
+  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
+  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
+  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
+  /// `Voucher.number`s for this vchtype/date-range, replacing the earlier
+  /// client-side-only approach (`listAll()` + filter) that only ever saw
+  /// this app's own drafts. This entry's own [_originalVoucherNumber] is
+  /// excluded (one occurrence) so re-saving with it unchanged never flags
+  /// itself as a duplicate.
   Future<void> fetchvchnos(String vchname) async {
     // Format the dates as yyyyMMdd
     String formattedStartDateVchNo = DateFormat(
@@ -224,39 +237,27 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       _isLoading = true;
     });
 
-    // tally-api has no auto-numbering endpoint for VoucherEntry (it's an
-    // app-originated table, not Tally's own sequence). Legacy's
-    // GET /api/entry/nos/:company/:serial returned every existing voucher
-    // number for this voucher type/date-range so checkVchNoExistence()
-    // could flag a duplicate; the same list is reproduced here by pulling
-    // every VoucherEntry already created via this app
-    // (VoucherEntryRepository.listAll()) and filtering client-side to the
-    // same voucher type + date range - see ReceiptRegistration.dart's
-    // fetchvchnos() for the identical pattern.
     try {
       final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
 
       if (voucherTypeMasterId != null) {
         final DateTime startDate = parseCompactDate(formattedStartDateVchNo);
         final DateTime endDate = parseCompactDate(formattedEndDateVchNo);
+        final String fromParam = DateFormat('yyyy-MM-dd').format(startDate);
+        final String toParam = DateFormat('yyyy-MM-dd').format(endDate);
 
-        final entries = await VoucherEntryRepository.instance.listAll();
+        final fetched = await VoucherEntryRepository.instance.voucherNumbers(
+          voucherTypeMasterId: voucherTypeMasterId,
+          from: fromParam,
+          to: toParam,
+        );
 
-        vchnos = entries
-            .where((e) {
-              if (e['voucherTypeMasterId'] != voucherTypeMasterId) {
-                return false;
-              }
-              final date = DateTime.tryParse(e['date']?.toString() ?? '');
-              if (date == null) return false;
-              return !date.isBefore(startDate) &&
-                  !date.isAfter(
-                    DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59),
-                  );
-            })
-            .map((e) => e['voucherNumber']?.toString() ?? '')
-            .where((v) => v.isNotEmpty)
-            .toList();
+        vchnos = List<String>.from(fetched);
+        final ownNumber = _originalVoucherNumber;
+        if (ownNumber != null) {
+          final ownIndex = vchnos.indexOf(ownNumber);
+          if (ownIndex != -1) vchnos.removeAt(ownIndex);
+        }
       }
 
       setState(() {
@@ -2277,6 +2278,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
         controller_narration.text = oldnarration;
 
         _vchnoController.text = oldvchno;
+        _originalVoucherNumber = oldvchno;
 
         bankcashname_data = bankCashLedgers.map((l) {
           final reservedName =
