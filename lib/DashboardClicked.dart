@@ -1243,6 +1243,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   dynamic _selectedvoucher = "";
   List<String> spinner_list = [];
+  final Map<String, int> _voucherTypeMasterIdByName = {};
 
   List<Sale_purc_cash> sales_purc_cash_list = [];
   List<Receivable_payable> receivable_payable_list = [];
@@ -2311,6 +2312,21 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         voucherTypes.map((v) => (v['name'] ?? '').toString()),
       );
 
+      // Used by `_fetchSalesPurchaseCashTallyApi`/`_fetchReceiptPaymentTallyApi`
+      // to narrow their voucher fetch server-side via `voucherTypeMasterId`
+      // instead of pulling every voucher type in range and filtering
+      // client-side - see those methods' doc comments.
+      _voucherTypeMasterIdByName
+        ..clear()
+        ..addEntries(
+          voucherTypes.map(
+            (v) => MapEntry(
+              (v['name'] ?? '').toString(),
+              v['masterId'] as int,
+            ),
+          ),
+        );
+
       setState(() {
         _selectedvoucher = spinner_list[0];
         _voucherController.text = _selectedvoucher;
@@ -2413,10 +2429,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     try {
       final from = parseCompactDate(startdate);
       final to = parseCompactDate(enddate);
-      final vouchers = await VoucherRepository.instance.listInRange(
-        from: from,
-        to: to,
-      );
 
       const salesTypes = {'Sales', 'CreditNote'};
       const purchaseTypes = {'Purchase', 'DebitNote'};
@@ -2425,6 +2437,38 @@ class _DashboardClickedPageState extends State<DashboardClicked>
           : ledgroup == 'Purchase Accounts'
           ? purchaseTypes
           : null; // Cash/Bank step 2 - no voucher-type restriction, ledger-filtered instead
+
+      // Narrow the fetch server-side to just the voucher type(s) this tile
+      // needs, instead of pulling every voucher type in range - see
+      // VoucherRepository.listInRangeForTypes' doc comment. Falls back to
+      // the unnarrowed fetch when a specific type/ledgroup can't be
+      // resolved to a masterId (e.g. Cash/Bank step 2, or a voucher-type
+      // name not present in `_voucherTypeMasterIdByName` yet).
+      final List<Map<String, dynamic>> vouchers;
+      if (vchname.isNotEmpty && _voucherTypeMasterIdByName.containsKey(vchname)) {
+        vouchers = await VoucherRepository.instance.listInRange(
+          from: from,
+          to: to,
+          voucherTypeMasterId: _voucherTypeMasterIdByName[vchname],
+        );
+      } else if (allowedTypes != null) {
+        final ids = _voucherTypeMasterIdByName.entries
+            .where((e) => allowedTypes.contains(e.key.replaceAll(' ', '')))
+            .map((e) => e.value)
+            .toSet();
+        vouchers = ids.isEmpty
+            ? await VoucherRepository.instance.listInRange(from: from, to: to)
+            : await VoucherRepository.instance.listInRangeForTypes(
+                from: from,
+                to: to,
+                voucherTypeMasterIds: ids,
+              );
+      } else {
+        vouchers = await VoucherRepository.instance.listInRange(
+          from: from,
+          to: to,
+        );
+      }
 
       final items = <Sale_purc_cash>[];
       for (final voucher in vouchers) {
@@ -2666,9 +2710,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     try {
       final from = parseCompactDate(startdate);
       final to = parseCompactDate(enddate);
+
+      // Narrow server-side to whichever single voucher type name is known
+      // (the more specific `vchname` if set, else `vchtypes`) - see
+      // `_fetchSalesPurchaseCashTallyApi`'s doc comment for the same
+      // pattern/rationale.
+      final narrowByName = vchname.isNotEmpty ? vchname : vchtypes;
+      final narrowedTypeId = _voucherTypeMasterIdByName[narrowByName];
       final vouchers = await VoucherRepository.instance.listInRange(
         from: from,
         to: to,
+        voucherTypeMasterId: narrowedTypeId,
       );
 
       final items = <Sale_purc_cash>[];

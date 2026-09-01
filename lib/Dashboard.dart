@@ -22,12 +22,8 @@ import 'constants.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/entry_widgets.dart';
 import 'api/api_exception.dart';
-import 'api/group_repository.dart';
-import 'api/ledger_repository.dart';
-import 'api/monthly_bucket_helper.dart' show parseMoneyField, bucketByMonth;
-import 'api/pagination_helper.dart';
-import 'api/tally_api_client.dart';
-import 'api/voucher_repository.dart';
+import 'api/dashboard_repository.dart';
+import 'api/monthly_bucket_helper.dart' show parseMoneyField;
 
 List<String> months_chart = [];
 List<String> months_chart_line_graph = [
@@ -1178,28 +1174,24 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   }
 
   // ---------------------------------------------------------------------
-  // tally-api's `reports/dashboard/summary`, `/sales-chart` and
-  // `/voucher-type-breakdown` (`dashboard-reports.service.ts`) are
-  // permanently broken server-side: every query filters on
-  // Group/VoucherType `reservedName` using Tally's old mixed-case strings
-  // ('Sales Accounts', 'Cash-in-Hand', 'Receipt', ...) while the actual
-  // Postgres `reservedName` columns were migrated to screaming-snake-case
-  // enum labels ('SALES', 'CASH', ...) without updating this report code -
-  // every reservedName comparison silently matches nothing, so `summary`
-  // always returns zeros and `sales-chart`/`voucher-type-breakdown` always
-  // return an empty list. `summary`'s cash/receivable/payable sub-queries
-  // additionally reference a `le.date` column on a join shape that no
-  // longer lines up with the current schema. This is a confirmed,
-  // permanent backend bug (tally-api repo, out of scope here) - not
-  // something fixable from this Flutter app.
-  //
-  // Below computes the exact same three things client-side from
-  // already-working tally-api endpoints instead, mirroring exactly what
-  // `DashboardClicked.dart` already does for its own KPI-tile drill-downs:
-  // voucher classification by `voucherTypeName`, the Cash/Bank tile's
-  // ledger-group walk, and (see the receivable/payable comment further
-  // down) a raw `bills` list scan in place of the also-broken
-  // `reports/ledgers/outstanding-*` endpoints.
+  // tally-api's `reports/dashboard/summary`/`sales-chart`/
+  // `voucher-type-breakdown` were assumed permanently broken (a
+  // reservedName mixed-case-vs-enum mismatch) when this screen was first
+  // migrated, and a client-side workaround was built instead: fetch every
+  // voucher in range (`VoucherRepository.listInRange`) and aggregate it in
+  // Dart, mirroring `DashboardClicked.dart`'s own KPI-tile drill-downs.
+  // That assumption turned out to be **stale** - re-verified live against
+  // tally-api directly (not just re-reading old notes): all three
+  // endpoints already use the correct enum-interpolated reservedName
+  // comparisons and return correct, fast results (a full year of 365k
+  // vouchers: ~200ms for `summary`, ~700ms for `sales-chart`, both
+  // including the real cash/receivable/payable figures the old workaround
+  // fetched separately). The full-voucher-fetch approach doesn't scale -
+  // it means one HTTP round trip per ~100 vouchers in range, so a
+  // large company's "This Year" view could mean thousands of sequential
+  // requests, which read as the dashboard simply never finishing loading.
+  // Switched to the real endpoints below; `DashboardRepository` already
+  // existed for this (built alongside the workaround, never wired up).
   Future<void> fetchDashData(String startdate, String enddate) async {
     if (!isVisibleNoAccess) {
       setState(() {
@@ -1209,113 +1201,30 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
       final stopwatch = Stopwatch()..start();
 
-      // Shared across all three sections below so the voucher list (which
-      // can be large) is only ever fetched once per fetchDashData() call.
-      List<Map<String, dynamic>> vouchers = [];
+      // Both charts below re-derive their own date bounds from
+      // startdate/enddate, so from/to only need computing once here for
+      // the KPI summary call.
+      final from = _parseYyyyMMdd(startdate);
+      final to = _parseYyyyMMdd(enddate);
 
       try {
-        final from = _parseYyyyMMdd(startdate);
-        final to = _parseYyyyMMdd(enddate);
-
-        vouchers = await VoucherRepository.instance.listInRange(
+        final summary = await DashboardRepository.instance.summary(
           from: from,
           to: to,
         );
-
-        double salesTotal = 0, purchaseTotal = 0, receiptTotal = 0, paymentTotal = 0;
-        for (final voucher in vouchers) {
-          final typeKey = _dashVoucherTypeKey(voucher);
-          if (_dashSalesVchTypes.contains(typeKey)) {
-            salesTotal += _dashVoucherDebitTotal(voucher);
-          } else if (_dashPurchaseVchTypes.contains(typeKey)) {
-            purchaseTotal += _dashVoucherDebitTotal(voucher);
-          } else if (_dashReceiptVchTypes.contains(typeKey)) {
-            receiptTotal += _dashVoucherDebitTotal(voucher);
-          } else if (_dashPaymentVchTypes.contains(typeKey)) {
-            paymentTotal += _dashVoucherDebitTotal(voucher);
-          }
-        }
-
-        // Cash/Bank tile total - same Cash-in-Hand/Bank Accounts/Bank OD
-        // group walk as `DashboardClicked.dart`'s
-        // `_fetchLedgerGroupsTallyApi`, summing each matched ledger's
-        // `closingBalance` (its `getTotalAmount()` Cash branch sums
-        // `item.amount + item.opening`, i.e. `closing - opening + opening`
-        // = `closing`) - falls back to `openingBalance` on the rare row
-        // missing a closing figure. Kept in its own try/catch so a
-        // flaky groups/ledgers call doesn't zero out the sales/purchase/
-        // receipt/payment totals computed above.
-        double cashTotal = 0;
-        try {
-          final groups = await GroupRepository.instance.listAll();
-          const cashBankReservedNames = {'CASH', 'BANK', 'BANK_OD'};
-          final cashBankGroupIds = groups
-              .where((g) => cashBankReservedNames.contains(g['reservedName']))
-              .map((g) => g['masterId'] as int)
-              .toSet();
-          for (final groupId in cashBankGroupIds) {
-            final ledgers = await LedgerRepository.instance.listLedgers(
-              groupMasterId: groupId,
-            );
-            for (final ledger in ledgers) {
-              final closing = ledger['closingBalance'];
-              cashTotal += closing != null
-                  ? parseMoneyField(closing)
-                  : parseMoneyField(ledger['openingBalance']);
-            }
-          }
-        } catch (e) {
-          cashTotal = 0;
-          debugPrint('fetchDashData cash/bank total failed: $e');
-        }
-
-        // Receivable/Payable - `LedgerRepository.outstandingBills()`/
-        // `outstandingTotal()` (used by `DashboardClicked.dart`'s own
-        // Receivable/Payable tile) both call tally-api's
-        // `reports/ledgers/outstanding-*` endpoints, which were discovered
-        // (this session) to reference a nonexistent `bill_entries` table /
-        // `b.masterId` column and 500 - so that screen's tile is *also*
-        // currently broken server-side and there is no working
-        // reservedName/report-based path to reuse. Instead this sums
-        // `finalBalance` directly off the plain (non-report)
-        // `tally-data/companies/:companyId/bills` list endpoint
-        // (`bills-sync.service.ts`'s `list()`, which only ever queries the
-        // "bills" table itself, no broken join) - same sign convention the
-        // (broken) summary endpoint uses: positive `finalBalance` is
-        // receivable, negative is payable. Also its own try/catch so a
-        // failure here doesn't blank the other KPI tiles.
-        double receivableTotal = 0, payableTotal = 0;
-        try {
-          final bills = await fetchAllPages(
-            (page) =>
-                TallyApiClient().getForCompany('/bills?page=$page&limit=100'),
-          );
-          for (final bill in bills) {
-            final balance = parseMoneyField(bill['finalBalance']);
-            if (balance > 0) {
-              receivableTotal += balance;
-            } else if (balance < 0) {
-              payableTotal += balance;
-            }
-          }
-        } catch (e) {
-          receivableTotal = 0;
-          payableTotal = 0;
-          debugPrint('fetchDashData receivable/payable total failed: $e');
-        }
 
         stopwatch.stop();
         setState(() {
           apiResponseTime = "${stopwatch.elapsedMilliseconds} ms";
         });
 
-        sales_value = salesTotal;
-        purchase_value = purchaseTotal;
-        receipt_value = receiptTotal;
-        payment_value = paymentTotal;
-        cash_value = cashTotal;
-        outstandingreceivable_value = receivableTotal;
-        outstandingpayable_value = payableTotal;
+        sales_value = parseMoneyField(summary['sales']);
+        purchase_value = parseMoneyField(summary['purchase']);
+        receipt_value = parseMoneyField(summary['receipt']);
+        payment_value = parseMoneyField(summary['payment']);
+        cash_value = parseMoneyField(summary['cash']);
+        outstandingreceivable_value = parseMoneyField(summary['receivable']);
+        outstandingpayable_value = parseMoneyField(summary['payable']);
 
         prefs.setDouble('sales', sales_value);
         prefs.setDouble('purchase', purchase_value);
@@ -1336,42 +1245,22 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             piechartdashprefs == 'True') {
           if (linechartdashprefs == 'True' || barchartdashprefs == 'True') {
             try {
-              // Reuses `vouchers` fetched above instead of a second
-              // full-list fetch. dashboard-reports/sales-chart returned one
-              // flat period list (no year grouping), unlike the legacy
-              // endpoint's year->months nesting that fed the multi-year
-              // line-overlay view (`data`/`lineChartData`, colored per year
-              // via yearColors). That overlay can't be reconstructed from
-              // this shape either, so the line-chart mode stays dropped
-              // here - `data` stays empty and only the single-series bar
-              // chart (salesDataList/recDataList) is shown, regardless of
-              // the linechartdash preference.
-              final salesVouchers = vouchers
-                  .where((v) => _dashSalesVchTypes.contains(_dashVoucherTypeKey(v)))
-                  .toList();
-              final receiptVouchers = vouchers
-                  .where((v) => _dashReceiptVchTypes.contains(_dashVoucherTypeKey(v)))
-                  .toList();
-
-              final salesBuckets = bucketByMonth(
-                salesVouchers,
-                dateOf: (v) => DateTime.parse(v['date'] as String),
-                amountOf: _dashVoucherDebitTotal,
-              );
-              final receiptBuckets = bucketByMonth(
-                receiptVouchers,
-                dateOf: (v) => DateTime.parse(v['date'] as String),
-                amountOf: _dashVoucherDebitTotal,
+              // dashboard-reports/sales-chart returns one flat period list
+              // (no year grouping), unlike the legacy endpoint's
+              // year->months nesting that fed the multi-year line-overlay
+              // view (`data`/`lineChartData`, colored per year via
+              // yearColors). That overlay can't be reconstructed from this
+              // shape either, so the line-chart mode stays dropped here -
+              // `data` stays empty and only the single-series bar chart
+              // (salesDataList/recDataList) is shown, regardless of the
+              // linechartdash preference.
+              final chartRows = await DashboardRepository.instance.salesChart(
+                from: from,
+                to: to,
+                groupBy: 'month',
               );
 
-              final monthKeys =
-                  <DateTime>{
-                      ...salesBuckets.map((b) => b.monthStart),
-                      ...receiptBuckets.map((b) => b.monthStart),
-                    }.toList()
-                    ..sort();
-
-              if (monthKeys.isEmpty) {
+              if (chartRows.isEmpty) {
                 setState(() {
                   isBarChartVisible = false;
                   isVisibleLineChart = false;
@@ -1383,20 +1272,13 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 recDataList.clear();
                 data.clear();
 
-                final salesByMonth = {
-                  for (final b in salesBuckets) b.monthStart: b.total,
-                };
-                final receiptByMonth = {
-                  for (final b in receiptBuckets) b.monthStart: b.total,
-                };
-
                 setState(() {
                   isVisibleLineChart = false;
                   isBarChartVisible = barchartdashprefs == 'True';
 
-                  for (final month in monthKeys) {
-                    final sales = salesByMonth[month] ?? 0.0;
-                    final receipt = receiptByMonth[month] ?? 0.0;
+                  for (final row in chartRows) {
+                    final sales = parseMoneyField(row['sales']);
+                    final receipt = parseMoneyField(row['receipt']);
                     salesDataList.add(-sales);
                     recDataList.add(receipt);
                   }
@@ -1429,52 +1311,29 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
           if (piechartdashprefs == 'True') {
             try {
-              // Reuses `vouchers` fetched above instead of a second full
-              // fetch. Grouped by voucherTypeMasterId/voucherTypeName (the
-              // same dimension `reports/dashboard/voucher-type-breakdown`
-              // used), split into sales-classified vs purchase-classified
-              // per voucher type using the same reservedName-mirroring
-              // classification as the KPI totals above (not a second
-              // scheme), each summed by debit total, zero entries filtered
-              // out - matching the previous shape/filtering exactly.
-              final breakdownByType = <int?, Map<String, dynamic>>{};
-              for (final voucher in vouchers) {
-                final typeKey = _dashVoucherTypeKey(voucher);
-                final isSales = _dashSalesVchTypes.contains(typeKey);
-                final isPurchase = _dashPurchaseVchTypes.contains(typeKey);
-                if (!isSales && !isPurchase) continue;
+              // reports/dashboard/voucher-type-breakdown already returns
+              // exactly this shape server-side, grouped by
+              // voucherTypeMasterId/voucherTypeName with `sales`/`purchase`
+              // pre-summed per row - no client-side grouping needed, zero
+              // entries filtered out same as before.
+              final breakdownRows = await DashboardRepository.instance
+                  .voucherTypeBreakdown(from: from, to: to);
 
-                final entry = breakdownByType.putIfAbsent(
-                  voucher['voucherTypeMasterId'] as int?,
-                  () => {
-                    'voucherTypeName': voucher['voucherTypeName'] ?? 'Unknown',
-                    'sales': 0.0,
-                    'purchase': 0.0,
-                  },
-                );
-                final debitTotal = _dashVoucherDebitTotal(voucher);
-                if (isSales) {
-                  entry['sales'] = (entry['sales'] as double) + debitTotal;
-                } else {
-                  entry['purchase'] = (entry['purchase'] as double) + debitTotal;
-                }
-              }
-
-              final salesSlices = breakdownByType.values
-                  .where((row) => (row['sales'] as double).abs() > 0)
+              final salesSlices = breakdownRows
+                  .where((row) => parseMoneyField(row['sales']).abs() > 0)
                   .map(
                     (row) => {
-                      'name': row['voucherTypeName'],
-                      'amount': row['sales'],
+                      'name': row['voucherTypeName'] ?? 'Unknown',
+                      'amount': parseMoneyField(row['sales']),
                     },
                   )
                   .toList();
-              final purchaseSlices = breakdownByType.values
-                  .where((row) => (row['purchase'] as double).abs() > 0)
+              final purchaseSlices = breakdownRows
+                  .where((row) => parseMoneyField(row['purchase']).abs() > 0)
                   .map(
                     (row) => {
-                      'name': row['voucherTypeName'],
-                      'amount': row['purchase'],
+                      'name': row['voucherTypeName'] ?? 'Unknown',
+                      'amount': parseMoneyField(row['purchase']),
                     },
                   )
                   .toList();

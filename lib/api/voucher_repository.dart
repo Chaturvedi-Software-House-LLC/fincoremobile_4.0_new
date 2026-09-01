@@ -84,6 +84,27 @@ class VoucherRepository {
     ),
   );
 
+  /// [listInRange] narrowed to a *set* of voucher types (e.g. "Sales" +
+  /// "Credit Note" both count toward a Sales KPI tile) - `/vouchers` only
+  /// accepts one `voucherTypeMasterId` per call, so this fans out one
+  /// [listInRange] call per id and concatenates. Used by
+  /// `DashboardClicked.dart`'s KPI-tile drill-down (`_fetchSalesPurchaseCashTallyApi`)
+  /// so its full-range fetch only pulls the voucher types the tile
+  /// actually needs, instead of every voucher in range and filtering
+  /// client-side - a meaningful reduction for a large company (e.g. Sales
+  /// vouchers are typically a fraction of all voucher types).
+  Future<List<Map<String, dynamic>>> listInRangeForTypes({
+    required DateTime from,
+    required DateTime to,
+    required Set<int> voucherTypeMasterIds,
+  }) async {
+    final results = await Future.wait([
+      for (final id in voucherTypeMasterIds)
+        listInRange(from: from, to: to, voucherTypeMasterId: id),
+    ]);
+    return [for (final page in results) ...page];
+  }
+
   Future<Map<String, dynamic>> getByMasterId(int voucherMasterId) async {
     final result = await _client.getForCompany('/vouchers/$voucherMasterId');
     return result.data as Map<String, dynamic>;
