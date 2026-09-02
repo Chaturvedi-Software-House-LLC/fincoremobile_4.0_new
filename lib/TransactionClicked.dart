@@ -1,16 +1,15 @@
 import 'package:FincoreGo/utils/currency_helper.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/voucher_repository.dart';
-import 'api/api_exception.dart';
+import 'providers/transaction_clicked_notifier.dart';
 
 class LedgerEntries {
   final String ledger, amount;
@@ -86,7 +85,7 @@ class CostCenter {
   }
 }
 
-class TransactionsClicked extends StatefulWidget {
+class TransactionsClicked extends ConsumerStatefulWidget {
   final String vchtype,
       startdate,
       enddate,
@@ -112,7 +111,8 @@ class TransactionsClicked extends StatefulWidget {
     required this.ledger,
   });
   @override
-  _TransactionsClickedPageState createState() => _TransactionsClickedPageState(
+  ConsumerState<TransactionsClicked> createState() =>
+      _TransactionsClickedPageState(
     vchtype: vchtype,
     startDateString: startdate,
     endDateString: enddate,
@@ -127,7 +127,8 @@ class TransactionsClicked extends StatefulWidget {
   );
 }
 
-class _TransactionsClickedPageState extends State<TransactionsClicked>
+class _TransactionsClickedPageState
+    extends ConsumerState<TransactionsClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String vchtype = "",
@@ -142,22 +143,6 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
 
   String startDateString = "", endDateString = "";
 
-  List<LedgerEntries> ledgerentries_list = [];
-  List<Bills> bills_list = [];
-  List<InventoryEntries> inventoryentries_list = [];
-  List<CostCenter> costcenter_list = [];
-  bool isLedgerExpanded = false;
-
-  bool isInventoryExpanded = false;
-
-  bool isCostCenterExpanded = false;
-
-  bool isBillsExpanded = false;
-  int visibleLedgerCount = 3;
-  int visibleBillsCount = 3;
-
-  int visibleInventoryCount = 3;
-  int visibleCostCenterCount = 3;
   _TransactionsClickedPageState({
     required this.vchtype,
     required this.startDateString,
@@ -172,41 +157,10 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
     required this.ledger,
   });
 
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true;
-
-  String email = "";
-  String name = "";
-
-  String billno = "", billtype = "", billduedate = "", billamount = "";
-
-  String? opening_value = "0", openingheading = "";
-
-  TextEditingController searchController = TextEditingController();
-
-  bool isVisibleNoDataFound = false;
-  bool isVisibleLedgerEntry = false,
-      isVisibleBills = false,
-      isVisibleInventoryEntry = false,
-      isVisibleCostCenter = false;
-
-  bool isTopPanelBillsVisible = true, isDueDateBillsVisible = true;
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-
-  // No longer a real gap - bill allocations are read straight off each
-  // ledger entry's `billAllocations` JSON array (see `_fetchDataTallyApi`).
-  // Kept (always false) only because nothing else in this file reads it;
-  // harmless dead state, not worth a wider refactor to remove.
-  bool _billsUnavailable = false;
+  TransactionClickedNotifier get _notifier =>
+      ref.read(transactionClickedNotifierProvider(masterid).notifier);
+  TransactionClickedState get _s =>
+      ref.read(transactionClickedNotifierProvider(masterid));
 
   String handleGodown(String godown) {
     if (godown == 'null' || godown.isEmpty) {
@@ -249,173 +203,17 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
     return formattedDate;
   }
 
-  Future<void> fetchData(final String masterid) async {
-    return _fetchDataTallyApi(masterid);
-  }
-
-  /// A single `GET vouchers/:masterId` call returns ledger/inventory/
-  /// cost-centre entries together (see `VoucherRepository`) - bill
-  /// allocations included, read off each ledger entry's own
-  /// `billAllocations` array rather than a separate bills collection call.
-  Future<void> _fetchDataTallyApi(String masterid) async {
-    setState(() {
-      isVisibleLedgerEntry = false;
-      isVisibleBills = false;
-      isVisibleInventoryEntry = false;
-      isVisibleCostCenter = false;
-      _billsUnavailable = false;
-      _isLoading = true;
-    });
-
-    try {
-      final voucherId = int.tryParse(masterid);
-      if (voucherId == null) {
-        throw Exception('Missing voucher masterId');
-      }
-      final voucher = await VoucherRepository.instance.getByMasterId(
-        voucherId,
-      );
-
-      final ledgerRows =
-          (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-          const [];
-      final inventoryRows =
-          (voucher['inventoryEntries'] as List?)
-              ?.cast<Map<String, dynamic>>() ??
-          const [];
-      final costCentreRows =
-          (voucher['costCentreAllocations'] as List?)
-              ?.cast<Map<String, dynamic>>() ??
-          const [];
-
-      ledgerentries_list = ledgerRows
-          .map(
-            (row) => LedgerEntries(
-              ledger: (row['ledgerName'] ?? '').toString(),
-              amount: (row['amount'] ?? '0').toString(),
-            ),
-          )
-          .toList();
-
-      inventoryentries_list = inventoryRows
-          .map(
-            (row) => InventoryEntries(
-              item: (row['stockItemName'] ?? '').toString(),
-              qty: (row['quantity'] ?? '0').toString(),
-              rate: (row['rate'] ?? '0').toString(),
-              discount: (row['discountPercentage'] ?? '0').toString(),
-              amount: (row['amount'] ?? '0').toString(),
-              godown: (row['godownName'] ?? 'null').toString(),
-            ),
-          )
-          .toList();
-
-      costcenter_list = costCentreRows
-          .map(
-            (row) => CostCenter(
-              costcentre: (row['costCentreName'] ?? '').toString(),
-              amount: (row['amount'] ?? '0').toString(),
-            ),
-          )
-          .toList();
-
-      // Bill allocations live as a JSON array directly on each ledger
-      // entry (`voucherLedgerEntryRowSchema.billAllocations`), not as a
-      // separate endpoint - `{billId, billName, billType, amount}` per
-      // entry. No `dueDate`/`billDate` field exists on this blob (that's
-      // only tracked on the standalone `Bill` master, not on the voucher's
-      // own bill-allocation record), so those show as "Not Available"
-      // rather than being fabricated.
-      bills_list = [
-        for (final row in ledgerRows)
-          for (final bill
-              in (row['billAllocations'] as List?)
-                      ?.cast<Map<String, dynamic>>() ??
-                  const [])
-            Bills(
-              billno: (bill['billName'] ?? '').toString(),
-              amount: (bill['amount'] ?? '0').toString(),
-              billtype: (bill['billType'] ?? '').toString(),
-              duedate: 'null',
-              billdate: 'null',
-              ledger: (row['ledgerName'] ?? '').toString(),
-            ),
-      ];
-
-      setState(() {
-        isVisibleLedgerEntry = ledgerentries_list.isNotEmpty;
-        isVisibleBills = bills_list.isNotEmpty;
-        isVisibleInventoryEntry = inventoryentries_list.isNotEmpty;
-        isVisibleCostCenter = costcenter_list.isNotEmpty;
-        _billsUnavailable = false;
-        _isLoading = false;
-      });
-    } on ApiException catch (e) {
-      setState(() {
-        isVisibleLedgerEntry = false;
-        isVisibleBills = false;
-        isVisibleInventoryEntry = false;
-        isVisibleCostCenter = false;
-        _isLoading = false;
-      });
-      showAppMessage(context, e.message);
-    } catch (e) {
-      setState(() {
-        isVisibleLedgerEntry = false;
-        isVisibleBills = false;
-        isVisibleInventoryEntry = false;
-        isVisibleCostCenter = false;
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-    });
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    fetchData(masterid);
-  }
-
   List<Widget> _buildLedgerWithBillsList() {
+    final vm = _s;
     // Group bills by ledger (case-insensitive + trim)
     final Map<String, List<Bills>> billsByLedger = {};
 
-    print('bills list -> $bills_list');
-    for (var bill in bills_list) {
+    for (var bill in vm.billsList) {
       final ledgerKey = bill.ledger.trim().toLowerCase();
       billsByLedger.putIfAbsent(ledgerKey, () => []).add(bill);
     }
 
-    return ledgerentries_list.map((entry) {
+    return vm.ledgerEntriesList.map((entry) {
       final key = entry.ledger.trim().toLowerCase();
       final relatedBills = billsByLedger[key] ?? [];
       return LedgerExpandableTile(
@@ -429,8 +227,6 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
   @override
   void initState() {
     super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
@@ -453,6 +249,17 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(transactionClickedNotifierProvider(masterid));
+    final vm = _s;
+    ref.listen<TransactionClickedState>(
+      transactionClickedNotifierProvider(masterid),
+      (previous, next) {
+        if (next.errorMessage != null) {
+          showAppMessage(context, next.errorMessage!);
+          _notifier.clearError();
+        }
+      },
+    );
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.transactions,
@@ -481,7 +288,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
               children: [
                 Flexible(
                   child: Text(
-                    company ?? '',
+                    vm.company,
 
                     style: GoogleFonts.poppins(
                       color: Colors.white,
@@ -531,7 +338,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                   ),
                   child: Column(
                     children: [
-                      if (isVisibleLedgerEntry)
+                      if (vm.isVisibleLedgerEntry)
                         ModernExpandableCard(
                           title: 'Accounting Details',
                           icon: Icons.account_balance,
@@ -551,13 +358,13 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                             buildBillRow('Amount', billamount, Icons.money),
                           ],
                         ),*/
-                      if (isVisibleInventoryEntry)
+                      if (vm.isVisibleInventoryEntry)
                         ModernExpandableCard(
                           title: 'Item Details',
                           icon: Icons.inventory_2_outlined,
                           children: [
-                            ...inventoryentries_list
-                                .take(visibleInventoryCount)
+                            ...vm.inventoryEntriesList
+                                .take(vm.visibleInventoryCount)
                                 .map(
                                   (card) => Column(
                                     children: [
@@ -615,27 +422,17 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                                 )
                                 .toList(),
 
-                            if (inventoryentries_list.length > 3)
+                            if (vm.inventoryEntriesList.length > 3)
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 8.0,
                                 ),
                                 child: Center(
                                   child: TextButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        if (isInventoryExpanded) {
-                                          visibleInventoryCount = 3;
-                                          isInventoryExpanded = false;
-                                        } else {
-                                          visibleInventoryCount =
-                                              inventoryentries_list.length;
-                                          isInventoryExpanded = true;
-                                        }
-                                      });
-                                    },
+                                    onPressed:
+                                        _notifier.toggleInventoryExpanded,
                                     child: Text(
-                                      isInventoryExpanded
+                                      vm.isInventoryExpanded
                                           ? 'View Less'
                                           : 'View More',
                                       style: GoogleFonts.poppins(
@@ -649,13 +446,13 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                           ],
                         ),
 
-                      if (isVisibleCostCenter)
+                      if (vm.isVisibleCostCenter)
                         ModernExpandableCard(
                           title: 'Cost Centre Details',
                           icon: Icons.account_tree_outlined,
                           children: [
-                            ...costcenter_list
-                                .take(visibleCostCenterCount)
+                            ...vm.costCenterList
+                                .take(vm.visibleCostCenterCount)
                                 .map(
                                   (card) => buildCostCenterRow(
                                     context,
@@ -665,27 +462,17 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
                                 )
                                 .toList(),
 
-                            if (costcenter_list.length > 3)
+                            if (vm.costCenterList.length > 3)
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 8.0,
                                 ),
                                 child: Center(
                                   child: TextButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        if (isCostCenterExpanded) {
-                                          visibleCostCenterCount = 3;
-                                          isCostCenterExpanded = false;
-                                        } else {
-                                          visibleCostCenterCount =
-                                              costcenter_list.length;
-                                          isCostCenterExpanded = true;
-                                        }
-                                      });
-                                    },
+                                    onPressed:
+                                        _notifier.toggleCostCenterExpanded,
                                     child: Text(
-                                      isCostCenterExpanded
+                                      vm.isCostCenterExpanded
                                           ? 'View Less'
                                           : 'View More',
                                       style: GoogleFonts.poppins(
@@ -713,7 +500,7 @@ class _TransactionsClickedPageState extends State<TransactionsClicked>
           // the old dimmed spinner-over-stale-content overlay so the
           // loading state reads as "content incoming" instead of a blank
           // page.
-          if (_isLoading)
+          if (vm.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
