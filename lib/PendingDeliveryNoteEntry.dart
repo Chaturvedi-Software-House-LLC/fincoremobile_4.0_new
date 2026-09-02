@@ -1,19 +1,15 @@
-import 'dart:convert';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/DeliveryNoteRegistration.dart';
 import 'package:FincoreGo/ModifySalesEntry.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'widgets/entry_widgets.dart';
-import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
-import 'api/api_exception.dart';
-import 'api/voucher_entry_repository.dart';
-import 'api/voucher_type_repository.dart';
+import 'providers/pending_delivery_note_entry_notifier.dart';
 
 /// One row of `VoucherEntryRepository.instance.listAll()`, shaped for this
 /// screen. tally-api's `VoucherEntry` primary key is a String UUID (not the
@@ -91,81 +87,26 @@ class SalesModel {
   }
 }
 
-class PendingDeliveryNoteEntry extends StatefulWidget {
+class PendingDeliveryNoteEntry extends ConsumerStatefulWidget {
   const PendingDeliveryNoteEntry({Key? key}) : super(key: key);
   @override
-  _PendingDeliveryNoteEntryPageState createState() =>
+  ConsumerState<PendingDeliveryNoteEntry> createState() =>
       _PendingDeliveryNoteEntryPageState();
 }
 
-class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
+class _PendingDeliveryNoteEntryPageState
+    extends ConsumerState<PendingDeliveryNoteEntry>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = false,
-      isVisibleNoDeliveryNoteEntryFound = false;
-
-  DateTime? selectedSingleDate;
-  DateTimeRange? selectedDateRange;
-
-  String rolename_fetched = "";
-
-  final List<SalesModel> deliverynoteentries = [];
+  PendingDeliveryNoteEntryNotifier get _notifier =>
+      ref.read(pendingDeliveryNoteEntryNotifierProvider.notifier);
+  PendingDeliveryNoteEntryState get _s =>
+      ref.read(pendingDeliveryNoteEntryNotifierProvider);
 
   TextEditingController _searchController = TextEditingController();
 
-  List<SalesModel> filteredDeliveryNoteEntries = [];
-
-  String name = "", email = "";
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  late SharedPreferences prefs;
-
   final Set<int> expandedCards = {};
-
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-
-        email = email_nav;
-      }
-
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    fetchDeliveryNoteEntries();
-  }
 
   Future<void> _showConfirmationDialogAndNavigate(
     BuildContext context,
@@ -289,184 +230,27 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
     );
   }
 
+
   Future<void> entrydelete(String entryId) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await VoucherEntryRepository.instance.remove(entryId);
+    final error = await _notifier.entrydelete(entryId);
+    if (error != null) {
+      showAppMessage(context, error);
+    } else {
       showAppMessage(context, "Entry deleted successfully");
-      await fetchDeliveryNoteEntries();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Server Error!!!');
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
-  // Pulls every voucher entry for the active company from tally-api
-  // (`VoucherEntryRepository.listAll()`), then filters client-side to the
-  // Delivery Note voucher type(s) (matched on `reservedName ==
-  // 'DELIVERY_NOTE'`, the same stable-identifier rationale tally-api's own report
-  // queries use - see its CLAUDE.md) rather than a `type=delivery note`
-  // query param, since tally-api has no such filter on `voucher-entries`.
-  // If a company-specific Delivery Note voucher type NAME is configured
-  // (the legacy `spectra_allocations` -> `voucher_type` override,
-  // previously sent as `vchName=`), that name is applied as an extra
-  // client-side filter, same as before.
-  //
-  // "Pending" in the legacy backend meant "not yet pushed to Tally"
-  // (`isSynced`/`vchName` query params). tally-api has no outbound-push-to-
-  // -Tally job yet (see `voucher_entry_repository.dart`), so `syncedAt` is
-  // always null and every entry returned here is, today, pending by
-  // definition - there is no separate "pending only" filter to apply.
+  /// Widget-side wrapper - the fetch/filter/sort logic moved verbatim into
+  /// `PendingDeliveryNoteEntryNotifier.fetchDeliveryNoteEntries`.
   Future<void> fetchDeliveryNoteEntries() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-
-      String? voucherTypeName;
-
-      final String? spectraAllocationsString = prefs.getString(
-        'spectra_allocations',
-      );
-
-      if (spectraAllocationsString != null &&
-          spectraAllocationsString.isNotEmpty) {
-        final List<dynamic> spectraAllocations = jsonDecode(
-          spectraAllocationsString,
-        );
-
-        if (spectraAllocations.isNotEmpty) {
-          voucherTypeName = spectraAllocations.first['voucher_type'];
-        }
-      }
-
-      final deliveryNoteVoucherTypes = await VoucherTypeRepository.instance
-          .byReservedName('DELIVERY_NOTE');
-
-      final Set<int> deliveryNoteVoucherTypeMasterIds =
-          deliveryNoteVoucherTypes
-              .map<int>((v) => (v['masterId'] as num).toInt())
-              .toSet();
-
-      final allEntries = await VoucherEntryRepository.instance.listAll();
-
-      final bool hasVoucherTypeNameFilter =
-          voucherTypeName != null && voucherTypeName.trim().isNotEmpty;
-
-      final mapped = allEntries
-          .where(
-            (json) => deliveryNoteVoucherTypeMasterIds.contains(
-              json['voucherTypeMasterId'],
-            ),
-          )
-          .map((json) => SalesModel.fromVoucherEntry(json))
-          .where(
-            (m) =>
-                !hasVoucherTypeNameFilter ||
-                (m.data['VOUCHERTYPENAME'] ?? '').toString() ==
-                    voucherTypeName,
-          )
-          .toList();
-
-      deliverynoteentries.clear();
-      filteredDeliveryNoteEntries.clear();
-
-      isVisibleNoDeliveryNoteEntryFound = false;
-
-      deliverynoteentries.addAll(mapped);
-
-      deliverynoteentries.sort((a, b) {
-        DateTime dateA = DateTime.parse(a.data['DATE'].toString());
-        DateTime dateB = DateTime.parse(b.data['DATE'].toString());
-        if (dateA != dateB) return dateB.compareTo(dateA);
-        final vchA =
-            int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        final vchB =
-            int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        return vchB.compareTo(vchA);
-      });
-
-      filteredDeliveryNoteEntries = List.from(deliverynoteentries);
-
-      setState(() {
-        FocusManager.instance.primaryFocus?.unfocus();
-        _searchController.clear();
-        selectedSingleDate = null;
-        selectedDateRange = null;
-
-        if (filteredDeliveryNoteEntries.isEmpty) {
-          isVisibleNoDeliveryNoteEntryFound = true;
-        }
-
-        _isLoading = false;
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-
-      setState(() {
-        if (filteredDeliveryNoteEntries.isEmpty) {
-          isVisibleNoDeliveryNoteEntryFound = true;
-        }
-
-        _isLoading = false;
-      });
-    } catch (e) {
-      print(e);
-
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _initSharedPreferences();
+    final error = await _notifier.fetchDeliveryNoteEntries();
+    if (error != null) showAppMessage(context, error);
+    FocusManager.instance.primaryFocus?.unfocus();
+    _searchController.clear();
   }
 
   void searchSales(String query) {
-    _applyFilters();
-  }
-
-  void _applyFilters() {
-    final query = _searchController.text.trim().toLowerCase();
-
-    setState(() {
-      filteredDeliveryNoteEntries = deliverynoteentries.where((entry) {
-        final data = entry.data;
-
-        final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
-        final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
-        final vchtype = (data['VOUCHERTYPENAME'] ?? '')
-            .toString()
-            .toLowerCase();
-
-        final bool matchesSearch =
-            query.isEmpty ||
-            party.contains(query) ||
-            vchno.contains(query) ||
-            vchtype.contains(query);
-
-        final bool matchesDate = _matchesDateFilter(entry);
-
-        return matchesSearch && matchesDate;
-      }).toList();
-
-      isVisibleNoDeliveryNoteEntryFound = filteredDeliveryNoteEntries.isEmpty;
-    });
+    _notifier.searchSales(query);
   }
 
   Future<void> _pickSingleDate() async {
@@ -474,7 +258,7 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
 
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: selectedSingleDate ?? DateTime.now(),
+      initialDate: _s.selectedSingleDate ?? DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
       builder: (context, child) {
@@ -503,12 +287,7 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
     );
 
     if (pickedDate != null) {
-      setState(() {
-        selectedSingleDate = pickedDate;
-        selectedDateRange = null;
-      });
-
-      _applyFilters();
+      _notifier.setSingleDateFilter(pickedDate);
     }
   }
 
@@ -519,7 +298,7 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
       context: context,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
-      initialDateRange: selectedDateRange,
+      initialDateRange: _s.selectedDateRange,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -529,15 +308,11 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
               surface: Theme.of(context).colorScheme.surface,
               onSurface: Theme.of(context).colorScheme.onSurface,
             ),
-
             datePickerTheme: DatePickerThemeData(
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-
               headerBackgroundColor: app_color,
               headerForegroundColor: Colors.white,
-
               rangeSelectionBackgroundColor: app_color.withOpacity(0.14),
-
               dayShape: WidgetStateProperty.resolveWith<OutlinedBorder?>((
                 states,
               ) {
@@ -546,31 +321,25 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                 }
                 return null;
               }),
-
               dayForegroundColor: WidgetStateProperty.resolveWith<Color?>((
                 states,
               ) {
                 if (states.contains(WidgetState.selected)) {
                   return Colors.white;
                 }
-
                 if (states.contains(WidgetState.disabled)) {
                   return Colors.grey.shade400;
                 }
-
                 return Theme.of(context).colorScheme.onSurface;
               }),
-
               dayBackgroundColor: WidgetStateProperty.resolveWith<Color?>((
                 states,
               ) {
                 if (states.contains(WidgetState.selected)) {
                   return app_color;
                 }
-
                 return null;
               }),
-
               todayForegroundColor: WidgetStateProperty.resolveWith<Color?>((
                 states,
               ) {
@@ -579,7 +348,6 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                 }
                 return app_color;
               }),
-
               todayBackgroundColor: WidgetStateProperty.resolveWith<Color?>((
                 states,
               ) {
@@ -589,7 +357,6 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
                 return Colors.transparent;
               }),
             ),
-
             textButtonTheme: TextButtonThemeData(
               style: TextButton.styleFrom(foregroundColor: app_color),
             ),
@@ -600,82 +367,28 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
     );
 
     if (pickedRange != null) {
-      setState(() {
-        selectedDateRange = pickedRange;
-        selectedSingleDate = null;
-      });
-
-      _applyFilters();
+      _notifier.setDateRangeFilter(pickedRange);
     }
   }
 
   void _clearDateFilter() {
-    setState(() {
-      selectedSingleDate = null;
-      selectedDateRange = null;
-    });
-
-    _applyFilters();
+    _notifier.clearDateFilter();
   }
 
   String _getDateFilterText() {
+    final selectedSingleDate = _s.selectedSingleDate;
+    final selectedDateRange = _s.selectedDateRange;
     if (selectedSingleDate != null) {
-      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate!);
+      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate);
     }
 
     if (selectedDateRange != null) {
-      final start = DateFormat("dd-MMM").format(selectedDateRange!.start);
-      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange!.end);
+      final start = DateFormat("dd-MMM").format(selectedDateRange.start);
+      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange.end);
       return "$start to $end";
     }
 
     return "All Dates";
-  }
-
-  bool _matchesDateFilter(SalesModel entry) {
-    final dateValue = entry.data['DATE'];
-
-    if (dateValue == null) return false;
-
-    final entryDate = DateTime.tryParse(dateValue.toString());
-
-    if (entryDate == null) return false;
-
-    final onlyEntryDate = DateTime(
-      entryDate.year,
-      entryDate.month,
-      entryDate.day,
-    );
-
-    if (selectedSingleDate != null) {
-      final selected = DateTime(
-        selectedSingleDate!.year,
-        selectedSingleDate!.month,
-        selectedSingleDate!.day,
-      );
-
-      return onlyEntryDate == selected;
-    }
-
-    if (selectedDateRange != null) {
-      final start = DateTime(
-        selectedDateRange!.start.year,
-        selectedDateRange!.start.month,
-        selectedDateRange!.start.day,
-      );
-
-      final end = DateTime(
-        selectedDateRange!.end.year,
-        selectedDateRange!.end.month,
-        selectedDateRange!.end.day,
-      );
-
-      return onlyEntryDate.isAtSameMomentAs(start) ||
-          onlyEntryDate.isAtSameMomentAs(end) ||
-          (onlyEntryDate.isAfter(start) && onlyEntryDate.isBefore(end));
-    }
-
-    return true;
   }
 
   Future<void> _refresh() async {
@@ -684,7 +397,17 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
     });
   }
 
+  @override
+  void initState() {
+    super.initState();
+    // Trigger provider creation (and its _init()) eagerly, matching the
+    // original's initState-time kickoff.
+    _notifier;
+  }
+
   Widget _buildDateFilterSection() {
+    final selectedSingleDate = _s.selectedSingleDate;
+    final selectedDateRange = _s.selectedDateRange;
     final bool hasDateFilter =
         selectedSingleDate != null || selectedDateRange != null;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -838,6 +561,14 @@ class _PendingDeliveryNoteEntryPageState extends State<PendingDeliveryNoteEntry>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(pendingDeliveryNoteEntryNotifierProvider);
+    final vm = _s;
+    final deliverynoteentries = vm.deliveryNoteEntries;
+    final filteredDeliveryNoteEntries = vm.filteredDeliveryNoteEntries;
+    final isVisibleNoDeliveryNoteEntryFound =
+        vm.isVisibleNoDeliveryNoteEntryFound;
+    final _isLoading = vm.isLoading;
+    final serial_no = vm.serialNo;
     return WillPopScope(
       onWillPop: () async {
         Navigator.pushReplacement(
