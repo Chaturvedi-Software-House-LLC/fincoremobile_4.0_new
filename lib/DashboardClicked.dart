@@ -6,6 +6,7 @@ import 'package:csv/csv.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -23,11 +24,10 @@ import 'package:cross_file/cross_file.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/ledger_repository.dart';
-import 'api/voucher_repository.dart';
 import 'api/pagination_helper.dart';
 import 'api/tally_api_client.dart';
 import 'api/monthly_bucket_helper.dart';
+import 'providers/dashboard_clicked_notifier.dart';
 
 class LedgerGroup {
   final String ledger;
@@ -304,7 +304,7 @@ List<Sale_purc_cash> _parseReceiptPaymentResponse(String body) {
       .toList();
 }
 
-class DashboardClicked extends StatefulWidget {
+class DashboardClicked extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, vchtypes;
 
   const DashboardClicked({
@@ -313,55 +313,25 @@ class DashboardClicked extends StatefulWidget {
     required this.vchtypes,
   });
   @override
-  _DashboardClickedPageState createState() => _DashboardClickedPageState(
+  ConsumerState<DashboardClicked> createState() => _DashboardClickedPageState(
     startDateString: startdate_string,
     endDateString: enddate_string,
     vchtypes: vchtypes,
   );
 }
 
-class _DashboardClickedPageState extends State<DashboardClicked>
+class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  String startDateString = "", endDateString = "", vchtypes = "";
+  String startDateString, endDateString, vchtypes;
 
-  String selectedSortOption = '';
-
-  int counter = 0;
-
-  bool _isVisibleduedate = false;
-
-  bool _isLedgerGroupVisible = false;
-  String? _selectedLedgerGroup;
-  List<LedgerGroup> ledgerGroupList = [];
-
-  bool _isAgeingView = false;
-  bool _isAgeingComputing = false;
-  bool _isSwitchingView = false;
-  List<AgeingBucket> _ageingBuckets = [];
-  List<AgeingBucket> _ageingBucketsDefaultOrder = [];
-  AgeingBucket? _selectedAgeingBucket;
-
-  bool _isPartyAgeingView = false;
-  List<PartyAgeingEntry> _partyAgeing = [];
-  List<PartyAgeingEntry> _partyAgeingDefaultOrder = [];
-  PartyAgeingEntry? _selectedPartyAgeing;
-
-  bool _isTopPartiesView = false;
-  bool _isSwitchingTopPartiesView = false;
-  List<TopPartyEntry> _topParties = [];
-  List<TopPartyEntry> _topPartiesDefaultOrder = [];
-  TopPartyEntry? _selectedTopParty;
-
-  List<Receivable_payable> filteredItems_receivable_payable =
-      []; // Initialize an empty list to hold the filtered items
-  List<Sale_purc_cash> filteredItems_sale_purc_cash = [];
-
-  List<LedgerGroup> filteredLedgerGroupList = [];
   ScrollController _scrollController_salelist = ScrollController();
   ScrollController _scrollController_receivablellist = ScrollController();
   final ScrollController _scrollFabController = ScrollController();
   TextEditingController _voucherController = TextEditingController();
+  TextEditingController searchController = TextEditingController();
+
+  bool _isVisibleduedate = false;
 
   _DashboardClickedPageState({
     required this.startDateString,
@@ -369,31 +339,15 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     required this.vchtypes,
   });
 
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isSalesListVisible = false,
-      _isOutstandingListVisible = false;
+  late final _args = DashboardClickedArgs(
+    startDateString: startDateString,
+    endDateString: endDateString,
+    vchtypes: vchtypes,
+  );
 
-  String email = "";
-  String name = "";
-
-  String? opening_value = "0", openingheading = "";
-
-  TextEditingController searchController = TextEditingController();
-
-  bool isVisibleNoDataFound = false, _isopeningVisible = true;
-
-  bool isSortVisible = false;
-
-  // Search text for the report views (Ageing / Party-wise Ageing / Top
-  // Parties) that don't have their own filteredItems_* list to mutate -
-  // these are filtered at render time instead. See _onSearchChanged.
-  String _reportSearchQuery = '';
+  DashboardClickedNotifier get _notifier =>
+      ref.read(dashboardClickedNotifierProvider(_args).notifier);
+  DashboardClickedState get _s => ref.read(dashboardClickedNotifierProvider(_args));
 
   int getExtraLedgerCount(List<LedgerEntry>? ledgers, String mainLedger) {
     if (ledgers == null || ledgers.isEmpty) return 0;
@@ -403,130 +357,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         .length;
   }
 
-  // 🔍 SEARCH LOGIC
-  void _onSearchChanged(String query) {
-    final q = query.toLowerCase();
-    setState(() {
-      _reportSearchQuery = q;
-    });
-
-    if (vchtypes == "Cash" && _isLedgerGroupVisible) {
-      setState(() {
-        filteredLedgerGroupList = ledgerGroupList.where((item) {
-          return item.ledger.toLowerCase().contains(q);
-        }).toList();
-      });
-    }
-    // 🟢 STEP 2: SELECTED LEDGER VOUCHERS SEARCH
-    else if (vchtypes == "Cash" && !_isLedgerGroupVisible) {
-      setState(() {
-        filteredItems_sale_purc_cash = sales_purc_cash_list.where((item) {
-          return item.ledger.toLowerCase() ==
-                  _selectedLedgerGroup?.toLowerCase() &&
-              (item.vchno.toLowerCase().contains(q) ||
-                  item.vchname.toLowerCase().contains(q) ||
-                  item.ledger.toLowerCase().contains(q));
-        }).toList();
-      });
-    } else if (vchtypes == "Receivable" || vchtypes == "Payable") {
-      setState(() {
-        filteredItems_receivable_payable = receivable_payable_list.where((
-          item,
-        ) {
-          return item.ledger.toLowerCase().contains(q) ||
-              item.billno.toLowerCase().contains(q) ||
-              item.billtype.toLowerCase().contains(q);
-        }).toList();
-      });
-    } else if (vchtypes == "Cash") {
-      setState(() {
-        filteredLedgerGroupList = ledgerGroupList.where((item) {
-          return item.ledger.toLowerCase().contains(q);
-        }).toList();
-      });
-    } else {
-      setState(() {
-        filteredItems_sale_purc_cash = sales_purc_cash_list.where((item) {
-          return item.vchno.toLowerCase().contains(q) ||
-              item.vchname.toLowerCase().contains(q) ||
-              item.ledger.toLowerCase().contains(q);
-        }).toList();
-      });
-    }
-  }
-
-  // 🔄 RESET SEARCH
-  // Render-time search filters for the report views that show their own
-  // computed lists (ageing buckets, party-wise ageing, top parties) rather
-  // than filteredItems_receivable_payable/filteredItems_sale_purc_cash.
-  List<Sale_purc_cash> _searchFilterVouchers(List<Sale_purc_cash> items) {
-    if (_reportSearchQuery.isEmpty) return items;
-    return items
-        .where(
-          (v) =>
-              v.vchno.toLowerCase().contains(_reportSearchQuery) ||
-              v.vchname.toLowerCase().contains(_reportSearchQuery) ||
-              v.ledger.toLowerCase().contains(_reportSearchQuery),
-        )
-        .toList();
-  }
-
-  List<Receivable_payable> _searchFilterBills(List<Receivable_payable> items) {
-    if (_reportSearchQuery.isEmpty) return items;
-    return items
-        .where(
-          (b) =>
-              b.ledger.toLowerCase().contains(_reportSearchQuery) ||
-              b.billno.toLowerCase().contains(_reportSearchQuery) ||
-              b.billtype.toLowerCase().contains(_reportSearchQuery),
-        )
-        .toList();
-  }
-
-  List<AgeingBucket> _searchFilterBuckets(List<AgeingBucket> items) {
-    if (_reportSearchQuery.isEmpty) return items;
-    return items
-        .where((b) => b.label.toLowerCase().contains(_reportSearchQuery))
-        .toList();
-  }
-
-  List<PartyAgeingEntry> _searchFilterPartyAgeing(
-    List<PartyAgeingEntry> items,
-  ) {
-    if (_reportSearchQuery.isEmpty) return items;
-    return items
-        .where((p) => p.ledger.toLowerCase().contains(_reportSearchQuery))
-        .toList();
-  }
-
-  List<TopPartyEntry> _searchFilterTopParties(List<TopPartyEntry> items) {
-    if (_reportSearchQuery.isEmpty) return items;
-    return items
-        .where((p) => p.ledger.toLowerCase().contains(_reportSearchQuery))
-        .toList();
-  }
-
-  void _resetSearch() {
-    setState(() {
-      _reportSearchQuery = '';
-      if (vchtypes == "Receivable" || vchtypes == "Payable") {
-        filteredItems_receivable_payable = List.from(receivable_payable_list);
-      } else if (vchtypes == "Cash" && _isLedgerGroupVisible) {
-        filteredLedgerGroupList = List.from(ledgerGroupList);
-      } else if (vchtypes == "Cash" && !_isLedgerGroupVisible) {
-        filteredItems_sale_purc_cash = sales_purc_cash_list
-            .where(
-              (item) =>
-                  item.ledger.toLowerCase() ==
-                  _selectedLedgerGroup?.toLowerCase(),
-            )
-            .toList();
-      } else {
-        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-      }
-    });
-  }
-
   @override
   void dispose() {
     _voucherController.dispose();
@@ -534,212 +364,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     super.dispose();
   }
 
-  double getCashDebitTotal() {
-    return filteredItems_sale_purc_cash.fold(0.0, (sum, item) {
-      return item.amount < 0 ? sum - item.amount.abs() : sum;
-    });
-  }
-
-  double getCashCreditTotal() {
-    return filteredItems_sale_purc_cash.fold(0.0, (sum, item) {
-      return item.amount > 0 ? sum + item.amount : sum;
-    });
-  }
-
-  /*
-  Widget buildDebitCreditSummary() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child:
-    );
-  }
-*/
-
-  double getTotalAmount() {
-    if (vchtypes == "Receivable" || vchtypes == "Payable") {
-      if (_isAgeingView &&
-          _isPartyAgeingView &&
-          _selectedPartyAgeing != null) {
-        return _selectedPartyAgeing!.overdueAmount;
-      }
-      if (_isAgeingView && _selectedAgeingBucket != null) {
-        return _selectedAgeingBucket!.amount;
-      }
-      double billsTotal = filteredItems_receivable_payable.fold(0.0, (
-        sum,
-        item,
-      ) {
-        print("Adding Outstanding: ${item.outstanding}");
-        return sum + item.outstanding;
-      });
-      double opening = 0.0;
-      setState(() {
-        // print("Opening value $opening_value");
-
-        opening = double.tryParse(opening_value ?? "0") ?? 0.0;
-      });
-
-      print("Opening (On Account): $opening");
-
-      return billsTotal + opening;
-    } else if (vchtypes == "Cash" && _isLedgerGroupVisible) {
-      double voucherTotal = filteredLedgerGroupList.fold(0.0, (sum, item) {
-        print(
-          "Adding Amount+Opening (Ledger): ${(item.amount + item.opening)}",
-        );
-        return sum + (item.amount + item.opening);
-      });
-      /*double opening = 0.0;
-      setState(() {
-        // print("Opening value $opening_value");
-
-        opening = double.tryParse(opening_value ?? "0") ?? 0.0;
-
-
-      });*/
-
-      //  print("Opening (Cash): $opening");
-
-      return voucherTotal;
-    } else if (vchtypes == "Cash" && !_isLedgerGroupVisible) {
-      double voucherTotal = filteredItems_sale_purc_cash.fold(0.0, (sum, item) {
-        print("Adding Amount (Ledger): ${item.amount}");
-        return sum + item.amount;
-      });
-      double opening = 0.0;
-      setState(() {
-        // print("Opening value $opening_value");
-
-        opening = double.tryParse(opening_value ?? "0") ?? 0.0;
-      });
-
-      print("Opening (Cash): $opening");
-
-      return voucherTotal + opening;
-      // return voucherTotal;
-    } else {
-      if (_isTopPartiesView && _selectedTopParty != null) {
-        return _selectedTopParty!.amount;
-      }
-      return filteredItems_sale_purc_cash.fold(0.0, (sum, item) {
-        print("Adding Amount: ${item.amount}");
-        return sum + item.amount;
-      });
-    }
-  }
-
   String getFormattedTotal() {
-    double total = getTotalAmount();
+    double total = _notifier.getTotalAmount();
     return formatAmount(total.toString()); // you already have this
-  }
-
-  /// Cash/Bank tile's ledger-group step (lists Cash-in-Hand/Bank Accounts
-  /// ledgers with their balances, before drilling into one ledger's
-  /// vouchers). Dispatches to the tally-api sibling for a tally-oauth-only
-  /// session.
-  Future<void> fetchLedgerGroups() {
-    return _fetchLedgerGroupsTallyApi();
-  }
-
-  /// The base
-  /// `/ledgers` list already returns per-ledger `openingBalance`/
-  /// `closingBalance` directly (no separate "get ledger group totals"
-  /// endpoint needed), filtered here to ledgers whose group's
-  /// `reservedName` is `Cash-in-Hand`/`Bank Accounts`/`Bank OD A/c` -
-  /// tally-api's own dashboard/summary cash classification.
-  Future<void> _fetchLedgerGroupsTallyApi() async {
-    setState(() {
-      filteredLedgerGroupList.clear();
-      ledgerGroupList.clear();
-      _isLoading = true;
-      _isLedgerGroupVisible = false;
-      _isSalesListVisible = false;
-    });
-
-    if (_selectedvoucher == "All Voucher Types") {
-      _selectedvoucher = "";
-    }
-
-    try {
-      // The base ledger list only carries groupMasterId/groupName, not the
-      // group's reservedName - fetch groups separately to classify by
-      // reservedName (a group named e.g. "Petty Cash" only counts as
-      // "cash" via its reservedName, not its display name).
-      final groups = await fetchAllPages(
-        (page) => TallyApiClient().getForCompany('/groups?page=$page&limit=100'),
-      );
-      // tally-api's GroupReservedName enum (2026-08-21 schema-hardening
-      // migration) uses screaming-snake-case labels, not Tally's own
-      // mixed-case reservedName strings - see ledger_repository.dart's
-      // doc comment for why this doesn't match the old-style strings.
-      const cashBankReservedNames = {
-        'CASH',
-        'BANK',
-        'BANK_OD',
-      };
-      final cashBankGroupIds = groups
-          .where((g) => cashBankReservedNames.contains(g['reservedName']))
-          .map((g) => g['masterId'] as int)
-          .toSet();
-
-      // `LedgerRepository.listLedgers()` with no groupMasterId defaults to
-      // party-like groups only (Sundry Debtors/Creditors) - Cash-in-Hand/
-      // Bank Accounts ledgers need one call per matched group id instead.
-      final cashBankLedgers = <Map<String, dynamic>>[];
-      for (final groupId in cashBankGroupIds) {
-        cashBankLedgers.addAll(
-          await LedgerRepository.instance.listLedgers(groupMasterId: groupId),
-        );
-      }
-
-      double totalOpening = 0;
-      final ledgerGroups = <LedgerGroup>[];
-      for (final ledger in cashBankLedgers) {
-        final opening = parseMoneyField(ledger['openingBalance']);
-        final closing = parseMoneyField(ledger['closingBalance']);
-        totalOpening += opening;
-        ledgerGroups.add(
-          LedgerGroup.fromJson({
-            'ledger': ledger['name'] ?? '',
-            'amount': closing - opening,
-            'opening': opening,
-          }),
-        );
-      }
-
-      if (!mounted) return;
-      setState(() {
-        opening_value = totalOpening.toString();
-        ledgerGroupList = ledgerGroups;
-        filteredLedgerGroupList = ledgerGroupList;
-        _isLedgerGroupVisible = true;
-        _isSalesListVisible = false;
-        _isOutstandingListVisible = false;
-        isVisibleNoDataFound = ledgerGroups.isEmpty;
-      });
-    } catch (e) {
-      setState(() {
-        _isLedgerGroupVisible = false;
-        _isSalesListVisible = false;
-        _isOutstandingListVisible = false;
-        isVisibleNoDataFound = true;
-      });
-      debugPrint('DashboardClicked tally-api fetchLedgerGroups failed: $e');
-    } finally {
-      setState(() => _isLoading = false);
-    }
   }
 
   void _showSelectionWindow(BuildContext context) {
@@ -862,7 +489,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                         ),
                       ),
                     ...options.map((opt) {
-                      final isSelected = selectedSortOption == opt['value'];
+                      final isSelected = _s.selectedSortOption == opt['value'];
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 2),
                         child: Material(
@@ -878,44 +505,10 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                           child: InkWell(
                             borderRadius: BorderRadius.circular(14),
                             onTap: () {
-                              setState(() {
-                                selectedSortOption = opt['value'] as String;
-                              });
-                              if (_isOutstandingListVisible &&
-                                  _isAgeingView &&
-                                  _isPartyAgeingView) {
-                                _applyPartyAgeingSort(selectedSortOption);
-                              } else if (_isOutstandingListVisible &&
-                                  _isAgeingView) {
-                                _applyAgeingSort(selectedSortOption);
-                              } else if (_isSalesListVisible &&
-                                  _isTopPartiesView) {
-                                _applyTopPartiesSort(selectedSortOption);
-                              } else {
-                                switch (selectedSortOption) {
-                                  case 'Default':
-                                    sortByDefault();
-                                    break;
-                                  case 'Newest to Oldest':
-                                    sortByDateHightoLow();
-                                    break;
-                                  case 'Oldest to Newest':
-                                    sortByDateLowtoHigh();
-                                    break;
-                                  case 'A->Z':
-                                    sortByAlphabetAtoZ();
-                                    break;
-                                  case 'Z->A':
-                                    sortByAlphabetZtoA();
-                                    break;
-                                  case 'Amount High to Low':
-                                    sortByAmountHightoLow();
-                                    break;
-                                  case 'Amount Low to High':
-                                    sortByAmountLowtoHigh();
-                                    break;
-                                }
-                              }
+                              _notifier.applySortOption(
+                                opt['value'] as String,
+                              );
+                              _scrollActiveListToTop();
                               Navigator.pop(context);
                             },
                             child: Padding(
@@ -974,282 +567,48 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     );
   }
 
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == "Cash") {
-          setState(() {
-            filteredItems_sale_purc_cash = sales_purc_cash_list
-                .where(
-                  (e) =>
-                      e.ledger.toLowerCase() ==
-                      _selectedLedgerGroup!.toLowerCase(),
-                )
-                .toList();
-          });
-        } else {
-          filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        filteredItems_receivable_payable = List.from(receivable_payable_list);
-        _scrollController_receivablellist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetAtoZ() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == 'Sales' || vchtypes == 'Purchase') {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => a.vchname.compareTo(b.vchname),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => a.ledger.compareTo(b.ledger),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        filteredItems_receivable_payable.sort(
-          (a, b) => a.ledger.compareTo(b.ledger),
-        );
-        _scrollController_receivablellist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetZtoA() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == 'Sales' || vchtypes == 'Purchase') {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => b.vchname.compareTo(a.vchname),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => b.ledger.compareTo(a.ledger),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        filteredItems_receivable_payable.sort(
-          (a, b) => b.ledger.compareTo(a.ledger),
-        );
-        _scrollController_receivablellist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateLowtoHigh() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        filteredItems_sale_purc_cash.sort(
-          (a, b) => a.vchdate.compareTo(b.vchdate),
-        );
-        _scrollController_salelist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        filteredItems_receivable_payable.sort(
-          (a, b) =>
-              DateTime.parse(a.billdate).compareTo(DateTime.parse(b.billdate)),
-        );
-
-        _scrollController_receivablellist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateHightoLow() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        filteredItems_sale_purc_cash.sort(
-          (a, b) => b.vchdate.compareTo(a.vchdate),
-        );
-        _scrollController_salelist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        filteredItems_receivable_payable.sort(
-          (a, b) =>
-              DateTime.parse(b.billdate).compareTo(DateTime.parse(a.billdate)),
-        );
-
-        _scrollController_receivablellist.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountLowtoHigh() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == 'Payment') {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => b.amount.compareTo(a.amount),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => a.amount.compareTo(b.amount),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        if (vchtypes == "Receivable") {
-          filteredItems_receivable_payable.sort(
-            (a, b) => b.outstanding.compareTo(a.outstanding),
-          );
-          _scrollController_receivablellist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems_receivable_payable.sort(
-            (a, b) => a.outstanding.compareTo(b.outstanding),
-          );
-          _scrollController_receivablellist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
-  void sortByAmountHightoLow() {
-    setState(() {
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == "Payment") {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => a.amount.compareTo(b.amount),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => b.amount.compareTo(a.amount),
-          );
-          _scrollController_salelist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      } else if (filteredItems_receivable_payable.isNotEmpty) {
-        if (vchtypes == "Receivable") {
-          filteredItems_receivable_payable.sort(
-            (a, b) => a.outstanding.compareTo(b.outstanding),
-          );
-          _scrollController_receivablellist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems_receivable_payable.sort(
-            (a, b) => b.outstanding.compareTo(a.outstanding),
-          );
-          _scrollController_receivablellist.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
+  /// Applies a sort while also scrolling the relevant list to the top -
+  /// the notifier's sort methods handle only the data mutation
+  /// (`ScrollController`s are widget-local), so the widget triggers the
+  /// scroll animation right after, mirroring whichever list the original
+  /// per-sort-method `animateTo` calls targeted.
+  void _scrollActiveListToTop() {
+    if (_s.filteredItemsSalePurcCash.isNotEmpty) {
+      _scrollController_salelist.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    } else if (_s.filteredItemsReceivablePayable.isNotEmpty) {
+      _scrollController_receivablellist.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    }
   }
 
   void showToast(String message) {
     showAppMessage(context, message);
   }
 
-  String allparties = 'All Parties', allvchtypes = 'All Voucher Types';
-
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  late String startdate_text = "", enddate_text = "";
   late DateTime _startDate;
   late DateTime _endDate;
-  String? datetype;
-
-  late String? startdate_pref, enddate_pref;
-
-  String HttpURL = "";
-
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-
-  dynamic _selectedvoucher = "";
-  List<String> spinner_list = [];
-  final Map<String, int> _voucherTypeMasterIdByName = {};
-
-  List<Sale_purc_cash> sales_purc_cash_list = [];
-  List<Receivable_payable> receivable_payable_list = [];
 
   // csv of all
   Future<void> generateAndShareCSV_SalesList() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final List<List<dynamic>> csvData = [];
     final headersRow = [
       'Vch No',
@@ -1289,6 +648,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndShareCSV_Outstanding() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final List<List<dynamic>> csvData = [];
     final headersRow = [
       'Bill No',
@@ -1329,6 +699,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   // pdf of all
   Future<void> generateAndSharePDF_SalesList() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -1487,6 +868,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndSharePDF_Outstanding() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -1647,6 +1039,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndShareCSV_Ageing() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final List<List<dynamic>> csvData = [];
 
     final asOfDate = DateFormat('dd-MMM-yyyy').format(DateTime.now());
@@ -1695,6 +1098,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndSharePDF_Ageing() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -1800,6 +1214,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndShareCSV_PartyAgeing() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final List<List<dynamic>> csvData = [];
 
     final asOfDate = DateFormat('dd-MMM-yyyy').format(DateTime.now());
@@ -1853,6 +1278,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndSharePDF_PartyAgeing() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -1958,6 +1394,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndShareCSV_TopParties() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final List<List<dynamic>> csvData = [];
 
     if (_selectedTopParty != null) {
@@ -2001,6 +1448,17 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   }
 
   Future<void> generateAndSharePDF_TopParties() async {
+    final vm = _s;
+    final company = vm.company;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final _selectedvoucher = vm.selectedVoucher;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedTopParty = vm.selectedTopParty;
+    final _topParties = vm.topParties;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -2104,705 +1562,6 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     );
   }
 
-  void fetchParentData() {
-    if (vchtypes == "Sales" ||
-        vchtypes == "Purchase" ||
-        vchtypes == "Receipt" ||
-        vchtypes == "Payment" ||
-        vchtypes == "Cash") {
-      if (vchtypes == "Sales" || vchtypes == "Purchase" || vchtypes == "Cash") {
-        _isopeningVisible = true;
-        if (vchtypes == "Sales") {
-          _isopeningVisible = false;
-          fetchParent("");
-        } else if (vchtypes == "Purchase") {
-          _isopeningVisible = false;
-          fetchParent("");
-        } else if (vchtypes == "Cash") {
-          _isopeningVisible = true;
-          fetchParent("");
-        }
-      } else if (vchtypes == "Receipt" || vchtypes == "Payment") {
-        _isopeningVisible = false;
-        fetchParent(vchtypes);
-      }
-      setState(() {
-        if (vchtypes == "Cash") {
-          _isSalesListVisible = false;
-        } else {
-          _isSalesListVisible = true;
-        }
-
-        _isOutstandingListVisible = false;
-      });
-    } else if (vchtypes == "Receivable" || vchtypes == "Payable") {
-      if (vchtypes == "Receivable") {
-        fetchParent_Receivable_Payable("ledger", "true", "true", "true");
-      } else if (vchtypes == "Payable") {
-        fetchParent_Receivable_Payable("ledger", "", "true", "true");
-      }
-      setState(() {
-        _isSalesListVisible = false;
-        _isOutstandingListVisible = true;
-      });
-    }
-  }
-
-  void fetchListData() {
-    if (_selectedvoucher == "All Voucher Types") {
-      if (vchtypes == "Sales" || vchtypes == "Purchase" || vchtypes == "Cash") {
-        if (vchtypes == "Sales") {
-          fetchSales_purchase_cash(
-            "Sales Accounts",
-            startDateString,
-            endDateString,
-            "",
-            "true",
-            "",
-            "",
-          );
-        } else if (vchtypes == "Purchase") {
-          fetchSales_purchase_cash(
-            "Purchase Accounts",
-            startDateString,
-            endDateString,
-            "",
-            "true",
-            "",
-            "",
-          );
-        } else if (vchtypes == "Cash") {
-          // Then load ledger groups for this period
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            fetchLedgerGroups();
-          });
-        }
-        /*else if (vchtypes =="Cash")
-        {
-          fetchSales_purchase_cash("cash-in-hand,bank accounts", startDateString, endDateString, "","true","");
-        }*/
-      } else if (vchtypes == "Receipt" || vchtypes == "Payment") {
-        fetchReceipt_Payment(startDateString, endDateString, vchtypes, "");
-      } else if (vchtypes == "Receivable" || vchtypes == "Payable") {
-        if (vchtypes == "Receivable") {
-          fetchReceivable_payable(
-            "billno",
-            startDateString,
-            endDateString,
-            "true",
-            "",
-          );
-        } else if (vchtypes == "Payable") {
-          fetchReceivable_payable(
-            "billno",
-            startDateString,
-            endDateString,
-            "",
-            "",
-          );
-        }
-      }
-    } else {
-      if (_selectedvoucher == "All Parties") {
-        if (vchtypes == "Receivable") {
-          fetchReceivable_payable(
-            "billdate",
-            startDateString,
-            endDateString,
-            "true",
-            "",
-          );
-        } else if (vchtypes == "Payable") {
-          fetchReceivable_payable(
-            "billdate",
-            startDateString,
-            endDateString,
-            "",
-            "",
-          );
-        }
-      } else {
-        if (vchtypes == "Sales" ||
-            vchtypes == "Purchase" ||
-            vchtypes == "Cash") {
-          if (vchtypes == "Sales") {
-            fetchSales_purchase_cash(
-              "Sales Accounts",
-              startDateString,
-              endDateString,
-              "",
-              "true",
-              _selectedvoucher,
-              "",
-            );
-          } else if (vchtypes == "Purchase") {
-            fetchSales_purchase_cash(
-              "Purchase Accounts",
-              startDateString,
-              endDateString,
-              "",
-              "true",
-              _selectedvoucher,
-              "",
-            );
-          } else if (vchtypes == "Cash") {
-            // Then load ledger groups for this period
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              fetchLedgerGroups();
-            });
-          }
-          /*else if (vchtypes =="Cash")
-            {
-              fetchSales_purchase_cash("cash-in-hand,bank accounts", startDateString, endDateString, "","true",_selectedvoucher);
-            }*/
-        } else if (vchtypes == "Receipt" || vchtypes == "Payment") {
-          fetchReceipt_Payment(
-            startDateString,
-            endDateString,
-            vchtypes,
-            _selectedvoucher,
-          );
-        } else if (vchtypes == "Receivable" || vchtypes == "Payable") {
-          if (vchtypes == "Receivable") {
-            fetchReceivable_payable(
-              "billdate",
-              startDateString,
-              endDateString,
-              "true",
-              _selectedvoucher,
-            );
-          } else if (vchtypes == "Payable") {
-            fetchReceivable_payable(
-              "billdate",
-              startDateString,
-              endDateString,
-              "",
-              _selectedvoucher,
-            );
-          }
-        }
-      }
-    }
-  }
-
-  /// Voucher-type filter dropdown for Sales/Purchase/Cash/Receipt/Payment
-  /// tiles.
-  Future<void> fetchParent(final String type) {
-    return _fetchParentTallyApi();
-  }
-
-  /// Sources the dropdown
-  /// from the `/voucher-types` master list (every voucher type in the
-  /// company) rather than legacy's `getvoucherNames` (only voucher types
-  /// that actually have vouchers in some unscoped set) - a reasonable
-  /// substitute, not a byte-for-byte match.
-  Future<void> _fetchParentTallyApi() async {
-    setState(() => _isLoading = true);
-    spinner_list.clear();
-
-    try {
-      final voucherTypes = await fetchAllPages(
-        (page) => TallyApiClient().getForCompany(
-          '/voucher-types?page=$page&limit=100',
-        ),
-      );
-
-      spinner_list.add(allvchtypes);
-      spinner_list.addAll(
-        voucherTypes.map((v) => (v['name'] ?? '').toString()),
-      );
-
-      // Used by `_fetchSalesPurchaseCashTallyApi`/`_fetchReceiptPaymentTallyApi`
-      // to narrow their voucher fetch server-side via `voucherTypeMasterId`
-      // instead of pulling every voucher type in range and filtering
-      // client-side - see those methods' doc comments.
-      _voucherTypeMasterIdByName
-        ..clear()
-        ..addEntries(
-          voucherTypes.map(
-            (v) => MapEntry(
-              (v['name'] ?? '').toString(),
-              v['masterId'] as int,
-            ),
-          ),
-        );
-
-      setState(() {
-        _selectedvoucher = spinner_list[0];
-        _voucherController.text = _selectedvoucher;
-        fetchListData();
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      debugPrint('DashboardClicked tally-api fetchParent failed: $e');
-    }
-  }
-
-  /// Ledger filter dropdown for Receivable/Payable tiles. Dispatches to the
-  /// tally-api sibling for a tally-oauth-only session.
-  Future<void> fetchParent_Receivable_Payable(
-    final String orderby,
-    final String isdebit,
-    final String select,
-    final String parent,
-  ) {
-    return _fetchParentReceivablePayableTallyApi();
-  }
-
-  /// Every
-  /// ledger in the company (`/ledgers`), not scoped to ledgers that
-  /// actually have outstanding bills - a reasonable substitute, not a
-  /// byte-for-byte match.
-  Future<void> _fetchParentReceivablePayableTallyApi() async {
-    setState(() => _isLoading = true);
-    spinner_list.clear();
-
-    try {
-      final ledgers = await LedgerRepository.instance.listLedgers();
-      spinner_list.add(allparties);
-      spinner_list.addAll(ledgers.map((l) => (l['name'] ?? '').toString()));
-
-      setState(() {
-        _selectedvoucher = spinner_list[0];
-        _voucherController.text = _selectedvoucher;
-        fetchListData();
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      debugPrint(
-        'DashboardClicked tally-api fetchParent_Receivable_Payable failed: $e',
-      );
-    }
-  }
-
-  /// Main Sales/Purchase/Cash voucher list. Dispatches to the tally-api
-  /// sibling for a tally-oauth-only session.
-  Future<void> fetchSales_purchase_cash(
-    final String ledgroup,
-    final String startdate,
-    final String enddate,
-    final String vchtypes,
-    final String opening,
-    final String vchname,
-    final String ledger,
-  ) {
-    return _fetchSalesPurchaseCashTallyApi(
-      ledgroup: ledgroup,
-      startdate: startdate,
-      enddate: enddate,
-      vchname: vchname,
-      ledger: ledger,
-    );
-  }
-
-  /// Classifies
-  /// vouchers by `voucherTypeName` using the same reservedName pairs
-  /// tally-api's own `reports/dashboard/summary` uses for the Sales/
-  /// Purchase KPI totals (`Sales`+`Credit Note` / `Purchase`+`Debit Note`) -
-  /// [ledgroup] here is literally "Sales Accounts"/"Purchase Accounts"/
-  /// "cash-in-hand,bank accounts" (legacy's own parameter values, reused
-  /// as the classification key rather than adding a new one).
-  ///
-  /// Simplification versus legacy: the displayed "ledger" (counterparty)
-  /// for each voucher is its first ledger entry, not specifically the
-  /// non-Sales/Purchase-Accounts side - resolving that properly needs the
-  /// full group hierarchy per ledger, which isn't fetched here. Good
-  /// enough for the common two-ledger voucher case, a known simplification
-  /// for anything more complex (see the migration plan's Phase 7).
-  Future<void> _fetchSalesPurchaseCashTallyApi({
-    required String ledgroup,
-    required String startdate,
-    required String enddate,
-    required String vchname,
-    required String ledger,
-  }) async {
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    try {
-      final from = parseCompactDate(startdate);
-      final to = parseCompactDate(enddate);
-
-      const salesTypes = {'Sales', 'CreditNote'};
-      const purchaseTypes = {'Purchase', 'DebitNote'};
-      final allowedTypes = ledgroup == 'Sales Accounts'
-          ? salesTypes
-          : ledgroup == 'Purchase Accounts'
-          ? purchaseTypes
-          : null; // Cash/Bank step 2 - no voucher-type restriction, ledger-filtered instead
-
-      // Narrow the fetch server-side to just the voucher type(s) this tile
-      // needs, instead of pulling every voucher type in range - see
-      // VoucherRepository.listInRangeForTypes' doc comment. Falls back to
-      // the unnarrowed fetch when a specific type/ledgroup can't be
-      // resolved to a masterId (e.g. Cash/Bank step 2, or a voucher-type
-      // name not present in `_voucherTypeMasterIdByName` yet).
-      final List<Map<String, dynamic>> vouchers;
-      if (vchname.isNotEmpty && _voucherTypeMasterIdByName.containsKey(vchname)) {
-        vouchers = await VoucherRepository.instance.listInRange(
-          from: from,
-          to: to,
-          voucherTypeMasterId: _voucherTypeMasterIdByName[vchname],
-        );
-      } else if (allowedTypes != null) {
-        final ids = _voucherTypeMasterIdByName.entries
-            .where((e) => allowedTypes.contains(e.key.replaceAll(' ', '')))
-            .map((e) => e.value)
-            .toSet();
-        vouchers = ids.isEmpty
-            ? await VoucherRepository.instance.listInRange(from: from, to: to)
-            : await VoucherRepository.instance.listInRangeForTypes(
-                from: from,
-                to: to,
-                voucherTypeMasterIds: ids,
-              );
-      } else {
-        vouchers = await VoucherRepository.instance.listInRange(
-          from: from,
-          to: to,
-        );
-      }
-
-      final items = <Sale_purc_cash>[];
-      for (final voucher in vouchers) {
-        final voucherType = (voucher['voucherTypeName'] as String? ?? '')
-            .replaceAll(' ', '');
-        if (allowedTypes != null && !allowedTypes.contains(voucherType)) {
-          continue;
-        }
-        if (vchname.isNotEmpty && voucher['voucherTypeName'] != vchname) {
-          continue;
-        }
-
-        final entries =
-            (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-            const [];
-        if (entries.isEmpty) continue;
-
-        if (ledger.isNotEmpty &&
-            !entries.any((e) => e['ledgerName'] == ledger)) {
-          continue;
-        }
-
-        final debitTotal = entries
-            .where((e) => e['isDebit'] == true)
-            .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-
-        items.add(
-          Sale_purc_cash.fromJson({
-            'vchname': voucher['voucherTypeName'] ?? '',
-            'vchno': voucher['number'] ?? '',
-            'amount': debitTotal,
-            'vchdate': voucher['date'] ?? '',
-            'ledger': entries.first['ledgerName'] ?? '',
-            'isoptional': voucher['isOptional'] ?? false,
-            'ispostdated': voucher['isPostDated'] ?? false,
-            'refno': voucher['reference'] ?? '',
-            'refdate': voucher['referenceDate'] ?? '',
-            'masterid': voucher['masterId'] ?? '',
-            'ledgers': [
-              for (final e in entries)
-                {
-                  'ledgername': e['ledgerName'] ?? '',
-                  'amount': parseMoneyField(e['amount']),
-                },
-            ],
-          }),
-        );
-      }
-
-      if (!mounted) return;
-      setState(() {
-        opening_value = '0';
-        sales_purc_cash_list
-          ..clear()
-          ..addAll(items);
-        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-        isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
-        isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
-        _isLoading = false;
-      });
-
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault();
-          case 'Newest to Oldest':
-            sortByDateHightoLow();
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh();
-          case 'A->Z':
-            sortByAlphabetAtoZ();
-          case 'Z->A':
-            sortByAlphabetZtoA();
-          case 'Amount High to Low':
-            sortByAmountHightoLow();
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh();
-        }
-      }
-      if (_isTopPartiesView) _computeTopParties();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-      debugPrint('DashboardClicked tally-api sales/purchase/cash fetch failed: $e');
-    }
-  }
-
-  /// Receivable/Payable outstanding-bills list. Dispatches to the
-  /// tally-api sibling for a tally-oauth-only session.
-  Future<void> fetchReceivable_payable(
-    final String orderby,
-    final String startdate,
-    final String enddate,
-    final String isdebit,
-    final String ledger,
-  ) {
-    return _fetchReceivablePayableTallyApi(isdebit: isdebit, ledger: ledger);
-  }
-
-  /// Via
-  /// `LedgerRepository.outstandingBills` - company-wide when [ledger] is
-  /// empty ("All Parties"), scoped to one ledger's masterId (resolved by
-  /// name) otherwise. `isdebit == 'true'` selects Receivable (positive
-  /// `finalBalance`), else Payable (negative).
-  Future<void> _fetchReceivablePayableTallyApi({
-    required String isdebit,
-    required String ledger,
-  }) async {
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-
-    try {
-      int? ledgerMasterId;
-      if (ledger.isNotEmpty) {
-        final ledgers = await LedgerRepository.instance.listLedgers();
-        final match = ledgers.firstWhere(
-          (l) => l['name'] == ledger,
-          orElse: () => const {},
-        );
-        ledgerMasterId = match['masterId'] as int?;
-      }
-
-      final bills = await LedgerRepository.instance.outstandingBills(
-        ledgerMasterId: ledgerMasterId,
-      );
-
-      final wantReceivable = isdebit == 'true';
-      final items = <Receivable_payable>[];
-      double opening = 0;
-      for (final bill in bills) {
-        final balance = parseMoneyField(bill['finalBalance']);
-        final isReceivable = balance > 0;
-        if (isReceivable != wantReceivable) continue;
-        opening += balance;
-        items.add(
-          Receivable_payable.fromJson({
-            'ledger': bill['ledgerName'] ?? '',
-            'billno': bill['name'] ?? '',
-            'billdate': bill['date'] ?? '',
-            'billtype': bill['isAdvance'] == true ? 'Advance' : 'New Ref',
-            'duedate': bill['dueDate'] ?? '',
-            'outstanding': balance,
-          }),
-        );
-      }
-
-      if (!mounted) return;
-      setState(() {
-        opening_value = '0';
-        receivable_payable_list
-          ..clear()
-          ..addAll(items);
-        filteredItems_receivable_payable = List.from(receivable_payable_list);
-        isVisibleNoDataFound = filteredItems_receivable_payable.isEmpty;
-        isSortVisible = filteredItems_receivable_payable.isNotEmpty;
-        _isLoading = false;
-      });
-
-      if (filteredItems_receivable_payable.isNotEmpty) {
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault();
-          case 'Newest to Oldest':
-            sortByDateHightoLow();
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh();
-          case 'A->Z':
-            sortByAlphabetAtoZ();
-          case 'Z->A':
-            sortByAlphabetZtoA();
-          case 'Amount High to Low':
-            sortByAmountHightoLow();
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh();
-        }
-      }
-      if (_isAgeingView) {
-        _computeAgeingBuckets();
-        if (_isPartyAgeingView) _computePartyAgeing();
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-      debugPrint('DashboardClicked tally-api receivable/payable fetch failed: $e');
-    }
-  }
-
-  /// Receipt/Payment voucher list. Dispatches to the tally-api sibling for
-  /// a tally-oauth-only session.
-  Future<void> fetchReceipt_Payment(
-    final String startdate,
-    final String enddate,
-    final String vchtypes,
-    final String vchname,
-  ) {
-    return _fetchReceiptPaymentTallyApi(
-      startdate: startdate,
-      enddate: enddate,
-      vchtypes: vchtypes,
-      vchname: vchname,
-    );
-  }
-
-  /// Filters
-  /// [VoucherRepository.listInRange] by `voucherTypeName == vchtypes`
-  /// ("Receipt"/"Payment"), same simplification as
-  /// `_fetchSalesPurchaseCashTallyApi` for the displayed "ledger" field.
-  Future<void> _fetchReceiptPaymentTallyApi({
-    required String startdate,
-    required String enddate,
-    required String vchtypes,
-    required String vchname,
-  }) async {
-    setState(() {
-      _isLoading = true;
-      isSortVisible = false;
-    });
-
-    sales_purc_cash_list.clear();
-    filteredItems_sale_purc_cash.clear();
-    receivable_payable_list.clear();
-    filteredItems_receivable_payable.clear();
-
-    try {
-      final from = parseCompactDate(startdate);
-      final to = parseCompactDate(enddate);
-
-      // Narrow server-side to whichever single voucher type name is known
-      // (the more specific `vchname` if set, else `vchtypes`) - see
-      // `_fetchSalesPurchaseCashTallyApi`'s doc comment for the same
-      // pattern/rationale.
-      final narrowByName = vchname.isNotEmpty ? vchname : vchtypes;
-      final narrowedTypeId = _voucherTypeMasterIdByName[narrowByName];
-      final vouchers = await VoucherRepository.instance.listInRange(
-        from: from,
-        to: to,
-        voucherTypeMasterId: narrowedTypeId,
-      );
-
-      final items = <Sale_purc_cash>[];
-      for (final voucher in vouchers) {
-        if (voucher['voucherTypeName'] != vchtypes) continue;
-        if (vchname.isNotEmpty && voucher['voucherTypeName'] != vchname) {
-          continue;
-        }
-
-        final entries =
-            (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-            const [];
-        if (entries.isEmpty) continue;
-
-        final debitTotal = entries
-            .where((e) => e['isDebit'] == true)
-            .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-
-        items.add(
-          Sale_purc_cash.fromJson({
-            'vchname': voucher['voucherTypeName'] ?? '',
-            'vchno': voucher['number'] ?? '',
-            'amount': debitTotal,
-            'vchdate': voucher['date'] ?? '',
-            'ledger': entries.first['ledgerName'] ?? '',
-            'isoptional': voucher['isOptional'] ?? false,
-            'ispostdated': voucher['isPostDated'] ?? false,
-            'refno': voucher['reference'] ?? '',
-            'refdate': voucher['referenceDate'] ?? '',
-            'masterid': voucher['masterId'] ?? '',
-            'ledgers': [
-              for (final e in entries)
-                {
-                  'ledgername': e['ledgerName'] ?? '',
-                  'amount': parseMoneyField(e['amount']),
-                },
-            ],
-          }),
-        );
-      }
-
-      if (!mounted) return;
-      setState(() {
-        sales_purc_cash_list
-          ..clear()
-          ..addAll(items);
-        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-        isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
-        isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
-        _isLoading = false;
-      });
-
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault();
-          case 'Newest to Oldest':
-            sortByDateHightoLow();
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh();
-          case 'A->Z':
-            sortByAlphabetAtoZ();
-          case 'Z->A':
-            sortByAlphabetZtoA();
-          case 'Amount High to Low':
-            sortByAmountHightoLow();
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh();
-        }
-      }
-      if (_isTopPartiesView) _computeTopParties();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-        _isLoading = false;
-      });
-      debugPrint('DashboardClicked tally-api receipt/payment fetch failed: $e');
-    }
-  }
-
   String convertDateFormat(String dateStr) {
     try {
       final date = DateTime.parse(dateStr);
@@ -2896,482 +1655,12 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     return formattedDate;
   }
 
-  // A single corrupted API value (e.g. a garbled outstanding amount) can
-  // otherwise inflate an entire summary total into an absurd figure. Bills
-  // beyond this are excluded from sums/rankings, but still shown as-is in
-  // any bill-level drill-down so the bad record stays visible for review.
-  bool _isPlausibleAmount(double value) => value.abs() < 1e12;
-
-  // Backend subtraction of large numbers that should net to exactly zero
-  // sometimes lands on floating-point noise instead (e.g. 1.7e-13). That's
-  // effectively a settled/zero bill, not real outstanding money — below one
-  // currency cent it should be treated as zero and skipped entirely rather
-  // than counted as an open bill.
-  bool _isNegligibleAmount(double value) => value.abs() < 0.01;
-
-  DateTime? _parseDueDateSafe(String billdate, String duedate) {
-    if (duedate == 'null' || duedate.isEmpty) return null;
-    try {
-      if (duedate.contains('Days')) {
-        final match = RegExp(r'(\d+)').firstMatch(duedate);
-        if (match == null) return null;
-        final nodays = int.parse(match.group(0)!);
-        final bill = DateTime.tryParse(billdate);
-        if (bill == null) return null;
-        return bill.add(Duration(days: nodays));
-      }
-      try {
-        return DateFormat('dd-MMM-yy').parse(duedate);
-      } catch (_) {
-        return DateTime.tryParse(duedate);
-      }
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _computeAgeingBuckets() async {
-    if (mounted) {
-      setState(() {
-        _isAgeingComputing = true;
-      });
-    }
-    final ageingPrefs = await SharedPreferences.getInstance();
-    final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
-    final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
-    final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
-    final h4 = int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
-    final h5 = int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
-
-    final notDue = AgeingBucket('Not Due');
-    final b1 = AgeingBucket('0-$h1 Days');
-    final b2 = AgeingBucket('$h1-$h2 Days');
-    final b3 = AgeingBucket('$h2-$h3 Days');
-    final b4 = AgeingBucket('$h3-$h4 Days');
-    final b5 = AgeingBucket('$h4-$h5 Days');
-    final b6 = AgeingBucket('$h5+ Days');
-    final others = AgeingBucket('Others');
-
-    final today = DateTime.now();
-
-    for (final card in filteredItems_receivable_payable) {
-      // Effectively settled (floating-point noise from the backend) -
-      // not a real outstanding bill, so don't count it at all.
-      if (_isNegligibleAmount(card.outstanding)) continue;
-
-      final plausible = _isPlausibleAmount(card.outstanding);
-
-      if (card.billtype != 'Agst Ref' && card.billtype != 'New Ref') {
-        others.count++;
-        if (plausible) others.amount += card.outstanding;
-        others.items.add(card);
-        continue;
-      }
-
-      final dueDate = _parseDueDateSafe(card.billdate, card.duedate);
-      if (dueDate == null) {
-        others.count++;
-        if (plausible) others.amount += card.outstanding;
-        others.items.add(card);
-        continue;
-      }
-      final daysOverdue = DateTime(
-        today.year,
-        today.month,
-        today.day,
-      ).difference(DateTime(dueDate.year, dueDate.month, dueDate.day)).inDays;
-
-      AgeingBucket bucket;
-      if (daysOverdue <= 0) {
-        bucket = notDue;
-      } else if (daysOverdue <= h1) {
-        bucket = b1;
-      } else if (daysOverdue <= h2) {
-        bucket = b2;
-      } else if (daysOverdue <= h3) {
-        bucket = b3;
-      } else if (daysOverdue <= h4) {
-        bucket = b4;
-      } else if (daysOverdue <= h5) {
-        bucket = b5;
-      } else {
-        bucket = b6;
-      }
-
-      bucket.count++;
-      if (plausible) bucket.amount += card.outstanding;
-      bucket.items.add(card);
-    }
-
-    final buckets = [notDue, b1, b2, b3, b4, b5, b6, others]
-        .where((b) => b.count > 0)
-        .toList();
-
-    if (mounted) {
-      setState(() {
-        _ageingBuckets = buckets;
-        _ageingBucketsDefaultOrder = List.from(buckets);
-        _selectedAgeingBucket = null;
-        selectedSortOption = 'Default';
-        _isAgeingComputing = false;
-      });
-    }
-  }
-
-  Future<void> _computePartyAgeing() async {
-    final ageingPrefs = await SharedPreferences.getInstance();
-    final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
-    final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
-    final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
-    final h4 = int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
-    final h5 = int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
-
-    final bandOrder = [
-      '0-$h1 Days',
-      '$h1-$h2 Days',
-      '$h2-$h3 Days',
-      '$h3-$h4 Days',
-      '$h4-$h5 Days',
-      '$h5+ Days',
-    ];
-
-    String bandFor(int daysOverdue) {
-      if (daysOverdue <= h1) return bandOrder[0];
-      if (daysOverdue <= h2) return bandOrder[1];
-      if (daysOverdue <= h3) return bandOrder[2];
-      if (daysOverdue <= h4) return bandOrder[3];
-      if (daysOverdue <= h5) return bandOrder[4];
-      return bandOrder[5];
-    }
-
-    final Map<String, PartyAgeingEntry> byLedger = {};
-    final today = DateTime.now();
-    final todayDate = DateTime(today.year, today.month, today.day);
-
-    for (final card in filteredItems_receivable_payable) {
-      if (_isNegligibleAmount(card.outstanding)) continue;
-      if (card.billtype != 'Agst Ref' && card.billtype != 'New Ref') continue;
-
-      final dueDate = _parseDueDateSafe(card.billdate, card.duedate);
-      if (dueDate == null) continue;
-
-      final daysOverdue = todayDate
-          .difference(DateTime(dueDate.year, dueDate.month, dueDate.day))
-          .inDays;
-      if (daysOverdue <= 0) continue;
-
-      final entry = byLedger.putIfAbsent(
-        card.ledger,
-        () => PartyAgeingEntry(card.ledger)..bandOrder = bandOrder,
-      );
-      entry.overdueCount++;
-      entry.overdueBills.add(card);
-      if (daysOverdue > entry.maxDaysOverdue) {
-        entry.maxDaysOverdue = daysOverdue;
-      }
-
-      if (_isPlausibleAmount(card.outstanding)) {
-        entry.overdueAmount += card.outstanding;
-        final band = bandFor(daysOverdue);
-        entry.bandAmounts[band] =
-            (entry.bandAmounts[band] ?? 0) + card.outstanding.abs();
-      } else {
-        print(
-          'Skipping implausible outstanding value for ${card.ledger} bill ${card.billno}: ${card.outstanding}',
-        );
-      }
-    }
-
-    final parties = byLedger.values.toList()
-      ..sort((a, b) => b.overdueAmount.abs().compareTo(a.overdueAmount.abs()));
-
-    if (mounted) {
-      setState(() {
-        _partyAgeing = parties;
-        _partyAgeingDefaultOrder = List.from(parties);
-        _selectedPartyAgeing = null;
-      });
-    }
-  }
-
-  void _applyPartyAgeingSort(String option) {
-    setState(() {
-      if (_selectedPartyAgeing != null) {
-        final bills = _selectedPartyAgeing!.overdueBills;
-        switch (option) {
-          case 'A->Z':
-            bills.sort((a, b) => a.billno.compareTo(b.billno));
-            break;
-          case 'Z->A':
-            bills.sort((a, b) => b.billno.compareTo(a.billno));
-            break;
-          case 'Amount High to Low':
-            bills.sort(
-              (a, b) => b.outstanding.abs().compareTo(a.outstanding.abs()),
-            );
-            break;
-          case 'Amount Low to High':
-            bills.sort(
-              (a, b) => a.outstanding.abs().compareTo(b.outstanding.abs()),
-            );
-            break;
-          case 'Default':
-          default:
-            break;
-        }
-      } else {
-        switch (option) {
-          case 'A->Z':
-            _partyAgeing.sort((a, b) => a.ledger.compareTo(b.ledger));
-            break;
-          case 'Z->A':
-            _partyAgeing.sort((a, b) => b.ledger.compareTo(a.ledger));
-            break;
-          case 'Amount High to Low':
-            _partyAgeing.sort(
-              (a, b) =>
-                  b.overdueAmount.abs().compareTo(a.overdueAmount.abs()),
-            );
-            break;
-          case 'Amount Low to High':
-            _partyAgeing.sort(
-              (a, b) =>
-                  a.overdueAmount.abs().compareTo(b.overdueAmount.abs()),
-            );
-            break;
-          case 'Default':
-          default:
-            _partyAgeing = List.from(_partyAgeingDefaultOrder);
-            break;
-        }
-      }
-    });
-  }
-
-  void _computeTopParties() {
-    final Map<String, TopPartyEntry> byLedger = {};
-
-    for (final card in filteredItems_sale_purc_cash) {
-      if (_isNegligibleAmount(card.amount)) continue;
-
-      final entry = byLedger.putIfAbsent(
-        card.ledger,
-        () => TopPartyEntry(card.ledger),
-      );
-      entry.voucherCount++;
-      if (_isPlausibleAmount(card.amount)) {
-        entry.amount += card.amount;
-      }
-      entry.vouchers.add(card);
-    }
-
-    final parties = byLedger.values.toList()
-      ..sort((a, b) => b.amount.abs().compareTo(a.amount.abs()));
-
-    if (mounted) {
-      setState(() {
-        _topParties = parties;
-        _topPartiesDefaultOrder = List.from(parties);
-        _selectedTopParty = null;
-        selectedSortOption = 'Default';
-      });
-    }
-  }
-
-  void _applyTopPartiesSort(String option) {
-    setState(() {
-      if (_selectedTopParty != null) {
-        final vouchers = _selectedTopParty!.vouchers;
-        switch (option) {
-          case 'Newest to Oldest':
-            vouchers.sort((a, b) => b.vchdate.compareTo(a.vchdate));
-            break;
-          case 'Oldest to Newest':
-            vouchers.sort((a, b) => a.vchdate.compareTo(b.vchdate));
-            break;
-          case 'A->Z':
-            vouchers.sort((a, b) => a.vchname.compareTo(b.vchname));
-            break;
-          case 'Z->A':
-            vouchers.sort((a, b) => b.vchname.compareTo(a.vchname));
-            break;
-          case 'Amount High to Low':
-            vouchers.sort((a, b) => b.amount.abs().compareTo(a.amount.abs()));
-            break;
-          case 'Amount Low to High':
-            vouchers.sort((a, b) => a.amount.abs().compareTo(b.amount.abs()));
-            break;
-          case 'Default':
-          default:
-            break;
-        }
-      } else {
-        switch (option) {
-          case 'A->Z':
-            _topParties.sort((a, b) => a.ledger.compareTo(b.ledger));
-            break;
-          case 'Z->A':
-            _topParties.sort((a, b) => b.ledger.compareTo(a.ledger));
-            break;
-          case 'Amount High to Low':
-            _topParties.sort(
-              (a, b) => b.amount.abs().compareTo(a.amount.abs()),
-            );
-            break;
-          case 'Amount Low to High':
-            _topParties.sort(
-              (a, b) => a.amount.abs().compareTo(b.amount.abs()),
-            );
-            break;
-          case 'Default':
-          default:
-            _topParties = List.from(_topPartiesDefaultOrder);
-            break;
-        }
-      }
-    });
-  }
-
-  void _applyAgeingSort(String option) {
-    setState(() {
-      if (_selectedAgeingBucket != null) {
-        final items = _selectedAgeingBucket!.items;
-        DateTime dueOf(Receivable_payable c) =>
-            _parseDueDateSafe(c.billdate, c.duedate) ??
-            DateTime.tryParse(c.billdate) ??
-            DateTime(1900);
-        switch (option) {
-          case 'Newest to Oldest':
-            items.sort((a, b) => dueOf(b).compareTo(dueOf(a)));
-            break;
-          case 'Oldest to Newest':
-            items.sort((a, b) => dueOf(a).compareTo(dueOf(b)));
-            break;
-          case 'A->Z':
-            items.sort((a, b) => a.ledger.compareTo(b.ledger));
-            break;
-          case 'Z->A':
-            items.sort((a, b) => b.ledger.compareTo(a.ledger));
-            break;
-          case 'Amount High to Low':
-            items.sort(
-              (a, b) => b.outstanding.abs().compareTo(a.outstanding.abs()),
-            );
-            break;
-          case 'Amount Low to High':
-            items.sort(
-              (a, b) => a.outstanding.abs().compareTo(b.outstanding.abs()),
-            );
-            break;
-          case 'Default':
-          default:
-            // original fetch order is already grouped sensibly; nothing to do
-            break;
-        }
-      } else {
-        switch (option) {
-          case 'A->Z':
-            _ageingBuckets.sort((a, b) => a.label.compareTo(b.label));
-            break;
-          case 'Z->A':
-            _ageingBuckets.sort((a, b) => b.label.compareTo(a.label));
-            break;
-          case 'Amount High to Low':
-            _ageingBuckets.sort(
-              (a, b) => b.amount.abs().compareTo(a.amount.abs()),
-            );
-            break;
-          case 'Amount Low to High':
-            _ageingBuckets.sort(
-              (a, b) => a.amount.abs().compareTo(b.amount.abs()),
-            );
-            break;
-          case 'Default':
-          default:
-            // buckets have no date; restore the natural ageing-severity order
-            _ageingBuckets = List.from(_ageingBucketsDefaultOrder);
-            break;
-        }
-      }
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-    });
-
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    startdate_pref = startDateString;
-    enddate_pref = endDateString;
-
-    _startDate = DateTime.parse(startdate_pref!);
-    _endDate = DateTime.parse(enddate_pref!);
-
-    DateTime start = _startDate;
-    DateTime end = _endDate;
-
-    String startMonth = DateFormat('MMM').format(start);
-    String startDay = DateFormat('dd').format(start);
-    int startYear = start.year;
-
-    String endMonth = DateFormat('MMM').format(end);
-    String endDay = DateFormat('dd').format(end);
-    int endYear = end.year;
-
-    startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-    enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-    fetchParentData();
-
-    if (vchtypes == "Receivable" || vchtypes == "Payable") {
-      setState(() {
-        openingheading = 'OnAccount';
-      });
-    } else {
-      setState(() {
-        openingheading = 'Opening Balance';
-      });
-    }
-  }
 
   Future<void> _selectDateRange(BuildContext context) async {
+    _startDate = DateTime.parse(_s.startDateString);
+    _endDate = DateTime.parse(_s.endDateString);
     final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+    final prefs = await SharedPreferences.getInstance();
     String? startfrom = prefs.getString('startfrom');
     DateTime earliestDate = DateTime.parse(startfrom!);
 
@@ -3404,36 +1693,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
     );
 
     if (selectedDateRange != null) {
-      setState(() {
-        _startDate = selectedDateRange.start;
-        _endDate = selectedDateRange.end;
-
-        DateTime start = _startDate;
-        DateTime end = _endDate;
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        fetchListData();
-
-        /*fetchDashData(startDateString,endDateString);*/
-      });
+      _startDate = selectedDateRange.start;
+      _endDate = selectedDateRange.end;
+      _notifier.setDateRange(_startDate, _endDate);
     }
   }
 
@@ -3441,21 +1703,21 @@ class _DashboardClickedPageState extends State<DashboardClicked>
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
   }
 
   Widget _buildTotalBar() {
-    if (_isLoading) return const SizedBox();
+    final vm = _s;
+    if (vm.isLoading) return const SizedBox();
 
-    double total = getTotalAmount();
+    double total = _notifier.getTotalAmount();
     if (total.abs() < 0.0001) total = 0.0;
 
     return Container(
       height:
-          (vchtypes == "Cash" && !_isLedgerGroupVisible && _isSalesListVisible)
+          (vchtypes == "Cash" && !vm.isLedgerGroupVisible && vm.isSalesListVisible)
           ? 90
           : 60, // 🔥 dynamic height
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -3471,14 +1733,22 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         children: [
           // 🔥 Credit
           if (vchtypes == "Cash" &&
-              !_isLedgerGroupVisible &&
-              _isSalesListVisible)
-            _buildCompactLine("Credit", getCashCreditTotal(), Colors.green),
+              !vm.isLedgerGroupVisible &&
+              vm.isSalesListVisible)
+            _buildCompactLine(
+              "Credit",
+              _notifier.getCashCreditTotal(),
+              Colors.green,
+            ),
           // 🔥 Debit
           if (vchtypes == "Cash" &&
-              !_isLedgerGroupVisible &&
-              _isSalesListVisible)
-            _buildCompactLine("Debit", getCashDebitTotal(), Colors.red),
+              !vm.isLedgerGroupVisible &&
+              vm.isSalesListVisible)
+            _buildCompactLine(
+              "Debit",
+              _notifier.getCashDebitTotal(),
+              Colors.red,
+            ),
 
           // 🔥 Total (always)
           Row(
@@ -3548,6 +1818,42 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(dashboardClickedNotifierProvider(_args));
+    final vm = _s;
+    final _isLedgerGroupVisible = vm.isLedgerGroupVisible;
+    final _selectedLedgerGroup = vm.selectedLedgerGroup;
+    final ledgerGroupList = vm.ledgerGroupList;
+    final filteredLedgerGroupList = vm.filteredLedgerGroupList;
+    final _isAgeingView = vm.isAgeingView;
+    final _isAgeingComputing = vm.isAgeingComputing;
+    final _isSwitchingView = vm.isSwitchingView;
+    final _ageingBuckets = vm.ageingBuckets;
+    final _selectedAgeingBucket = vm.selectedAgeingBucket;
+    final _isPartyAgeingView = vm.isPartyAgeingView;
+    final _partyAgeing = vm.partyAgeing;
+    final _selectedPartyAgeing = vm.selectedPartyAgeing;
+    final _isTopPartiesView = vm.isTopPartiesView;
+    final _isSwitchingTopPartiesView = vm.isSwitchingTopPartiesView;
+    final _topParties = vm.topParties;
+    final _selectedTopParty = vm.selectedTopParty;
+    final filteredItems_receivable_payable = vm.filteredItemsReceivablePayable;
+    final filteredItems_sale_purc_cash = vm.filteredItemsSalePurcCash;
+    final sales_purc_cash_list = vm.salesPurcCashList;
+    final receivable_payable_list = vm.receivablePayableList;
+    final _isSalesListVisible = vm.isSalesListVisible;
+    final _isOutstandingListVisible = vm.isOutstandingListVisible;
+    final opening_value = vm.openingValue;
+    final openingheading = vm.openingHeading;
+    final isVisibleNoDataFound = vm.isVisibleNoDataFound;
+    final _isopeningVisible = vm.isOpeningVisible;
+    final isSortVisible = vm.isSortVisible;
+    final startdate_text = vm.startDateText;
+    final enddate_text = vm.endDateText;
+    final company = vm.company;
+    final _isLoading = vm.isLoading;
+    final _selectedvoucher = vm.selectedVoucher;
+    final spinner_list = vm.spinnerList;
+    final selectedSortOption = vm.selectedSortOption;
     return Scaffold(
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3615,52 +1921,13 @@ class _DashboardClickedPageState extends State<DashboardClicked>
 
           centerTitle: false,
           actions: [
-            /*IconButton(
-              onPressed: () {
-                counter++;
-                setState(() {
-                  _isSearchViewVisible = counter % 2 != 0;
-                  if(!_isSearchViewVisible)
-                  {
-                    searchController.clear();
-                    if (vchtypes == "Receivable" || vchtypes == "Payable") {
-                      filteredItems_receivable_payable = receivable_payable_list;
-                    } else {
-                      filteredItems_sale_purc_cash = sales_purc_cash_list;
-                    }
-                  }
-                });
-              },
-              icon: Icon(Icons.search, color: Colors.white, size: 26),
-            ),*/
             if (vchtypes == "Receivable" || vchtypes == "Payable")
               IconButton(
                 tooltip: _isAgeingView ? 'Bill List' : 'Ageing Analysis',
                 onPressed: (_isAgeingComputing || _isSwitchingView)
                     ? null
                     : () {
-                        setState(() {
-                          _isSwitchingView = true;
-                        });
-                        // ✅ keep the spinner up long enough to actually be
-                        // seen spinning, not just flash for a frame or two
-                        Future.delayed(const Duration(milliseconds: 600), () {
-                          if (!mounted) return;
-                          final togglingOn = !_isAgeingView;
-                          setState(() {
-                            _isAgeingView = togglingOn;
-                            _selectedAgeingBucket = null;
-                            _isPartyAgeingView = false;
-                            _selectedPartyAgeing = null;
-                            _isSwitchingView = false;
-                            selectedSortOption = 'Default';
-                          });
-                          if (togglingOn) {
-                            _computeAgeingBuckets();
-                          } else {
-                            sortByDefault();
-                          }
-                        });
+                        _notifier.toggleAgeingView();
                       },
                 icon: (_isAgeingComputing || _isSwitchingView)
                     ? SizedBox(
@@ -3687,26 +1954,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                 onPressed: _isSwitchingTopPartiesView
                     ? null
                     : () {
-                        setState(() {
-                          _isSwitchingTopPartiesView = true;
-                        });
-                        // ✅ keep the spinner up long enough to actually be
-                        // seen spinning, not just flash for a frame or two
-                        Future.delayed(const Duration(milliseconds: 600), () {
-                          if (!mounted) return;
-                          final togglingOn = !_isTopPartiesView;
-                          setState(() {
-                            _isTopPartiesView = togglingOn;
-                            _selectedTopParty = null;
-                            _isSwitchingTopPartiesView = false;
-                            selectedSortOption = 'Default';
-                          });
-                          if (togglingOn) {
-                            _computeTopParties();
-                          } else {
-                            sortByDefault();
-                          }
-                        });
+                        _notifier.toggleTopPartiesView();
                       },
                 icon: _isSwitchingTopPartiesView
                     ? SizedBox(
@@ -3987,11 +2235,8 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                       if (_voucherController.text.isNotEmpty)
                                         GestureDetector(
                                           onTap: () {
-                                            setState(() {
-                                              _voucherController.clear();
-                                              _selectedvoucher =
-                                                  spinner_list.first;
-                                            });
+                                            _voucherController.clear();
+                                            _notifier.clearSelectedVoucher();
                                           },
                                           child: Icon(
                                             Icons.close_rounded,
@@ -4040,13 +2285,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               );
                             },
                             onSelected: (suggestion) {
-                              setState(() {
-                                _selectedvoucher = suggestion;
-                                _voucherController.text = suggestion;
-                                searchController.clear();
-                                _reportSearchQuery = '';
-                                fetchListData();
-                              });
+                              _voucherController.text = suggestion;
+                              searchController.clear();
+                              _notifier.selectVoucher(suggestion);
                             },
                             emptyBuilder: (context) => Padding(
                               padding: const EdgeInsets.all(8.0),
@@ -4192,7 +2433,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               height: 46,
                               child: TextField(
                                 controller: searchController,
-                                onChanged: _onSearchChanged,
+                                onChanged: _notifier.onSearchChanged,
 
                                 style: GoogleFonts.poppins(
                                   fontSize: 13.5,
@@ -4216,8 +2457,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                           icon: const Icon(Icons.close, size: 18),
                                           onPressed: () {
                                             searchController.clear();
-                                            _resetSearch();
-                                            setState(() {});
+                                            _notifier.resetSearch();
                                           },
                                         )
                                       : null,
@@ -4303,23 +2543,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               }
                               return InkWell(
                                 onTap: () {
-                                  setState(() {
-                                    searchController.clear();
-                                    FocusScope.of(context).unfocus();
-                                    _selectedLedgerGroup = group.ledger;
-                                    _isLedgerGroupVisible = false;
-                                    _isSalesListVisible = true;
-                                  });
-
-                                  fetchSales_purchase_cash(
-                                    "cash-in-hand,bank accounts",
-                                    startDateString,
-                                    endDateString,
-                                    "",
-                                    "true",
-                                    _selectedvoucher ?? "",
-                                    _selectedLedgerGroup!,
-                                  );
+                                  searchController.clear();
+                                  FocusScope.of(context).unfocus();
+                                  _notifier.selectLedgerGroup(group.ledger);
                                 },
                                 child: Container(
                                   margin: const EdgeInsets.symmetric(
@@ -4434,13 +2660,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(12),
                                 onTap: () {
-                                  setState(() {
-                                    _selectedTopParty = null;
-                                    selectedSortOption = 'Default';
-                                    _topParties = List.from(
-                                      _topPartiesDefaultOrder,
-                                    );
-                                  });
+                                  _notifier.clearSelectedTopParty();
                                 },
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -4472,7 +2692,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             ),
                             Builder(
                               builder: (context) {
-                                final visible = _searchFilterVouchers(
+                                final visible = _notifier.searchFilterVouchers(
                                   _selectedTopParty!.vouchers,
                                 );
                                 return ListView.builder(
@@ -4526,7 +2746,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                           else
                             Builder(
                               builder: (context) {
-                                final visible = _searchFilterTopParties(
+                                final visible = _notifier.searchFilterTopParties(
                                   _topParties,
                                 );
                                 return ListView.builder(
@@ -4556,14 +2776,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   alignment: Alignment.centerLeft,
                                   child: TextButton.icon(
                                     onPressed: () {
-                                      setState(() {
-                                        _isSalesListVisible = false;
-                                        _isLedgerGroupVisible = true;
-                                        searchController.clear();
-                                        FocusScope.of(context).unfocus();
-                                        fetchLedgerGroups();
-                                        // filteredLedgerGroupList = ledgerGroupList;
-                                      });
+                                      searchController.clear();
+                                      FocusScope.of(context).unfocus();
+                                      _notifier.backToLedgerGroups();
                                     },
                                     icon: const Icon(
                                       Icons.arrow_back_ios_new_rounded,
@@ -4673,14 +2888,9 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 child: _AgeingModeTabs(
                                   isPartyMode: _isPartyAgeingView,
                                   onChanged: (isPartyMode) {
-                                    setState(() {
-                                      _isPartyAgeingView = isPartyMode;
-                                      selectedSortOption = 'Default';
-                                    });
-                                    if (isPartyMode &&
-                                        _partyAgeing.isEmpty) {
-                                      _computePartyAgeing();
-                                    }
+                                    _notifier.togglePartyAgeingMode(
+                                      isPartyMode,
+                                    );
                                   },
                                 ),
                               ),
@@ -4696,13 +2906,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(12),
                                     onTap: () {
-                                      setState(() {
-                                        _selectedPartyAgeing = null;
-                                        selectedSortOption = 'Default';
-                                        _partyAgeing = List.from(
-                                          _partyAgeingDefaultOrder,
-                                        );
-                                      });
+                                      _notifier.clearSelectedPartyAgeing();
                                     },
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(
@@ -4745,7 +2949,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 ),
                                 Builder(
                                   builder: (context) {
-                                    final visible = _searchFilterBills(
+                                    final visible = _notifier.searchFilterBills(
                                       _selectedPartyAgeing!.overdueBills,
                                     );
                                     return ListView.builder(
@@ -4795,7 +2999,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               else
                                 Builder(
                                   builder: (context) {
-                                    final visible = _searchFilterPartyAgeing(
+                                    final visible = _notifier.searchFilterPartyAgeing(
                                       _partyAgeing,
                                     );
                                     return ListView.builder(
@@ -4816,13 +3020,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(12),
                                   onTap: () {
-                                    setState(() {
-                                      _selectedAgeingBucket = null;
-                                      selectedSortOption = 'Default';
-                                      _ageingBuckets = List.from(
-                                        _ageingBucketsDefaultOrder,
-                                      );
-                                    });
+                                    _notifier.clearSelectedAgeingBucket();
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
@@ -4851,7 +3049,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                               ),
                               Builder(
                                 builder: (context) {
-                                  final visible = _searchFilterBills(
+                                  final visible = _notifier.searchFilterBills(
                                     _selectedAgeingBucket!.items,
                                   );
                                   return ListView.builder(
@@ -4906,7 +3104,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
                             else
                               Builder(
                                 builder: (context) {
-                                  final visible = _searchFilterBuckets(
+                                  final visible = _notifier.searchFilterBuckets(
                                     _ageingBuckets,
                                   );
                                   return ListView.builder(
@@ -5595,10 +3793,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         borderRadius: BorderRadius.circular(20),
         splashColor: app_color.withOpacity(0.08),
         onTap: () {
-          setState(() {
-            _selectedPartyAgeing = entry;
-            selectedSortOption = 'Default';
-          });
+          _notifier.selectPartyAgeing(entry);
         },
         child: Container(
           decoration: BoxDecoration(
@@ -5712,10 +3907,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         borderRadius: BorderRadius.circular(20),
         splashColor: app_color.withOpacity(0.08),
         onTap: () {
-          setState(() {
-            _selectedAgeingBucket = bucket;
-            selectedSortOption = 'Default';
-          });
+          _notifier.selectAgeingBucket(bucket);
         },
         child: Container(
       decoration: BoxDecoration(
@@ -5830,10 +4022,7 @@ class _DashboardClickedPageState extends State<DashboardClicked>
         borderRadius: BorderRadius.circular(20),
         splashColor: app_color.withOpacity(0.08),
         onTap: () {
-          setState(() {
-            _selectedTopParty = entry;
-            selectedSortOption = 'Default';
-          });
+          _notifier.selectTopParty(entry);
         },
         child: Container(
           decoration: BoxDecoration(
