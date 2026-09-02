@@ -4,20 +4,19 @@ import 'package:FincoreGo/currencyFormat.dart';
 import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'package:FincoreGo/widgets/entry_widgets.dart';
-import 'api/stock_repository.dart';
-import 'api/monthly_bucket_helper.dart';
+import 'providers/items_clicked_notifier.dart';
 
 class Sale_Purc {
   final String month, amount;
@@ -32,7 +31,7 @@ class Sale_Purc {
   }
 }
 
-class ItemsClicked extends StatefulWidget {
+class ItemsClicked extends ConsumerStatefulWidget {
   final String itemname,
       unit,
       item_desc,
@@ -58,7 +57,7 @@ class ItemsClicked extends StatefulWidget {
     this.stockItemMasterId,
   });
   @override
-  _ItemsClickedPageState createState() => _ItemsClickedPageState(
+  ConsumerState<ItemsClicked> createState() => _ItemsClickedPageState(
     itemname: itemname,
     unit: unit,
     item_desc: item_desc,
@@ -72,7 +71,7 @@ class ItemsClicked extends StatefulWidget {
   );
 }
 
-class _ItemsClickedPageState extends State<ItemsClicked>
+class _ItemsClickedPageState extends ConsumerState<ItemsClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String itemname = "",
@@ -85,35 +84,6 @@ class _ItemsClickedPageState extends State<ItemsClicked>
       lastpurcrate = "",
       alias = "";
   int? stockItemMasterId;
-  String startDateString = "", endDateString = "";
-  String totalsales = "";
-  String vchtypes = "purchase" + "," + "sales";
-  bool isVisibleNoAccess = false;
-  bool isItemDescVisible = false,
-      isItemAliasVisible = false,
-      isVisibleSalesList = false,
-      isClicked_Salesicon = false,
-      isVisiblePurchaseList = false,
-      isClicked_Purchaseicon = false;
-  int counter = 0;
-  bool isDateVisible = true;
-  bool salesummary_visible = false, purchasesummary_visible = false;
-  String sales_totalnetsales = "0",
-      sales_lastsaledate = "Not Available",
-      sales_lastsaleprice = "Not Available",
-      sales_totalsalesqty = "Not Available",
-      sales_minrate = "Not Available",
-      sales_maxrate = "Not Available",
-      sales_noofinvoices = "Not Available";
-  bool isSalesClickableCard = false, isPurchaseClickableCard = false;
-  String purchase_totalnetpurchase = "Not Available",
-      purchase_lastpurchasedate = "Not Available",
-      purchase_lastpurchaseprice = "Not Available",
-      purchase_totalpurchaseqty = "Not Available",
-      purchase_minrate = "Not Available",
-      purchase_maxrate = "Not Available",
-      purchase_noofinvoices = "Not Available";
-  dynamic _selecteddate;
 
   List<String> date_range = [
     'Today',
@@ -125,10 +95,9 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     'Year To Date',
     'Custom Date',
   ];
-  List<Sale_Purc> list_sale =
-      []; // Initialize an empty list to hold the filtered items
-  List<Sale_Purc> list_purchase =
-      []; // Initialize an empty list to hold the filtered items
+
+  DateTime _startDate = DateTime.now();
+  DateTime _endDate = DateTime.now().add(Duration(days: 7));
 
   _ItemsClickedPageState({
     required this.itemname,
@@ -143,812 +112,114 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     this.stockItemMasterId,
   });
 
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true;
-  String email = "";
-  String name = "";
-  String? opening_value = "0", openingheading = "";
-  TextEditingController searchController = TextEditingController();
-  bool isVisibleNoDataFound = false;
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  late String startdate_text = "", enddate_text = "";
-  DateTime _startDate = DateTime.now();
-  DateTime _endDate = DateTime.now().add(Duration(days: 7));
-  String? datetype;
-  late String? startdate_pref;
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-  List<String> spinner_list = [];
-  bool _isTextEnabled = true;
-  late int? decimal;
-  late NumberFormat currencyFormat;
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
+  late final _args = ItemsClickedArgs(
+    itemDesc: item_desc,
+    itemLastSaleDate: item_lastsaledate,
+    itemLastPurchDate: item_lastpurchdate,
+    itemRate: item_rate,
+    lastPurcRate: lastpurcrate,
+    alias: alias,
+    stockItemMasterId: stockItemMasterId,
+  );
 
-  bool _isDashVisible = true,
-      _isEnddateVisible = true,
-      _IsSizeboxVisible = true;
+  ItemsClickedNotifier get _notifier =>
+      ref.read(itemsClickedNotifierProvider(_args).notifier);
+  ItemsClickedState get _s => ref.read(itemsClickedNotifierProvider(_args));
 
-  String formatRate(String value, {int decimals = 2}) {
-    try {
-      String numberOnly = value.split('/').first.trim();
-      double parsed = double.parse(numberOnly);
-      return parsed.toStringAsFixed(decimals);
-    } catch (e) {
-      return value; // agar parsing fail ho jaye to raw value return karega
-    }
-  }
+  String formatRate(String value, {int decimals = 2}) =>
+      _notifier.formatRate(value, decimals: decimals);
 
-  String formatBackendValue(String value, {int decimals = 2}) {
-    try {
-      List<String> parts = value.split('/');
-      String numberPart = parts.first.trim();
-      String unitPart = parts.length > 1 ? parts.last.trim() : "";
+  String formatBackendValue(String value, {int decimals = 2}) =>
+      _notifier.formatBackendValue(value, decimals: decimals);
 
-      double parsed = double.parse(numberPart);
-      String formattedNumber = parsed.toStringAsFixed(decimals);
+  String convertDateFormat(String dateStr) =>
+      _notifier.convertDateFormat(dateStr);
 
-      return "$formattedNumber/$unitPart";
-    } catch (e) {
-      return value; // fallback if parsing fails
-    }
-  }
-
-  String convertDateFormat(String dateStr) {
-    // Parse the input date string
-    DateTime date = DateTime.parse(dateStr);
-    // Format the date to the desired output format
-    String formattedDate = DateFormat("dd-MMM-yyyy").format(date);
-    return formattedDate;
-  }
-
-  String formatTotal(dynamic amount, {int decimals = 2}) {
-    try {
-      // Convert to double
-      double parsed = double.parse(amount.toString());
-
-      // Get absolute value for formatting
-      double absValue = parsed.abs();
-
-      // Format with commas + decimals
-      final formatter = NumberFormat.currency(
-        locale: 'en',
-        symbol:
-            '', // 👈 keep symbol empty, since you already have one in string
-        decimalDigits: decimals,
-      );
-
-      String formatted = formatter.format(absValue).trim();
-
-      // Append CR/DR
-      if (parsed < 0) {
-        return "$formatted DR";
-      } else {
-        return "$formatted CR";
-      }
-    } catch (e) {
-      return amount.toString();
-    }
-  }
-
-  /// Fetches sales/purchase summary data via the tally-api backend. Keeps
-  /// its original 5-arg signature (`vchtypes`/`item_name`/`groupby` are no
-  /// longer used internally) so all 9 call sites (one per date-range
-  /// shortcut) stay untouched.
-  Future<void> fetchMainData(
-    String vchtypes,
-    String item_name,
-    String startdate_string,
-    String enddate_string,
-    String groupby,
-  ) async {
-    return _fetchMainDataTallyApi(startdate_string, enddate_string);
-  }
-
-  /// Populates the `sales_*`/`purchase_*`/`list_sale`/`list_purchase` state
-  /// fields the UI renders. `lastsaledate`/`lastsaleprice` (and their
-  /// purchase equivalents) are deliberately left untouched here, sourced
-  /// instead from the widget's constructor params (already fetched by
-  /// Items.dart) rather than the summary response.
-  Future<void> _fetchMainDataTallyApi(
-    String startdate_string,
-    String enddate_string,
-  ) async {
-    final stockItemMasterId = this.stockItemMasterId;
-    if (stockItemMasterId == null || !(salesummary_visible || purchasesummary_visible)) {
-      isDateVisible = false;
-      return;
-    }
-
-    isDateVisible = true;
-    list_sale.clear();
-    list_purchase.clear();
-
-    setState(() {
-      _isLoading = true;
-      isPurchaseClickableCard = false;
-      isSalesClickableCard = false;
-      isVisibleSalesList = false;
-      isClicked_Salesicon = false;
-      isVisiblePurchaseList = false;
-      isClicked_Purchaseicon = false;
-    });
-
-    sales_noofinvoices = 'Not Available';
-    sales_totalnetsales = '0';
-    sales_totalsalesqty = 'Not Available';
-    sales_minrate = 'Not Available';
-    sales_maxrate = 'Not Available';
-
-    purchase_noofinvoices = 'Not Available';
-    purchase_totalnetpurchase = '0';
-    purchase_totalpurchaseqty = 'Not Available';
-    purchase_minrate = 'Not Available';
-    purchase_maxrate = 'Not Available';
-
-    try {
-      final from = parseCompactDate(startdate_string);
-      final to = parseCompactDate(enddate_string);
-
-      final rows = await StockRepository.instance.stockItemSummary(
-        stockItemMasterId,
-        from: from,
-        to: to,
-      );
-
-      Future<void> bucketMonths(
-        List<Sale_Purc> target,
-        int voucherTypeMasterId,
-      ) async {
-        final movement = await StockRepository.instance.stockItemMovement(
-          stockItemMasterId,
-          from: from,
-          to: to,
-          voucherTypeMasterId: voucherTypeMasterId,
-        );
-        final buckets = bucketByMonth(
-          movement,
-          dateOf: (r) => DateTime.parse(r['date'] as String),
-          amountOf: (r) => parseMoneyField(r['amount']).abs(),
-        );
-        target.addAll([
-          for (final b in buckets) Sale_Purc(month: b.label, amount: b.total.toString()),
-        ]);
-      }
-
-      for (final row in rows) {
-        final vchtype = (row['voucherTypeName'] as String? ?? '');
-        final voucherTypeMasterId = row['voucherTypeMasterId'] as int?;
-
-        if (vchtype == 'Sales') {
-          isSalesClickableCard = true;
-          sales_noofinvoices = (row['invoiceCount'] ?? 0).toString();
-          sales_totalnetsales = formatTotal(row['totalAmount'], decimals: decimal!);
-          sales_lastsaledate = convertDateFormat(item_lastsaledate);
-          sales_lastsaleprice = formatBackendValue(item_rate, decimals: decimal!);
-          sales_totalsalesqty = (row['totalQuantity'] ?? '0').toString();
-          sales_minrate = formatRate((row['minRate'] ?? '0').toString(), decimals: decimal!);
-          sales_maxrate = formatRate((row['maxRate'] ?? '0').toString(), decimals: decimal!);
-          if (voucherTypeMasterId != null) {
-            await bucketMonths(list_sale, voucherTypeMasterId);
-          }
-        } else if (vchtype == 'Purchase') {
-          isPurchaseClickableCard = true;
-          purchase_noofinvoices = (row['invoiceCount'] ?? 0).toString();
-          purchase_totalnetpurchase = formatTotal(row['totalAmount'], decimals: decimal!);
-          purchase_lastpurchasedate = convertDateFormat(item_lastpurchdate);
-          purchase_lastpurchaseprice = formatBackendValue(lastpurcrate, decimals: decimal!);
-          purchase_totalpurchaseqty = (row['totalQuantity'] ?? '0').toString();
-          purchase_minrate = formatRate((row['minRate'] ?? '0').toString(), decimals: decimal!);
-          purchase_maxrate = formatRate((row['maxRate'] ?? '0').toString(), decimals: decimal!);
-          if (voucherTypeMasterId != null) {
-            await bucketMonths(list_purchase, voucherTypeMasterId);
-          }
-        }
-      }
-
-      setState(() => _isLoading = false);
-    } catch (e) {
-      setState(() => _isLoading = false);
-      debugPrint('ItemsClicked tally-api summary fetch failed: $e');
-    }
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    company = prefs.getString('company_name');
-    username = prefs.getString('username');
-    _selecteddate = prefs.getString('datetype') ?? date_range.first;
-
-    decimal = prefs.getInt('decimalplace') ?? 2;
-
-    currencyFormat = new NumberFormat();
-
-    String? currencyCode = '';
-
-    currencyCode = prefs.getString('currencycode') ?? "AED";
-
-    try {
-      if (currencyCode == 'INR' ||
-          currencyCode == 'EUR' ||
-          currencyCode == 'USD' ||
-          currencyCode == 'PKR') {
-        currencyFormat = NumberFormat('#,##0');
-        NumberFormat format = NumberFormat.simpleCurrency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-      } else {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-    } catch (e) {
-      NumberFormat format = NumberFormat.currency(
-        locale: 'en',
-        name: currencyCode,
-      );
-      currencysymbol = format.currencySymbol;
-      currencyFormat = NumberFormat('#,##0');
-    }
-
-    _currencyCode = currencyCode ?? 'AED';
-
-    if (_selecteddate == 'Custom Date') {
-      _startDate = DateTime.parse(prefs.getString('startdate')!);
-      _endDate = DateTime.parse(prefs.getString('enddate')!);
-
-      DateTime start = _startDate;
-      DateTime end = _endDate;
-
-      String startMonth = DateFormat('MMM').format(start);
-      String sdf = DateFormat(
-        'MM',
-      ).format(start); // converting month into string
-      String startDay = DateFormat('dd').format(start);
-      int startYear = start.year;
-
-      String endMonth = DateFormat('MMM').format(end);
-      String sdfEnd = DateFormat('MM').format(end);
-      String endDay = DateFormat('dd').format(end);
-      int endYear = end.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-    }
-
-    String item_sales = prefs.getString("item_sales") ?? 'False';
-    String item_purchase = prefs.getString("item_purchase") ?? 'False';
-
-    if (item_sales == 'True') {
-      salesummary_visible = true;
-    } else {
-      salesummary_visible = false;
-    }
-
-    if (item_purchase == 'True') {
-      purchasesummary_visible = true;
-    } else {
-      purchasesummary_visible = false;
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    _handleDate(_selecteddate);
-
-    if (item_desc == 'null' || itemname == '') {
-      isItemDescVisible = false;
-    } else {
-      isItemDescVisible = true;
-    }
-    if (alias == 'null' || alias == '') {
-      isItemAliasVisible = false;
-    } else {
-      isItemAliasVisible = true;
-    }
-  }
+  String formatTotal(dynamic amount, {int decimals = 2}) =>
+      _notifier.formatTotal(amount, decimals: decimals);
 
   Future<void> _selectDateRange(BuildContext context) async {
-    if (_isTextEnabled) {
-      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
-      String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate = DateTime.parse(startfrom!);
+    if (!_s.isTextEnabled) return;
+    final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+    final earliestDate = DateTime.parse(_s.startFrom!);
 
-      DateTimeRange? selectedDateRange = await showDateRangePicker(
-        context: context,
-        initialDateRange: initialDateRange,
-        firstDate: earliestDate,
-        lastDate: DateTime(2100),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: app_color, // main accent color
-                onPrimary: Colors.white,
-                surface: Theme.of(context).colorScheme.surface,
-                onSurface: Theme.of(context).colorScheme.onSurface,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                rangeSelectionBackgroundColor: app_color.withOpacity(
-                  0.15,
-                ), // 🔹 light shade of your app_color
-                rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                  app_color.withOpacity(0.15),
-                ),
+    final selectedDateRange = await showDateRangePicker(
+      context: context,
+      initialDateRange: initialDateRange,
+      firstDate: earliestDate,
+      lastDate: DateTime(2100),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: app_color,
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            datePickerTheme: DatePickerThemeData(
+              rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
+              rangeSelectionOverlayColor: MaterialStatePropertyAll(
+                app_color.withOpacity(0.15),
               ),
             ),
-            child: child!,
-          );
-        },
-      );
-
-      if (selectedDateRange != null) {
-        setState(() {
-          _startDate = selectedDateRange.start;
-          _endDate = selectedDateRange.end;
-
-          DateTime start = _startDate;
-          DateTime end = _endDate;
-
-          String startMonth = DateFormat('MMM').format(start);
-          String sdf = DateFormat(
-            'MM',
-          ).format(start); // converting month into string
-          String startDay = DateFormat('dd').format(start);
-          int startYear = start.year;
-
-          String endMonth = DateFormat('MMM').format(end);
-          String sdfEnd = DateFormat('MM').format(end);
-          String endDay = DateFormat('dd').format(end);
-          int endYear = end.year;
-
-          startDateString = '$startYear$sdf$startDay';
-          endDateString = '$endYear$sdfEnd$endDay';
-
-          startdate_text =
-              startDay + "-" + startMonth + "-" + startYear.toString();
-          enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-          print(startDateString);
-          print(endDateString);
-        });
-        fetchMainData(
-          vchtypes,
-          itemname,
-          startDateString,
-          endDateString,
-          "vchtype",
+          ),
+          child: child!,
         );
-      }
+      },
+    );
+
+    if (selectedDateRange != null) {
+      setState(() {
+        _startDate = selectedDateRange.start;
+        _endDate = selectedDateRange.end;
+      });
+      _notifier.setCustomDateRange(selectedDateRange.start, selectedDateRange.end);
     }
   }
 
   Future<void> _selectDateRange_auto(BuildContext context) async {
-    print('auto');
-    if (_isTextEnabled) {
-      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
-      String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate = DateTime.parse(startfrom!);
+    if (!_s.isTextEnabled) return;
+    final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+    final earliestDate = DateTime.parse(_s.startFrom!);
 
-      DateTimeRange? selectedDateRange = await showDateRangePicker(
-        context: context,
-        initialDateRange: initialDateRange,
-        firstDate: earliestDate,
-        lastDate: DateTime(2100),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: app_color, // main accent color
-                onPrimary: Colors.white,
-                surface: Theme.of(context).colorScheme.surface,
-                onSurface: Theme.of(context).colorScheme.onSurface,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                rangeSelectionBackgroundColor: app_color.withOpacity(
-                  0.15,
-                ), // 🔹 light shade of your app_color
-                rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                  app_color.withOpacity(0.15),
-                ),
+    final selectedDateRange = await showDateRangePicker(
+      context: context,
+      initialDateRange: initialDateRange,
+      firstDate: earliestDate,
+      lastDate: DateTime(2100),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: app_color,
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            datePickerTheme: DatePickerThemeData(
+              rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
+              rangeSelectionOverlayColor: MaterialStatePropertyAll(
+                app_color.withOpacity(0.15),
               ),
             ),
-            child: child!,
-          );
-        },
-      );
+          ),
+          child: child!,
+        );
+      },
+    );
 
-      setState(() {
-        _startDate = selectedDateRange!.start;
-        _endDate = selectedDateRange.end;
-
-        DateTime start = _startDate;
-        DateTime end = _endDate;
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-      });
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-    }
+    if (selectedDateRange == null) return;
+    setState(() {
+      _startDate = selectedDateRange.start;
+      _endDate = selectedDateRange.end;
+    });
+    _notifier.setCustomDateRange(selectedDateRange.start, selectedDateRange.end);
   }
 
   void _handleDate(String value) {
-    setState(() {
-      _selecteddate = value;
-    });
-
-    if (_selecteddate == "Today") {
-      DateTime currentDate = DateTime.now();
-      String startMonth = DateFormat('MMM').format(currentDate);
-      String sdf = DateFormat(
-        'MM',
-      ).format(currentDate); // converting month into string
-
-      String startDay = DateFormat('dd').format(currentDate);
-      int startYear = currentDate.year;
-
-      String endMonth = DateFormat('MMM').format(currentDate);
-      String sdfEnd = DateFormat('MM').format(currentDate);
-
-      String endDay = DateFormat('dd').format(currentDate);
-      int endYear = currentDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-    } else if (_selecteddate == "Year To Date") {
-      DateTime now = DateTime.now();
-      DateTime startDate = DateTime(
-        now.year,
-        1,
-        1,
-      ); // Start of the current year
-      DateTime endDate = DateTime(now.year, now.month, now.day); // Today's date
-
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(startDate).substring(3, 6);
-      String sdf = DateFormat('MM').format(startDate);
-
-      String startDay = dateFormat.format(startDate).substring(0, 2);
-      int startYear = startDate.year;
-
-      String endMonth = dateFormat.format(endDate).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(endDate);
-
-      String endDay = dateFormat.format(endDate).substring(0, 2);
-      int endYear = endDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Yesterday") {
-      DateTime yesterday = DateTime.now().subtract(Duration(days: 1));
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yesterday); // converting month into string
-
-      String startDay = dateFormat.format(yesterday).substring(0, 2);
-      int startYear = yesterday.year;
-
-      String endMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(yesterday);
-
-      String endDay = dateFormat.format(yesterday).substring(0, 2);
-      int endYear = yesterday.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-    } else if (_selecteddate == "This Month") {
-      DateTime now = DateTime.now();
-      DateTime startOfMonth = DateTime(now.year, now.month, 1);
-      DateTime endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-      String startMonth = DateFormat('MMM').format(startOfMonth);
-      String sdf = DateFormat(
-        'MM',
-      ).format(startOfMonth); // converting month into string
-      String startDay = DateFormat('dd').format(startOfMonth);
-      int startYear = startOfMonth.year;
-
-      String endMonth = DateFormat('MMM').format(endOfMonth);
-      String sdfEnd = DateFormat('MM').format(endOfMonth);
-      String endDay = DateFormat('dd').format(endOfMonth);
-      int endYear = endOfMonth.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Month") {
-      var calendarLastMonthStart = DateTime.now();
-      var calendarLastMonthEnd = DateTime.now();
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month - 1,
-        1,
-      );
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month,
-        1,
-      );
-      calendarLastMonthEnd = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month + 1,
-        0,
-      );
-
-      var startMonth = DateFormat('MMM').format(calendarLastMonthStart);
-      var sdf = DateFormat('MM').format(calendarLastMonthStart);
-      var startDay = DateFormat('dd').format(calendarLastMonthStart);
-      var startYear = calendarLastMonthStart.year;
-
-      var endMonth = DateFormat('MMM').format(calendarLastMonthEnd);
-      var sdfEnd = DateFormat('MM').format(calendarLastMonthEnd);
-      var endDay = DateFormat('dd').format(calendarLastMonthEnd);
-      var endYear = calendarLastMonthEnd.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "This Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year, 1, 1);
-      DateTime yearEnd = DateTime(today.year, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year - 1, 1, 1);
-      DateTime yearEnd = DateTime(today.year - 1, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData(
-        vchtypes,
-        itemname,
-        startDateString,
-        endDateString,
-        "vchtype",
-      );
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Custom Date") {
-      setState(() {
-        _isTextEnabled = true;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-
+    _notifier.handleDate(value);
+    if (value == 'Custom Date') {
       _selectDateRange_auto(context);
     }
   }
@@ -958,31 +229,32 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   }
 
   Future<void> generateAndShareCSV_ItemDetail() async {
+    final vm = _s;
     final List<List<dynamic>> csvData = [];
     csvData.add(['Item Name', itemname]);
     // alias/inventory_closing can come back as the literal string "null"
     // from the API (not Dart null) - isItemAliasVisible already guards
     // against that for alias; inventory_closing gets the same guard here.
-    if (isItemAliasVisible) csvData.add(['Alias', alias]);
+    if (vm.isItemAliasVisible) csvData.add(['Alias', alias]);
     csvData.add([
       'Inventory Closing',
       inventory_closing == 'null' ? '0' : inventory_closing,
     ]);
     csvData.add([]);
 
-    if (salesummary_visible && list_sale.isNotEmpty) {
+    if (vm.salesSummaryVisible && vm.listSale.isNotEmpty) {
       csvData.add(['Sales Summary']);
       csvData.add(['Month', 'Amount']);
-      for (final row in list_sale) {
+      for (final row in vm.listSale) {
         csvData.add([row.month, formatAmount(row.amount)]);
       }
       csvData.add([]);
     }
 
-    if (purchasesummary_visible && list_purchase.isNotEmpty) {
+    if (vm.purchaseSummaryVisible && vm.listPurchase.isNotEmpty) {
       csvData.add(['Purchase Summary']);
       csvData.add(['Month', 'Amount']);
-      for (final row in list_purchase) {
+      for (final row in vm.listPurchase) {
         csvData.add([row.month, formatAmount(row.amount)]);
       }
     }
@@ -995,18 +267,19 @@ class _ItemsClickedPageState extends State<ItemsClicked>
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing $itemname Detail Report of ${company ?? ''}',
+        text: 'Sharing $itemname Detail Report of ${vm.company}',
         files: [XFile(tempFilePath)],
       ),
     );
   }
 
   Future<void> generateAndSharePDF_ItemDetail() async {
+    final vm = _s;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
-    final companyName = company ?? '';
+    final companyName = vm.company;
 
     pw.Widget buildSummaryTable(String title, List<Sale_Purc> list) {
       return pw.Column(
@@ -1056,7 +329,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                 style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, font: font),
               ),
             ),
-            if (isItemAliasVisible)
+            if (vm.isItemAliasVisible)
               pw.Center(
                 child: pw.Text(
                   alias,
@@ -1068,10 +341,10 @@ class _ItemsClickedPageState extends State<ItemsClicked>
               'Inventory Closing: ${inventory_closing == 'null' ? '0' : inventory_closing}',
               style: pw.TextStyle(fontSize: 11, font: font),
             ),
-            if (salesummary_visible && list_sale.isNotEmpty)
-              buildSummaryTable('Sales Summary', list_sale),
-            if (purchasesummary_visible && list_purchase.isNotEmpty)
-              buildSummaryTable('Purchase Summary', list_purchase),
+            if (vm.salesSummaryVisible && vm.listSale.isNotEmpty)
+              buildSummaryTable('Sales Summary', vm.listSale),
+            if (vm.purchaseSummaryVisible && vm.listPurchase.isNotEmpty)
+              buildSummaryTable('Purchase Summary', vm.listPurchase),
           ],
         ),
       ),
@@ -1085,22 +358,16 @@ class _ItemsClickedPageState extends State<ItemsClicked>
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing $itemname Detail Report of ${company ?? ''}',
+        text: 'Sharing $itemname Detail Report of ${vm.company}',
         files: [XFile(tempFilePath)],
       ),
     );
   }
 
   @override
-  void initState() {
-    super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
-  }
-
-  @override
-  @override
   Widget build(BuildContext context) {
+    ref.watch(itemsClickedNotifierProvider(_args));
+    final vm = _s;
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.items),
       key: _scaffoldKey,
@@ -1127,7 +394,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
               children: [
                 Flexible(
                   child: Text(
-                    company ?? '',
+                    vm.company,
                     style: GoogleFonts.poppins(
                       color: Colors.white,
                       fontSize: 16,
@@ -1169,7 +436,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (list_sale.isNotEmpty || list_purchase.isNotEmpty) {
+                          if (vm.listSale.isNotEmpty || vm.listPurchase.isNotEmpty) {
                             generateAndSharePDF_ItemDetail();
                           } else {
                             showToast('Data Not Found');
@@ -1199,7 +466,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (list_sale.isNotEmpty || list_purchase.isNotEmpty) {
+                          if (vm.listSale.isNotEmpty || vm.listPurchase.isNotEmpty) {
                             generateAndShareCSV_ItemDetail();
                           } else {
                             showToast('Data Not Found');
@@ -1232,21 +499,21 @@ class _ItemsClickedPageState extends State<ItemsClicked>
           ],
         ),
       ),
-      body: _isLoading
+      body: vm.isLoading
           ? _buildSkeletonItemDetail()
           : ListView(
               padding: EdgeInsets.only(left: 16, right: 16, bottom: 12, top: 8),
               children: [
-                if (isDateVisible) _buildDateSelector(context),
-                if (isDateVisible) SizedBox(height: 8),
+                if (vm.isDateVisible) _buildDateSelector(context),
+                if (vm.isDateVisible) SizedBox(height: 8),
 
                 _buildItemOverviewCard(),
 
-                if (salesummary_visible || purchasesummary_visible)
+                if (vm.salesSummaryVisible || vm.purchaseSummaryVisible)
                   SizedBox(height: 8),
-                if (salesummary_visible)
+                if (vm.salesSummaryVisible)
                   _buildSummaryCard(context, isSales: true),
-                if (purchasesummary_visible)
+                if (vm.purchaseSummaryVisible)
                   _buildSummaryCard(context, isSales: false),
               ],
             ),
@@ -1324,6 +591,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   }
 
   Widget _buildItemOverviewCard() {
+    final vm = _s;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
       decoration: BoxDecoration(
@@ -1389,7 +657,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             const SizedBox(height: 12),
 
             /// 🔹 Alias
-            if (isItemAliasVisible) ...[
+            if (vm.isItemAliasVisible) ...[
               Container(
                 margin: const EdgeInsets.symmetric(vertical: 4),
                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
@@ -1516,7 +784,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             ),
 
             /// 🔹 Description
-            if (isItemDescVisible) ...[
+            if (vm.isItemDescVisible) ...[
               const Divider(height: 28, thickness: 0.5),
 
               // 🔹 Title Row with Gradient Badge
@@ -1590,6 +858,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   }
 
   Widget _buildDateSelector(BuildContext context) {
+    final vm = _s;
     final tintColor = Theme.of(context).brightness == Brightness.dark
         ? Colors.white.withOpacity(0.06)
         : Colors.grey.shade100;
@@ -1624,7 +893,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
               child: DropdownButton<String>(
                 isExpanded: true,
                 isDense: true,
-                value: _selecteddate,
+                value: vm.selectedDate,
                 icon: Icon(
                   Icons.expand_more,
                   size: 18,
@@ -1666,7 +935,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
                   SizedBox(width: 6),
                   Flexible(
                     child: Text(
-                      "$startdate_text → $enddate_text",
+                      "${vm.startDateText} → ${vm.endDateText}",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w600,
@@ -1690,6 +959,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
     List<Sale_Purc> list,
     bool isSales,
   ) {
+    final vm = _s;
     return Column(
       children: list
           .map((card) {
@@ -1706,7 +976,7 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             if (parsedAmount == null || parsedDate == null) {
               return const SizedBox.shrink();
             }
-            final amount = parsedAmount.toStringAsFixed(decimal!);
+            final amount = parsedAmount.toStringAsFixed(vm.decimal);
             final date = parsedDate;
             final startOfMonth = DateFormat(
           'yyyyMMdd',
@@ -1789,9 +1059,9 @@ class _ItemsClickedPageState extends State<ItemsClicked>
 
                 // 🔹 Amount with arrow
                 currencyAmountText(
-                  currencyCode: _currencyCode,
-                  symbol: currencysymbol,
-                  amountText: formatTotal(amount, decimals: decimal!),
+                  currencyCode: vm.currencyCode,
+                  symbol: vm.currencySymbol,
+                  amountText: formatTotal(amount, decimals: vm.decimal),
                   style: GoogleFonts.poppins(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -1854,8 +1124,8 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   // onSurface) so the Dirham glyph swap-in is visually seamless.
   Widget _summaryCurrencyValue(String amountText) {
     return currencyAmountText(
-      currencyCode: _currencyCode,
-      symbol: currencysymbol,
+      currencyCode: _s.currencyCode,
+      symbol: _s.currencySymbol,
       amountText: amountText,
       style: GoogleFonts.poppins(
         fontSize: 14,
@@ -1968,37 +1238,42 @@ class _ItemsClickedPageState extends State<ItemsClicked>
   }
 
   Widget _buildSummaryCard(BuildContext context, {required bool isSales}) {
+    final vm = _s;
     final title = isSales ? 'SALES SUMMARY' : 'PURCHASE SUMMARY';
     final icon = isSales
         ? Icons.trending_up_rounded
         : Icons.shopping_cart_outlined;
     final total = _formatIntValue(
-      isSales ? sales_totalnetsales : purchase_totalnetpurchase,
+      isSales ? vm.salesTotalNetSales : vm.purchaseTotalNetPurchase,
     );
     final lastDate = _formatValue(
-      isSales ? sales_lastsaledate : purchase_lastpurchasedate,
+      isSales ? vm.salesLastSaleDate : vm.purchaseLastPurchaseDate,
     );
     final lastPrice = _formatIntValue(
-      isSales ? sales_lastsaleprice : purchase_lastpurchaseprice,
+      isSales ? vm.salesLastSalePrice : vm.purchaseLastPurchasePrice,
     );
 
     print('last $isSales price $lastPrice');
     final qty = _formatValue(
-      isSales ? sales_totalsalesqty : purchase_totalpurchaseqty,
+      isSales ? vm.salesTotalSalesQty : vm.purchaseTotalPurchaseQty,
     );
-    final minRate = _formatIntValue(isSales ? sales_minrate : purchase_minrate);
-    final maxRate = _formatIntValue(isSales ? sales_maxrate : purchase_maxrate);
+    final minRate =
+        _formatIntValue(isSales ? vm.salesMinRate : vm.purchaseMinRate);
+    final maxRate =
+        _formatIntValue(isSales ? vm.salesMaxRate : vm.purchaseMaxRate);
     final invoices = _formatValue(
-      isSales ? sales_noofinvoices : purchase_noofinvoices,
+      isSales ? vm.salesNoOfInvoices : vm.purchaseNoOfInvoices,
     );
-    final listData = isSales ? list_sale : list_purchase;
+    final listData = isSales ? vm.listSale : vm.listPurchase;
     final isClickable = isSales
-        ? isSalesClickableCard
-        : isPurchaseClickableCard;
-    final isExpanded = isSales ? isClicked_Salesicon : isClicked_Purchaseicon;
-    final isVisible = isSales ? isVisibleSalesList : isVisiblePurchaseList;
+        ? vm.isSalesClickableCard
+        : vm.isPurchaseClickableCard;
+    final isExpanded =
+        isSales ? vm.isClickedSalesIcon : vm.isClickedPurchaseIcon;
+    final isVisible =
+        isSales ? vm.isVisibleSalesList : vm.isVisiblePurchaseList;
     final hasData =
-        (isSales ? sales_noofinvoices : purchase_noofinvoices) !=
+        (isSales ? vm.salesNoOfInvoices : vm.purchaseNoOfInvoices) !=
         'Not Available';
 
     if (!hasData) {
@@ -2068,15 +1343,11 @@ class _ItemsClickedPageState extends State<ItemsClicked>
             InkWell(
               onTap: () {
                 if (isClickable) {
-                  setState(() {
-                    if (isSales) {
-                      isClicked_Salesicon = !isClicked_Salesicon;
-                      isVisibleSalesList = !isVisibleSalesList;
-                    } else {
-                      isClicked_Purchaseicon = !isClicked_Purchaseicon;
-                      isVisiblePurchaseList = !isVisiblePurchaseList;
-                    }
-                  });
+                  if (isSales) {
+                    _notifier.toggleSalesExpanded();
+                  } else {
+                    _notifier.togglePurchaseExpanded();
+                  }
                 }
               },
               borderRadius: BorderRadius.circular(12),
@@ -2146,8 +1417,8 @@ class _ItemsClickedPageState extends State<ItemsClicked>
 
                     // 🔹 Total value
                     currencyAmountText(
-                      currencyCode: _currencyCode,
-                      symbol: currencysymbol,
+                      currencyCode: vm.currencyCode,
+                      symbol: vm.currencySymbol,
                       amountText: total,
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w700,
