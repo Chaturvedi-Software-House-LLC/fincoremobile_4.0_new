@@ -7,6 +7,7 @@ import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,13 +24,10 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
 import 'utils/number_formatter.dart';
-import 'api/ledger_repository.dart';
-import 'api/voucher_repository.dart';
-import 'api/voucher_drilldown_helper.dart';
-import 'api/monthly_bucket_helper.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'providers/party_clicked_notifier.dart';
 
 class Summary {
   final String vchtype, totalInvoice, averageAmount, lastdate, totalAmount;
@@ -101,7 +99,7 @@ class Rec_Pay {
   }
 }
 
-class PartyClicked extends StatefulWidget {
+class PartyClicked extends ConsumerStatefulWidget {
   final String partyname;
   /// The ledger's tally-api `masterId` - every migrated report endpoint
   /// (`ledgerSummary`/`outstandingTotal`/`outstandingBills`/`itemSummary`)
@@ -111,165 +109,26 @@ class PartyClicked extends StatefulWidget {
   final int? ledgerMasterId;
   const PartyClicked({required this.partyname, this.ledgerMasterId});
   @override
-  _PartyClickedPageState createState() =>
+  ConsumerState<PartyClicked> createState() =>
       _PartyClickedPageState(partyname: partyname, ledgerMasterId: ledgerMasterId);
 }
 
-class _PartyClickedPageState extends State<PartyClicked>
+class _PartyClickedPageState extends ConsumerState<PartyClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String partyname = "";
   int? ledgerMasterId;
 
-  String startDateString = "", endDateString = "";
-  String totalsales = "";
-  String vchtypes = "purchase" + "," + "sales";
+  _PartyClickedPageState({required this.partyname, this.ledgerMasterId});
 
-  bool isExpanded_Sales = false;
-  String lastsaledate = "",
-      noofsalesinvoice = "0",
-      avgsalesinvoiceamt = "0",
-      totalsaleamt = "0";
-  String lastpurchasedate = "",
-      noofpurchaseinvoice = "0",
-      avgpurchaseinvoiceamt = "0",
-      totalpurchaseamt = "0";
-  String lastreceiptdate = "",
-      noofreceiptinvoice = "0",
-      avgreceiptinvoiceamt = "0",
-      totalreceiptamt = "0";
-  String lastpaymentdate = "",
-      noofpaymentinvoice = "0",
-      avgpaymentinvoiceamt = "0",
-      totalpaymentamt = "0";
-  String lastcreditnotedate = "",
-      noofcreditnoteinvoice = "0",
-      avgcreditnoteinvoiceamt = "0",
-      totalcreditnoteamt = "0";
-  String lastdebitnotedate = "",
-      noofdebitnoteinvoice = "0",
-      avgdebitnoteinvoiceamt = "0",
-      totaldebitnoteamt = "0";
-  String lastjournaldate = "",
-      noofjournalinvoice = "0",
-      avgjournalinvoiceamt = "0",
-      totaljournalamt = "0";
+  late final _args =
+      PartyClickedArgs(partyname: partyname, ledgerMasterId: ledgerMasterId);
 
-  String receivabletotal = "0",
-      onAccountReceivable = "0",
-      row1_receivable = "0",
-      row2_receivable = "0",
-      row3_receivable = "0",
-      row4_receivable = "0",
-      row5_receivable = "0",
-      row6_receivable = "0",
-      row1_receivable_heading = "180",
-      row2_receivable_heading = "120",
-      row3_receivable_heading = "90",
-      row4_receivable_heading = "60",
-      row5_receivable_heading = "30",
-      row6_receivable_heading = "0",
-      row1_receivable_heading_value = "180",
-      row2_receivable_heading_value = "120",
-      row3_receivable_heading_value = "90",
-      row4_receivable_heading_value = "60",
-      row5_receivable_heading_value = "30",
-      row6_receivable_heading_value = "0";
+  PartyClickedNotifier get _notifier =>
+      ref.read(partyClickedNotifierProvider(_args).notifier);
+  PartyClickedState get _s => ref.read(partyClickedNotifierProvider(_args));
 
-  String payabletotal = "0",
-      onAccountPayable = "0",
-      row1_payable = "0",
-      row2_payable = "0",
-      row3_payable = "0",
-      row4_payable = "0",
-      row5_payable = "0",
-      row6_payable = "0",
-      row1_payable_heading = "180",
-      row2_payable_heading = "120",
-      row3_payable_heading = "90",
-      row4_payable_heading = "60",
-      row5_payable_heading = "30",
-      row6_payable_heading = "0",
-      row1_payable_heading_value = "180",
-      row2_payable_heading_value = "120",
-      row3_payable_heading_value = "90",
-      row4_payable_heading_value = "60",
-      row5_payable_heading_value = "30",
-      row6_payable_heading_value = "0";
-
-  int counter = 0;
-
-  // Running ageing-bucket accumulators for the Receivable/Payable summary.
-  // These must persist across the whole recpay_list loop (one call to
-  // formatOnAccountWithBillNo per bill) - previously they were declared
-  // *inside* formatOnAccountWithBillNo and reset to 0 on every call, so
-  // each bucket only ever reflected the single most-recently-processed
-  // bill instead of the sum of every bill in that bucket, and the
-  // headline receivabletotal/payabletotal (derived from these below)
-  // never accounted for bill-based amounts at all - only whatever the
-  // separate getOutstandings "opening" endpoint returned, which is 0 for
-  // a party whose whole balance is bill-linked rather than on-account.
-  double _sumReceivable0 = 0,
-      _sumReceivable30 = 0,
-      _sumReceivable60 = 0,
-      _sumReceivable90 = 0,
-      _sumReceivable120 = 0,
-      _sumReceivable180 = 0;
-  double _sumPayable0 = 0,
-      _sumPayable30 = 0,
-      _sumPayable60 = 0,
-      _sumPayable90 = 0,
-      _sumPayable120 = 0,
-      _sumPayable180 = 0;
-
-  // On-account money that is NOT also inside one of the 6 buckets above
-  // (i.e. overdue_int <= 0, so formatOnAccountWithBillNo never ran for
-  // it). Kept separate from onAccountReceivable/onAccountPayable, which
-  // just holds whatever the last on-account row's raw value was and does
-  // NOT tell you whether that same row was already bucketed elsewhere.
-  double _currentReceivableOnAccount = 0;
-  double _currentPayableOnAccount = 0;
-
-  late int? decimal;
-  late NumberFormat currencyFormat;
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
-
-  bool isVisibleSoldBtn = false, isVisiblePurchaseBtn = false;
-
-  bool isNoAccessVisible = false;
-
-  bool isClicked_Summary = true,
-      isClicked_Sold = false,
-      isClicked_Purchase = false,
-      isVisibleSoldList = false,
-      isVisiblePurchaseList = false;
-
-  bool SalesVisibility = false,
-      PurchaseVisibility = false,
-      ReceiptVisibility = false,
-      PaymentVisibility = false,
-      CreditnoteVisibility = false,
-      DebitnoteVisibility = false,
-      JournalVisibility = false,
-      ReceivableVisibility = false,
-      PayableVisibility = false,
-      SalesOrderVisibility = false,
-      PurchaseOrderVisibility = false;
-
-  String pendingsalesorder = "0", pendingpurchaseorder = "0";
-
-  dynamic _selecteddate;
-
-  List<Sold_Purchased> filteredItems_sold = [];
-  List<Sold_Purchased> sold_list = [];
-
-  List<Sold_Purchased> filteredItems_purchase = [];
-  List<Sold_Purchased> purchase_list = [];
-
-  String item_count = "0";
-
-  bool _isSearchViewVisible = false, isSearchLayoutVisible = false;
+  TextEditingController searchController = TextEditingController();
 
   // Used to capture the Trend Overview chart as an image for the Summary
   // PDF export - the chart itself (fl_chart) has no direct PDF renderer,
@@ -286,86 +145,95 @@ class _PartyClickedPageState extends State<PartyClicked>
     'Custom Date',
   ];
 
-  List<months> months_list_sales =
-      []; // Initialize an empty list to hold the filtered items
-  List<months> months_list_purchase =
-      []; // Initialize an empty list to hold the filtered items
-  List<months> months_list_receipt =
-      []; // Initialize an empty list to hold the filtered items
-  List<months> months_list_payment =
-      []; // Initialize an empty list to hold the filtered items
-  List<months> months_list_creditnote =
-      []; // Initialize an empty list to hold the filtered items
-  List<months> months_list_debitnote =
-      []; // Initialize an empty list to hold the filtered items
-  List<months> months_list_journal =
-      []; // Initialize an empty list to hold the filtered items
-
-  _PartyClickedPageState({required this.partyname, this.ledgerMasterId});
-
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true;
-
-  String email = "";
-  String name = "";
-
-  String? opening_value = "0", openingheading = "";
-
-  TextEditingController searchController = TextEditingController();
-
-  bool isVisibleNoDataFound = false;
-
-  bool isVisibleSummaryBtn = false;
-
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  late String startdate_text = "", enddate_text = "";
   DateTime _startDate = DateTime.now();
   DateTime _endDate = DateTime.now().add(Duration(days: 7));
-  String? datetype;
 
-  late String? startdate_pref;
+  Future<void> _selectDateRange(BuildContext context) async {
+    if (!_s.isTextEnabled) return;
+    final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+    final earliestDate = DateTime.parse((await SharedPreferences.getInstance()).getString('startfrom')!);
 
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
+    final selectedDateRange = await showDateRangePicker(
+      context: context,
+      initialDateRange: initialDateRange,
+      firstDate: earliestDate,
+      lastDate: DateTime(2100),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: app_color,
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            datePickerTheme: DatePickerThemeData(
+              rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
+              rangeSelectionOverlayColor: MaterialStatePropertyAll(
+                app_color.withOpacity(0.15),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
 
-  List<String> spinner_list = [];
+    if (selectedDateRange != null) {
+      setState(() {
+        _startDate = selectedDateRange.start;
+        _endDate = selectedDateRange.end;
+      });
+      _notifier.setCustomDateRange(selectedDateRange.start, selectedDateRange.end);
+    }
+  }
 
-  String heading1 = '',
-      heading2 = '',
-      heading3 = '',
-      heading4 = '',
-      heading5 = '';
+  Future<void> _selectDateRange_auto(BuildContext context) async {
+    if (!_s.isTextEnabled) return;
+    final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+    final earliestDate = DateTime.parse((await SharedPreferences.getInstance()).getString('startfrom')!);
 
-  bool _isTextEnabled = true;
+    final selectedDateRange = await showDateRangePicker(
+      context: context,
+      initialDateRange: initialDateRange,
+      firstDate: earliestDate,
+      lastDate: DateTime(2100),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: app_color,
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            datePickerTheme: DatePickerThemeData(
+              rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
+              rangeSelectionOverlayColor: MaterialStatePropertyAll(
+                app_color.withOpacity(0.15),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
 
-  bool _isDashVisible = true,
-      _isEnddateVisible = true,
-      _IsSizeboxVisible = true;
+    if (selectedDateRange == null) return;
+    setState(() {
+      _startDate = selectedDateRange.start;
+      _endDate = selectedDateRange.end;
+    });
+    _notifier.setCustomDateRange(selectedDateRange.start, selectedDateRange.end);
+  }
 
-  String salesparty = '';
-  String purchaseparty = '';
-  String creditnoteparty = '';
-  String journalparty = '';
-  String payableparty = '';
-  String pendingpurchaseorderparty = '';
-  String receiptparty = '';
-  String paymentparty = '';
-  String debitnoteparty = '';
-  String receivableparty = '';
-  String pendingsalesorderparty = '';
-  String party_suppliers = '';
-  String party_customers = '';
+  void _handleDate(String value) {
+    _notifier.handleDate(value);
+    if (value == 'Custom Date') {
+      _selectDateRange_auto(context);
+    }
+  }
 
-  // ------------------------ SUMMARY PDF ------------------------
-  // Formats a raw signed total the same way the on-screen summary cards do
-  // (CurrencyFormatter's baked-symbol variant, which is fine for PDF/CSV
-  // export contexts - see currencyFormat.dart).
   String _pdfFormatCrDr(String raw) {
     final value = double.tryParse(raw.replaceAll(',', '')) ?? 0.0;
     final formatted = CurrencyFormatter.formatCurrency_double(value.abs());
@@ -388,12 +256,86 @@ class _PartyClickedPageState extends State<PartyClicked>
   }
 
   Future<void> generateAndSharePDF_Summary() async {
+    final vm = _s;
+    final company = vm.company;
+    final SalesVisibility = vm.salesVisibility;
+    final PurchaseVisibility = vm.purchaseVisibility;
+    final ReceiptVisibility = vm.receiptVisibility;
+    final PaymentVisibility = vm.paymentVisibility;
+    final CreditnoteVisibility = vm.creditnoteVisibility;
+    final DebitnoteVisibility = vm.debitnoteVisibility;
+    final JournalVisibility = vm.journalVisibility;
+    final ReceivableVisibility = vm.receivableVisibility;
+    final PayableVisibility = vm.payableVisibility;
+    final SalesOrderVisibility = vm.salesOrderVisibility;
+    final PurchaseOrderVisibility = vm.purchaseOrderVisibility;
+    final totalsaleamt = vm.totalsaleamt;
+    final avgsalesinvoiceamt = vm.avgsalesinvoiceamt;
+    final noofsalesinvoice = vm.noofsalesinvoice;
+    final lastsaledate = vm.lastsaledate;
+    final totalpurchaseamt = vm.totalpurchaseamt;
+    final avgpurchaseinvoiceamt = vm.avgpurchaseinvoiceamt;
+    final noofpurchaseinvoice = vm.noofpurchaseinvoice;
+    final lastpurchasedate = vm.lastpurchasedate;
+    final totalreceiptamt = vm.totalreceiptamt;
+    final avgreceiptinvoiceamt = vm.avgreceiptinvoiceamt;
+    final noofreceiptinvoice = vm.noofreceiptinvoice;
+    final lastreceiptdate = vm.lastreceiptdate;
+    final totalpaymentamt = vm.totalpaymentamt;
+    final avgpaymentinvoiceamt = vm.avgpaymentinvoiceamt;
+    final noofpaymentinvoice = vm.noofpaymentinvoice;
+    final lastpaymentdate = vm.lastpaymentdate;
+    final totalcreditnoteamt = vm.totalcreditnoteamt;
+    final avgcreditnoteinvoiceamt = vm.avgcreditnoteinvoiceamt;
+    final noofcreditnoteinvoice = vm.noofcreditnoteinvoice;
+    final lastcreditnotedate = vm.lastcreditnotedate;
+    final totaldebitnoteamt = vm.totaldebitnoteamt;
+    final avgdebitnoteinvoiceamt = vm.avgdebitnoteinvoiceamt;
+    final noofdebitnoteinvoice = vm.noofdebitnoteinvoice;
+    final lastdebitnotedate = vm.lastdebitnotedate;
+    final totaljournalamt = vm.totaljournalamt;
+    final avgjournalinvoiceamt = vm.avgjournalinvoiceamt;
+    final noofjournalinvoice = vm.noofjournalinvoice;
+    final lastjournaldate = vm.lastjournaldate;
+    final receivabletotal = vm.receivabletotal;
+    final onAccountReceivable = vm.onAccountReceivable;
+    final row1_receivable = vm.row1Receivable;
+    final row2_receivable = vm.row2Receivable;
+    final row3_receivable = vm.row3Receivable;
+    final row4_receivable = vm.row4Receivable;
+    final row5_receivable = vm.row5Receivable;
+    final row6_receivable = vm.row6Receivable;
+    final row1_receivable_heading = vm.row1ReceivableHeading;
+    final row2_receivable_heading = vm.row2ReceivableHeading;
+    final row3_receivable_heading = vm.row3ReceivableHeading;
+    final row4_receivable_heading = vm.row4ReceivableHeading;
+    final row5_receivable_heading = vm.row5ReceivableHeading;
+    final row6_receivable_heading = vm.row6ReceivableHeading;
+    final payabletotal = vm.payabletotal;
+    final onAccountPayable = vm.onAccountPayable;
+    final row1_payable = vm.row1Payable;
+    final row2_payable = vm.row2Payable;
+    final row3_payable = vm.row3Payable;
+    final row4_payable = vm.row4Payable;
+    final row5_payable = vm.row5Payable;
+    final row6_payable = vm.row6Payable;
+    final row1_payable_heading = vm.row1PayableHeading;
+    final row2_payable_heading = vm.row2PayableHeading;
+    final row3_payable_heading = vm.row3PayableHeading;
+    final row4_payable_heading = vm.row4PayableHeading;
+    final row5_payable_heading = vm.row5PayableHeading;
+    final row6_payable_heading = vm.row6PayableHeading;
+    final pendingsalesorder = vm.pendingsalesorder;
+    final pendingpurchaseorder = vm.pendingpurchaseorder;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
+
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
 
-    final companyName = company ?? '';
+    final companyName = company;
     const reportname = 'Party Summary Report';
 
     final chartImageBytes =
@@ -741,12 +683,18 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   // ------------------------ SOLD PDF ------------------------
   Future<void> generateAndSharePDF_Sold() async {
+    final vm = _s;
+    final company = vm.company;
+    final sold_list = vm.soldList;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
+
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
 
-    final companyName = company!;
+    final companyName = company;
     final reportname = 'Party Wise Sales Summary';
     final party_name = partyname;
 
@@ -869,12 +817,18 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   // ------------------------ PURCHASE PDF ------------------------
   Future<void> generateAndSharePDF_Purchase() async {
+    final vm = _s;
+    final company = vm.company;
+    final purchase_list = vm.purchaseList;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
+
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
 
-    final companyName = company!;
+    final companyName = company;
     final reportname = 'Party Wise Purchase Summary';
     final party_name = partyname;
     final headersRow3 = ['Item', 'Qty', 'Last Purchased', 'Rate'];
@@ -996,6 +950,9 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   // ------------------------ SOLD CSV ------------------------
   Future<void> generateAndShareCSV_Sold() async {
+    final vm = _s;
+    final company = vm.company;
+    final sold_list = vm.soldList;
     final List<List<dynamic>> csvData = [];
     final reportname = 'Party Wise Sales Summary';
 
@@ -1026,6 +983,9 @@ class _PartyClickedPageState extends State<PartyClicked>
 
   // ------------------------ PURCHASE CSV ------------------------
   Future<void> generateAndShareCSV_Purchase() async {
+    final vm = _s;
+    final company = vm.company;
+    final purchase_list = vm.purchaseList;
     final List<List<dynamic>> csvData = [];
     final reportname = 'Party Wise Purchase Summary';
 
@@ -1054,356 +1014,6 @@ class _PartyClickedPageState extends State<PartyClicked>
     ], text: 'Sharing $reportname Report of $company');
   }
 
-  /// tally-api equivalent of legacy `fetchsold`/`fetchpurchase` - only
-  /// reached when this party has no Summary-visibility flags set at all
-  /// (a "pure" customer/supplier, see `fetchSummary()`).
-  ///
-  /// `LedgerRepository.itemSummary` (legacy's `getItemSummary`) returns
-  /// every stock item transacted with this ledger regardless of voucher
-  /// type, with no `vchtype` filter - using it directly made the Sold and
-  /// Purchased lists show identical data for a party with both Sales and
-  /// Purchase vouchers. Filters via [fetchDrilldownVouchers] +
-  /// [voucher]'s own `voucherTypeName` instead (same approach as
-  /// `PartyDrillDown`'s tally-api aggregation), then sums each item's
-  /// qty/amount across only the matching vouchers.
-  Future<void> _fetchSoldPurchaseTallyApi(String vchtype) async {
-    final ledgerMasterId = this.ledgerMasterId;
-    if (ledgerMasterId == null) return;
-
-    final isSold = vchtype == 'Sales';
-
-    setState(() {
-      item_count = "0";
-      _isLoading = true;
-      if (isSold) {
-        isVisibleSoldList = false;
-      } else {
-        isVisiblePurchaseList = false;
-      }
-      isVisibleNoDataFound = false;
-      _isSearchViewVisible = false;
-      searchController.clear();
-    });
-
-    filteredItems_sold.clear();
-    sold_list.clear();
-    filteredItems_purchase.clear();
-    purchase_list.clear();
-
-    try {
-      final from = parseCompactDate(startDateString);
-      final to = parseCompactDate(endDateString);
-      final vouchers = await fetchDrilldownVouchers(
-        from: from,
-        to: to,
-        partyLedgerName: partyname,
-        voucherTypeName: vchtype,
-      );
-
-      final totals = <String, Map<String, dynamic>>{};
-      for (final voucher in vouchers) {
-        final inventoryEntries =
-            (voucher['inventoryEntries'] as List?)
-                ?.cast<Map<String, dynamic>>() ??
-            const [];
-        final date = voucher['date']?.toString() ?? '';
-        for (final entry in inventoryEntries) {
-          final name = (entry['stockItemName'] ?? '').toString();
-          final bucket = totals.putIfAbsent(
-            name,
-            () => {'qty': 0.0, 'unit': '', 'lastdate': '', 'rate': '0'},
-          );
-          bucket['qty'] = (bucket['qty'] as double) + parseMoneyField(entry['quantity']);
-          bucket['unit'] = entry['unitSymbol'] ?? bucket['unit'];
-          // Keep the rate/date from whichever entry has the latest date.
-          if (date.compareTo(bucket['lastdate'] as String) >= 0) {
-            bucket['lastdate'] = date;
-            bucket['rate'] = (entry['rate'] ?? '0').toString();
-          }
-        }
-      }
-
-      final items = [
-        for (final entry in totals.entries)
-          Sold_Purchased(
-            item: entry.key,
-            qty: (entry.value['qty'] as double).toString(),
-            unit: (entry.value['unit'] as String),
-            lastdate: (entry.value['lastdate'] as String),
-            rate: (entry.value['rate'] as String),
-          ),
-      ];
-
-      setState(() {
-        if (isSold) {
-          sold_list.addAll(items);
-          filteredItems_sold = sold_list;
-          isVisibleSoldList = items.isNotEmpty;
-        } else {
-          purchase_list.addAll(items);
-          filteredItems_purchase = purchase_list;
-          isVisiblePurchaseList = items.isNotEmpty;
-        }
-        item_count = items.length.toString();
-        isVisibleNoDataFound = items.isEmpty;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        if (isSold) {
-          isVisibleSoldList = false;
-        } else {
-          isVisiblePurchaseList = false;
-        }
-        isVisibleNoDataFound = true;
-        _isLoading = false;
-      });
-      debugPrint('PartyClicked tally-api sold/purchase fetch failed: $e');
-    }
-  }
-
-  void formatRecPayTotal(String outstanding) {
-    final double value = double.tryParse(outstanding) ?? 0.0;
-
-    if (value == 0) {
-      setState(() {
-        ReceivableVisibility = false;
-        PayableVisibility = false;
-        receivabletotal = "0";
-        payabletotal = "0";
-      });
-      return;
-    }
-
-    if (value > 0) {
-      if (receivableparty == 'True') {
-        setState(() {
-          ReceivableVisibility = true;
-          PayableVisibility = false;
-          receivabletotal = outstanding;
-          payabletotal = "0";
-        });
-      }
-    } else {
-      if (payableparty == 'True') {
-        setState(() {
-          PayableVisibility = true;
-          ReceivableVisibility = false;
-          payabletotal = outstanding;
-          receivabletotal = "0";
-        });
-      }
-    }
-  }
-
-  // overdueInt is passed so this can tell whether the caller ALSO bucketed
-  // this same amount via formatOnAccountWithBillNo (that happens whenever
-  // overdue_int > 0, even for an on-account/billno-null entry) - if it
-  // did, this money is already inside the bucket sums and must NOT be
-  // added again here, or the grand total silently doubles it.
-  void formatOnAccount(String rawOutstanding, int overdueInt) {
-    // Some bills come back with a comma-formatted amount (e.g.
-    // "-1,234.56") - strip it before parsing, same fix as Data.fromJson
-    // in PartyClickedRecPayClicked.dart.
-    final outstanding = rawOutstanding.replaceAll(',', '');
-    final double value = double.tryParse(outstanding) ?? 0.0;
-
-    if (value == 0) return;
-
-    final alreadyBucketed = overdueInt > 0;
-
-    if (value < 0) {
-      if (receivableparty == 'True') {
-        setState(() {
-          onAccountReceivable = outstanding; // raw: -57561
-          ReceivableVisibility = true;
-          if (!alreadyBucketed) {
-            _currentReceivableOnAccount += value.abs();
-          }
-          _refreshReceivablePayableGrandTotals();
-        });
-      }
-    } else {
-      if (payableparty == 'True') {
-        setState(() {
-          onAccountPayable = outstanding; // raw: 57561
-          PayableVisibility = true;
-          if (!alreadyBucketed) {
-            _currentPayableOnAccount += value;
-          }
-          _refreshReceivablePayableGrandTotals();
-        });
-      }
-    }
-  }
-
-  // Symbol-free on purpose: this only resets the bucket rows to "0" before
-  // recomputation, and the rows are rendered via _rowAmountWidget, which
-  // already prepends the symbol/Dirham glyph - baking it in here as well
-  // caused a doubled symbol on every bucket with no overdue data.
-  String formatRemainingOverdue(String outstanding) {
-    double outstanding_double = double.parse(outstanding);
-    return CurrencyFormatter.formatCurrencyParts(outstanding_double).number;
-  }
-
-  // Recomputes the headline receivabletotal/payabletotal from the same
-  // bucket sums the row1-row6 breakdown uses, so the big total figure can
-  // never drift from (or silently stay at 0 relative to) what the buckets
-  // below it actually show.
-  void _refreshReceivablePayableGrandTotals() {
-    // _currentReceivableOnAccount/_currentPayableOnAccount cover only the
-    // truly "not yet overdue" portion (overdue_int <= 0, never bucketed
-    // above) - so a party that's entirely current-balance still gets a
-    // correct total, without double-counting on-account rows that were
-    // ALSO bucketed (overdue_int > 0).
-    final receivableGrand =
-        _sumReceivable0 +
-        _sumReceivable30 +
-        _sumReceivable60 +
-        _sumReceivable90 +
-        _sumReceivable120 +
-        _sumReceivable180 +
-        _currentReceivableOnAccount;
-    final payableGrand =
-        _sumPayable0 +
-        _sumPayable30 +
-        _sumPayable60 +
-        _sumPayable90 +
-        _sumPayable120 +
-        _sumPayable180 +
-        _currentPayableOnAccount;
-
-    if (receivableGrand > 0) {
-      receivabletotal = '-${receivableGrand.toStringAsFixed(2)}';
-    }
-    if (payableGrand > 0) {
-      payabletotal = payableGrand.toStringAsFixed(2);
-    }
-  }
-
-  void formatOnAccountWithBillNo(int overdue_int, String rawTotal) {
-    // Same comma-stripping fix as formatOnAccount/Data.fromJson - a
-    // comma-formatted amount here would make double.parse() below throw,
-    // aborting this bill's bucket update silently.
-    final total = rawTotal.replaceAll(',', '');
-    if (total.contains("-")) {
-      if (receivableparty == 'True') {
-        setState(() {
-          ReceivableVisibility = true;
-        });
-        if (overdue_int > 0 && overdue_int <= int.parse(heading1)) {
-          final amount = double.parse(total.replaceAll("-", ""));
-          _sumReceivable0 += amount;
-          row6_receivable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable0).number} DR';
-        }
-
-        if (overdue_int > int.parse(heading1) &&
-            overdue_int <= int.parse(heading2)) {
-          final amount = double.parse(total.replaceAll("-", ""));
-          _sumReceivable30 += amount;
-          row5_receivable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable30).number} DR';
-        }
-
-        if (overdue_int > int.parse(heading2) &&
-            overdue_int <= int.parse(heading3)) {
-          final amount = double.parse(total.replaceAll("-", ""));
-          _sumReceivable60 += amount;
-          row4_receivable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable60).number} DR';
-        }
-
-        if (overdue_int > int.parse(heading3) &&
-            overdue_int <= int.parse(heading4)) {
-          final amount = double.parse(total.replaceAll("-", ""));
-          _sumReceivable90 += amount;
-          row3_receivable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable90).number} DR';
-        }
-
-        if (overdue_int > int.parse(heading4) &&
-            overdue_int <= int.parse(heading5)) {
-          final amount = double.parse(total.replaceAll("-", ""));
-          _sumReceivable120 += amount;
-          row2_receivable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable120).number} DR';
-        }
-
-        if (overdue_int > int.parse(heading5)) {
-          final amount = double.parse(total.replaceAll("-", ""));
-          _sumReceivable180 += amount;
-          row1_receivable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumReceivable180).number} DR';
-        }
-
-        _refreshReceivablePayableGrandTotals();
-      }
-    } else {
-      if (payableparty == 'True') {
-        setState(() {
-          PayableVisibility = true;
-        });
-        if (overdue_int > 0 && overdue_int <= int.parse(heading1)) {
-          final amount = double.parse(total);
-          _sumPayable0 += amount;
-          row6_payable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumPayable0).number} CR';
-        }
-
-        if (overdue_int > int.parse(heading1) &&
-            overdue_int <= int.parse(heading2)) {
-          final amount = double.parse(total);
-          _sumPayable30 += amount;
-          row5_payable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumPayable30).number} CR';
-        }
-
-        if (overdue_int > int.parse(heading2) &&
-            overdue_int <= int.parse(heading3)) {
-          final amount = double.parse(total);
-          _sumPayable60 += amount;
-          row4_payable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumPayable60).number} CR';
-        }
-
-        if (overdue_int > int.parse(heading3) &&
-            overdue_int <= int.parse(heading4)) {
-          final amount = double.parse(total);
-          _sumPayable90 += amount;
-          row3_payable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumPayable90).number} CR';
-        }
-
-        if (overdue_int > int.parse(heading4) &&
-            overdue_int <= int.parse(heading5)) {
-          final amount = double.parse(total);
-          _sumPayable120 += amount;
-          row2_payable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumPayable120).number} CR';
-        }
-
-        if (overdue_int > int.parse(heading5)) {
-          final amount = double.parse(total);
-          _sumPayable180 += amount;
-          row1_payable =
-              '${CurrencyFormatter.formatCurrencyParts(_sumPayable180).number} CR';
-        }
-
-        _refreshReceivablePayableGrandTotals();
-      }
-    }
-  }
-
-  String formatRate(String rate) {
-    String rate_string = "";
-
-    rate_string = CurrencyFormatter.formatCurrency_normal(rate);
-
-    // Apply any transformations or formatting to the 'amount' variable here
-    return rate_string;
-  }
-
   String convertDateFormat(String dateStr) {
     String formattedDate = "";
 
@@ -1419,987 +1029,125 @@ class _PartyClickedPageState extends State<PartyClicked>
     return formattedDate;
   }
 
-  void formatSalePurc(String total, String vchtype) {
-    double i = 0;
-    String total_string = "";
-
-    if (total != 'null') {
-      i = double.parse(total);
-    }
-    if (total != 'null') {
-      if (total.contains("-")) {
-        total_string = i.toString();
-        total_string = total_string.replaceAll("-", "");
-        double total_double = double.parse(total_string);
-        total_string = CurrencyFormatter.formatCurrency_double(total_double);
-        total_string = total_string + " DR";
-      } else {
-        total_string = i.toString();
-        double total_double = double.parse(total_string);
-        total_string = CurrencyFormatter.formatCurrency_double(total_double);
-        total_string = total_string + " CR";
-      }
-    }
-    if (vchtype == 'SalesOrder') {
-      if (pendingsalesorderparty == 'True') {
-        if (total == 'null') {
-          setState(() {
-            SalesOrderVisibility = false;
-          });
-          pendingsalesorder = "0";
-        } else {
-          setState(() {
-            SalesOrderVisibility = true;
-          });
-          pendingsalesorder = total;
-        }
-      }
-    }
-    if (vchtype == 'PurcOrder') {
-      if (pendingpurchaseorderparty == 'True') {
-        if (total == 'null') {
-          setState(() {
-            PurchaseOrderVisibility = false;
-          });
-          pendingpurchaseorder = "0";
-        } else {
-          setState(() {
-            PurchaseOrderVisibility = true;
-          });
-          pendingpurchaseorder = total_string;
-        }
-      }
-    }
-  }
-
-  /// tally-api equivalent of legacy `fetchSummaryData` - populates the exact
-  /// same state fields the existing UI (`SummaryExpansionCard`,
-  /// `ReceivableBreakdownCard`/`PayableBreakdownCard`, `PendingOrderTile`)
-  /// already renders, so no widget-tree changes were needed.
-  ///
-  /// Sourced from tally-api report endpoints
-  /// (`LedgerRepository.ledgerSummary`/`outstandingTotal`/
-  /// `outstandingBills`/`pendingOrderTotal`) plus one client-side
-  /// aggregation (`VoucherRepository.listInRange` bucketed by
-  /// `monthly_bucket_helper.dart`, since no ledger-scoped monthly-trend
-  /// endpoint exists on tally-api today).
-  Future<void> _fetchSummaryDataTallyApi(
-    String startdate_string,
-    String enddate_string,
-  ) async {
-    final ledgerMasterId = this.ledgerMasterId;
-    if (ledgerMasterId == null) return;
-
-    months_list_sales.clear();
-    months_list_purchase.clear();
-    months_list_receipt.clear();
-    months_list_payment.clear();
-    months_list_creditnote.clear();
-    months_list_debitnote.clear();
-    months_list_journal.clear();
-
-    row1_receivable = formatRemainingOverdue("0");
-    row2_receivable = formatRemainingOverdue("0");
-    row3_receivable = formatRemainingOverdue("0");
-    row4_receivable = formatRemainingOverdue("0");
-    row5_receivable = formatRemainingOverdue("0");
-    row6_receivable = formatRemainingOverdue("0");
-
-    row1_payable = formatRemainingOverdue("0");
-    row2_payable = formatRemainingOverdue("0");
-    row3_payable = formatRemainingOverdue("0");
-    row4_payable = formatRemainingOverdue("0");
-    row5_payable = formatRemainingOverdue("0");
-    row6_payable = formatRemainingOverdue("0");
-
-    setState(() {
-      _isLoading = true;
-      isClicked_Summary = true;
-      isClicked_Sold = false;
-      isClicked_Purchase = false;
-      isSearchLayoutVisible = false;
-      searchController.clear();
-      isVisibleNoDataFound = false;
-
-      SalesVisibility = false;
-      PurchaseVisibility = false;
-      ReceiptVisibility = false;
-      PaymentVisibility = false;
-      CreditnoteVisibility = false;
-      DebitnoteVisibility = false;
-      JournalVisibility = false;
-      ReceivableVisibility = false;
-      PayableVisibility = false;
-      PurchaseOrderVisibility = false;
-      SalesOrderVisibility = false;
-    });
-
-    try {
-      final from = parseCompactDate(startdate_string);
-      final to = parseCompactDate(enddate_string);
-
-      final summaryRows = await LedgerRepository.instance.ledgerSummary(
-        ledgerMasterId,
-        from: from,
-        to: to,
-      );
-
-      if (summaryRows.isEmpty) {
-        setState(() => isVisibleNoDataFound = true);
-      }
-
-      // Tally's own reservedName has a space ("Credit Note"/"Debit Note")
-      // where this screen's internal keys don't ("CreditNote"/"DebitNote").
-      for (final row in summaryRows) {
-        final vchtype = (row['voucherTypeName'] as String? ?? '').replaceAll(
-          ' ',
-          '',
-        );
-        final totalAmount = (row['totalAmount'] ?? '0').toString();
-        final averageAmount = (row['averageAmount'] ?? '0').toString();
-        final invoiceCount = (row['invoiceCount'] ?? 0).toString();
-        final lastDate = (row['lastDate'] ?? '').toString();
-
-        switch (vchtype) {
-          case 'Sales':
-            if (salesparty != 'True') continue;
-            setState(() => SalesVisibility = true);
-            totalsaleamt = totalAmount;
-            avgsalesinvoiceamt = averageAmount;
-            noofsalesinvoice = invoiceCount;
-            lastsaledate = lastDate;
-          case 'Purchase':
-            if (purchaseparty != 'True') continue;
-            setState(() => PurchaseVisibility = true);
-            totalpurchaseamt = totalAmount;
-            avgpurchaseinvoiceamt = averageAmount;
-            noofpurchaseinvoice = invoiceCount;
-            lastpurchasedate = lastDate;
-          case 'Receipt':
-            if (receiptparty != 'True') continue;
-            setState(() => ReceiptVisibility = true);
-            totalreceiptamt = totalAmount;
-            avgreceiptinvoiceamt = averageAmount;
-            noofreceiptinvoice = invoiceCount;
-            lastreceiptdate = lastDate;
-          case 'Payment':
-            if (paymentparty != 'True') continue;
-            setState(() => PaymentVisibility = true);
-            totalpaymentamt = totalAmount;
-            avgpaymentinvoiceamt = averageAmount;
-            noofpaymentinvoice = invoiceCount;
-            lastpaymentdate = lastDate;
-          case 'CreditNote':
-            if (creditnoteparty != 'True') continue;
-            setState(() => CreditnoteVisibility = true);
-            totalcreditnoteamt = totalAmount;
-            avgcreditnoteinvoiceamt = averageAmount;
-            noofcreditnoteinvoice = invoiceCount;
-            lastcreditnotedate = lastDate;
-          case 'DebitNote':
-            if (debitnoteparty != 'True') continue;
-            setState(() => DebitnoteVisibility = true);
-            totaldebitnoteamt = totalAmount;
-            avgdebitnoteinvoiceamt = averageAmount;
-            noofdebitnoteinvoice = invoiceCount;
-            lastdebitnotedate = lastDate;
-          case 'Journal':
-            if (journalparty != 'True') continue;
-            setState(() => JournalVisibility = true);
-            totaljournalamt = totalAmount;
-            avgjournalinvoiceamt = averageAmount;
-            noofjournalinvoice = invoiceCount;
-            lastjournaldate = lastDate;
-          default:
-          // DeliveryNote/other reserved names - not shown in this summary
-          // UI, same as legacy's explicit DelNote/SalesOrder skip.
-        }
-      }
-
-      // Monthly Breakdown + Trend chart - built client-side from the full
-      // voucher list (has voucherTypeName + per-ledger entries already),
-      // since no ledger-scoped monthly-trend endpoint exists on tally-api.
-      if (SalesVisibility ||
-          PurchaseVisibility ||
-          ReceiptVisibility ||
-          PaymentVisibility ||
-          CreditnoteVisibility ||
-          DebitnoteVisibility ||
-          JournalVisibility) {
-        final vouchers = await VoucherRepository.instance.listInRange(
-          from: from,
-          to: to,
-        );
-
-        void bucketInto(List<months> target, String vchtypeKey) {
-          final rows = <Map<String, dynamic>>[];
-          for (final voucher in vouchers) {
-            final voucherType =
-                (voucher['voucherTypeName'] as String? ?? '').replaceAll(
-                  ' ',
-                  '',
-                );
-            if (voucherType != vchtypeKey) continue;
-            final entries =
-                (voucher['ledgerEntries'] as List?)
-                    ?.cast<Map<String, dynamic>>() ??
-                const [];
-            for (final entry in entries) {
-              if (entry['ledgerMasterId'] != ledgerMasterId) continue;
-              rows.add({
-                'date': voucher['date'],
-                'amount': parseMoneyField(entry['amount']).abs(),
-              });
-            }
-          }
-          final buckets = bucketByMonth(
-            rows,
-            dateOf: (r) => DateTime.parse(r['date'] as String),
-            amountOf: (r) => r['amount'] as double,
-          );
-          target.addAll([
-            for (final b in buckets)
-              months(mname: b.label, total: b.total.toString()),
-          ]);
-        }
-
-        if (SalesVisibility) bucketInto(months_list_sales, 'Sales');
-        if (PurchaseVisibility) bucketInto(months_list_purchase, 'Purchase');
-        if (ReceiptVisibility) bucketInto(months_list_receipt, 'Receipt');
-        if (PaymentVisibility) bucketInto(months_list_payment, 'Payment');
-        if (CreditnoteVisibility) {
-          bucketInto(months_list_creditnote, 'CreditNote');
-        }
-        if (DebitnoteVisibility) {
-          bucketInto(months_list_debitnote, 'DebitNote');
-        }
-        if (JournalVisibility) bucketInto(months_list_journal, 'Journal');
-      }
-
-      // Receivable/Payable outstanding.
-      if (receivableparty == 'True' || payableparty == 'True') {
-        _sumReceivable0 = 0;
-        _sumReceivable30 = 0;
-        _sumReceivable60 = 0;
-        _sumReceivable90 = 0;
-        _sumReceivable120 = 0;
-        _sumReceivable180 = 0;
-        _sumPayable0 = 0;
-        _sumPayable30 = 0;
-        _sumPayable60 = 0;
-        _sumPayable90 = 0;
-        _sumPayable120 = 0;
-        _sumPayable180 = 0;
-        _currentReceivableOnAccount = 0;
-        _currentPayableOnAccount = 0;
-
-        final totals = await LedgerRepository.instance.outstandingTotal(
-          ledgerMasterId,
-        );
-        formatRecPayTotal((totals['outstanding'] ?? '0').toString());
-
-        final bills = await LedgerRepository.instance.outstandingBills(
-          ledgerMasterId: ledgerMasterId,
-        );
-        for (final bill in bills) {
-          final outstanding = (bill['finalBalance'] ?? '0').toString();
-          final overdueDays = bill['overdueDays'] as int?;
-          // Every row here is a real, named bill (tally-api's Bill model) -
-          // legacy's separate "on account" (unmatched-reference) branch has
-          // no equivalent concept in this endpoint's response.
-          formatOnAccountWithBillNo(overdueDays ?? 0, outstanding);
-        }
-      }
-
-      // Pending Sales/Purchase Order - now backed by tally-api's real
-      // `reports/orders/summary` (added after this screen was first
-      // migrated, when the endpoint didn't exist yet - see
-      // `LedgerRepository.pendingOrderTotal`'s doc-comment). Reuses the
-      // same `formatSalePurc` the legacy response fed, so the tile/PDF
-      // export rendering below needed no changes.
-      if (pendingsalesorderparty == 'True') {
-        final row = await LedgerRepository.instance.pendingOrderTotal(
-          ledgerMasterId,
-          isSales: true,
-          from: from,
-          to: to,
-        );
-        formatSalePurc((row?['totalAmount'] ?? 'null').toString(), 'SalesOrder');
-      }
-      if (pendingpurchaseorderparty == 'True') {
-        final row = await LedgerRepository.instance.pendingOrderTotal(
-          ledgerMasterId,
-          isSales: false,
-          from: from,
-          to: to,
-        );
-        formatSalePurc((row?['totalAmount'] ?? 'null').toString(), 'PurcOrder');
-      }
-
-      setState(() => _isLoading = false);
-    } catch (e) {
-      setState(() => _isLoading = false);
-      debugPrint('PartyClicked tally-api summary fetch failed: $e');
-    }
-  }
-
-  void fetchSummary() {
-    if (salesparty == 'False' &&
-        purchaseparty == 'False' &&
-        receiptparty == 'False' &&
-        paymentparty == 'False' &&
-        creditnoteparty == 'False' &&
-        debitnoteparty == 'False' &&
-        journalparty == 'False' &&
-        receivableparty == 'False' &&
-        payableparty == 'False' &&
-        pendingsalesorderparty == 'False' &&
-        pendingpurchaseorderparty == 'False') {
-      isVisibleSummaryBtn = false;
-      isClicked_Summary = false;
-      if (party_suppliers == 'True') {
-        isClicked_Purchase = true;
-        isClicked_Sold = false;
-        isClicked_Summary = false;
-        isSearchLayoutVisible = true;
-
-        _fetchSoldPurchaseTallyApi('Purchase');
-      } else if (party_customers == 'True') {
-        isClicked_Summary = false;
-        isClicked_Sold = true;
-        isClicked_Purchase = false;
-        isSearchLayoutVisible = true;
-
-        _fetchSoldPurchaseTallyApi('Sales');
-      }
-    } else {
-      setState(() {
-        isVisibleSummaryBtn = true;
-        isClicked_Summary = true;
-      });
-      _fetchSummaryDataTallyApi(startDateString, endDateString);
-    }
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-      _selecteddate = prefs.getString('datetype') ?? date_range.first;
-
-      decimal = prefs.getInt('decimalplace') ?? 2;
-
-      currencyFormat = new NumberFormat();
-
-      String? currencyCode = '';
-
-      currencyCode = prefs.getString('currencycode') ?? "AED";
-
-      try {
-        if (currencyCode == 'INR' ||
-            currencyCode == 'EUR' ||
-            currencyCode == 'USD' ||
-            currencyCode == 'PKR') {
-          currencyFormat = NumberFormat('#,##0');
-          NumberFormat format = NumberFormat.simpleCurrency(
-            locale: 'en',
-            name: currencyCode,
-          );
-          currencysymbol = format.currencySymbol;
-        } else {
-          NumberFormat format = NumberFormat.currency(
-            locale: 'en',
-            name: currencyCode,
-          );
-          currencysymbol = format.currencySymbol;
-          currencyFormat = NumberFormat('#,##0');
-        }
-      } catch (e) {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-
-      _currencyCode = currencyCode;
-
-      if (_selecteddate == 'Custom Date') {
-        _startDate = DateTime.parse(prefs.getString('startdate')!);
-        _endDate = DateTime.parse(prefs.getString('enddate')!);
-
-        DateTime start = _startDate;
-        DateTime end = _endDate;
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-      }
-    });
-
-    salesparty = prefs.getString("salesparty") ?? 'False';
-    purchaseparty = prefs.getString("purchaseparty") ?? 'False';
-    creditnoteparty = prefs.getString("creditnoteparty") ?? 'False';
-    journalparty = prefs.getString("journalparty") ?? 'False';
-    payableparty = prefs.getString("payableparty") ?? 'False';
-    pendingpurchaseorderparty =
-        prefs.getString("pendingpurchaseorderparty") ?? 'False';
-    receiptparty = prefs.getString("receiptparty") ?? 'False';
-    paymentparty = prefs.getString("paymentparty") ?? 'False';
-    debitnoteparty = prefs.getString("debitnoteparty") ?? 'False';
-    receivableparty = prefs.getString("receivableparty") ?? 'False';
-    pendingsalesorderparty =
-        prefs.getString("pendingsalesorderparty") ?? 'False';
-    party_suppliers = prefs.getString("purchaseparty") ?? 'False';
-    party_customers = prefs.getString("salesparty") ?? 'False';
-
-    if (party_suppliers == 'True') {
-      isVisiblePurchaseBtn = true;
-    } else {
-      isVisiblePurchaseBtn = false;
-    }
-
-    if (party_customers == 'True') {
-      isVisibleSoldBtn = true;
-    } else {
-      isVisibleSoldBtn = false;
-    }
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    _handleDate(_selecteddate);
-
-    if (prefs.getString('heading1') == null) {
-      heading1 = '30';
-      heading2 = '60';
-      heading3 = '90';
-      heading4 = '120';
-      heading5 = '180';
-
-      row1_receivable_heading_value = heading5;
-      row2_receivable_heading_value = heading4;
-      row3_receivable_heading_value = heading3;
-      row4_receivable_heading_value = heading2;
-      row5_receivable_heading_value = heading1;
-      row6_receivable_heading_value = '0';
-
-      row1_payable_heading_value = heading5;
-      row2_payable_heading_value = heading4;
-      row3_payable_heading_value = heading3;
-      row4_payable_heading_value = heading2;
-      row5_payable_heading_value = heading1;
-      row6_payable_heading_value = '0';
-    } else {
-      heading1 = prefs.getString('heading1')!;
-      heading2 = prefs.getString('heading2')!;
-      heading3 = prefs.getString('heading3')!;
-      heading4 = prefs.getString('heading4')!;
-      heading5 = prefs.getString('heading5')!;
-
-      row1_receivable_heading_value = heading5;
-      row2_receivable_heading_value = heading4;
-      row3_receivable_heading_value = heading3;
-      row4_receivable_heading_value = heading2;
-      row5_receivable_heading_value = heading1;
-      row6_receivable_heading_value = '0';
-
-      row1_payable_heading_value = heading5;
-      row2_payable_heading_value = heading4;
-      row3_payable_heading_value = heading3;
-      row4_payable_heading_value = heading2;
-      row5_payable_heading_value = heading1;
-      row6_payable_heading_value = '0';
-    }
-
-    row1_receivable_heading = ">" + row1_receivable_heading_value;
-    row2_receivable_heading = ">" + row2_receivable_heading_value;
-    row3_receivable_heading = ">" + row3_receivable_heading_value;
-    row4_receivable_heading = ">" + row4_receivable_heading_value;
-    row5_receivable_heading = ">" + row5_receivable_heading_value;
-    row6_receivable_heading = ">" + row6_receivable_heading_value;
-
-    row1_payable_heading = ">" + row1_payable_heading_value;
-    row2_payable_heading = ">" + row2_payable_heading_value;
-    row3_payable_heading = ">" + row3_payable_heading_value;
-    row4_payable_heading = ">" + row4_payable_heading_value;
-    row5_payable_heading = ">" + row5_payable_heading_value;
-    row6_payable_heading = ">" + row6_payable_heading_value;
-
-    /*row1_receivable = formatRemainingOverdue(row1_receivable);
-    row2_receivable = formatRemainingOverdue(row2_receivable);
-    row3_receivable = formatRemainingOverdue(row3_receivable);
-    row4_receivable = formatRemainingOverdue(row4_receivable);
-    row5_receivable = formatRemainingOverdue(row5_receivable);
-    row6_receivable = formatRemainingOverdue(row6_receivable);
-
-    row1_payable = formatRemainingOverdue(row1_payable);
-    row2_payable = formatRemainingOverdue(row2_payable);
-    row3_payable = formatRemainingOverdue(row3_payable);
-    row4_payable = formatRemainingOverdue(row4_payable);
-    row5_payable = formatRemainingOverdue(row5_payable);
-    row6_payable = formatRemainingOverdue(row6_payable);*/
-  }
-
-  Future<void> _selectDateRange(BuildContext context) async {
-    if (_isTextEnabled) {
-      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
-      String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate = DateTime.parse(startfrom!);
-
-      DateTimeRange? selectedDateRange = await showDateRangePicker(
-        context: context,
-        initialDateRange: initialDateRange,
-        firstDate: earliestDate,
-        lastDate: DateTime(2100),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: app_color, // main accent color
-                onPrimary: Colors.white,
-                surface: Theme.of(context).colorScheme.surface,
-                onSurface: Theme.of(context).colorScheme.onSurface,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                rangeSelectionBackgroundColor: app_color.withOpacity(
-                  0.15,
-                ), // 🔹 light shade of your app_color
-                rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                  app_color.withOpacity(0.15),
-                ),
-              ),
-            ),
-            child: child!,
-          );
-        },
-      );
-
-      if (selectedDateRange != null) {
-        setState(() {
-          _startDate = selectedDateRange.start;
-          _endDate = selectedDateRange.end;
-
-          DateTime start = _startDate;
-          DateTime end = _endDate;
-
-          String startMonth = DateFormat('MMM').format(start);
-          String sdf = DateFormat(
-            'MM',
-          ).format(start); // converting month into string
-          String startDay = DateFormat('dd').format(start);
-          int startYear = start.year;
-
-          String endMonth = DateFormat('MMM').format(end);
-          String sdfEnd = DateFormat('MM').format(end);
-          String endDay = DateFormat('dd').format(end);
-          int endYear = end.year;
-
-          startDateString = '$startYear$sdf$startDay';
-          endDateString = '$endYear$sdfEnd$endDay';
-
-          startdate_text =
-              startDay + "-" + startMonth + "-" + startYear.toString();
-          enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-          print(startDateString);
-          print(endDateString);
-
-          fetchSummary();
-        });
-      }
-    }
-  }
-
-  Future<void> _selectDateRange_auto(BuildContext context) async {
-    if (_isTextEnabled) {
-      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
-      String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate = DateTime.parse(startfrom!);
-
-      DateTimeRange? selectedDateRange = await showDateRangePicker(
-        context: context,
-        initialDateRange: initialDateRange,
-        firstDate: earliestDate,
-        lastDate: DateTime(2100),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: app_color, // main accent color
-                onPrimary: Colors.white,
-                surface: Theme.of(context).colorScheme.surface,
-                onSurface: Theme.of(context).colorScheme.onSurface,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                rangeSelectionBackgroundColor: app_color.withOpacity(
-                  0.15,
-                ), // 🔹 light shade of your app_color
-                rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                  app_color.withOpacity(0.15),
-                ),
-              ),
-            ),
-            child: child!,
-          );
-        },
-      );
-
-      setState(() {
-        _startDate = selectedDateRange!.start;
-        _endDate = selectedDateRange!.end;
-
-        DateTime start = _startDate;
-        DateTime end = _endDate;
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        fetchSummary();
-
-        print(startDateString);
-        print(endDateString);
-      });
-    }
-  }
-
-  void _handleDate(String value) {
-    setState(() {
-      _selecteddate = value;
-    });
-
-    if (_selecteddate == "Today") {
-      DateTime currentDate = DateTime.now();
-      String startMonth = DateFormat('MMM').format(currentDate);
-      String sdf = DateFormat(
-        'MM',
-      ).format(currentDate); // converting month into string
-
-      String startDay = DateFormat('dd').format(currentDate);
-      int startYear = currentDate.year;
-
-      String endMonth = DateFormat('MMM').format(currentDate);
-      String sdfEnd = DateFormat('MM').format(currentDate);
-
-      String endDay = DateFormat('dd').format(currentDate);
-      int endYear = currentDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-      fetchSummary();
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-    } else if (_selecteddate == "Year To Date") {
-      DateTime now = DateTime.now();
-      DateTime startDate = DateTime(
-        now.year,
-        1,
-        1,
-      ); // Start of the current year
-      DateTime endDate = DateTime(now.year, now.month, now.day); // Today's date
-
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(startDate).substring(3, 6);
-      String sdf = DateFormat('MM').format(startDate);
-
-      String startDay = dateFormat.format(startDate).substring(0, 2);
-      int startYear = startDate.year;
-
-      String endMonth = dateFormat.format(endDate).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(endDate);
-
-      String endDay = dateFormat.format(endDate).substring(0, 2);
-      int endYear = endDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchSummary();
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Yesterday") {
-      DateTime yesterday = DateTime.now().subtract(Duration(days: 1));
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yesterday); // converting month into string
-
-      String startDay = dateFormat.format(yesterday).substring(0, 2);
-      int startYear = yesterday.year;
-
-      String endMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(yesterday);
-
-      String endDay = dateFormat.format(yesterday).substring(0, 2);
-      int endYear = yesterday.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-      fetchSummary();
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-    } else if (_selecteddate == "This Month") {
-      DateTime now = DateTime.now();
-      DateTime startOfMonth = DateTime(now.year, now.month, 1);
-      DateTime endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-      String startMonth = DateFormat('MMM').format(startOfMonth);
-      String sdf = DateFormat(
-        'MM',
-      ).format(startOfMonth); // converting month into string
-      String startDay = DateFormat('dd').format(startOfMonth);
-      int startYear = startOfMonth.year;
-
-      String endMonth = DateFormat('MMM').format(endOfMonth);
-      String sdfEnd = DateFormat('MM').format(endOfMonth);
-      String endDay = DateFormat('dd').format(endOfMonth);
-      int endYear = endOfMonth.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-      fetchSummary();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Month") {
-      var calendarLastMonthStart = DateTime.now();
-      var calendarLastMonthEnd = DateTime.now();
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month - 1,
-        1,
-      );
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month,
-        1,
-      );
-      calendarLastMonthEnd = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month + 1,
-        0,
-      );
-
-      var startMonth = DateFormat('MMM').format(calendarLastMonthStart);
-      var sdf = DateFormat('MM').format(calendarLastMonthStart);
-      var startDay = DateFormat('dd').format(calendarLastMonthStart);
-      var startYear = calendarLastMonthStart.year;
-
-      var endMonth = DateFormat('MMM').format(calendarLastMonthEnd);
-      var sdfEnd = DateFormat('MM').format(calendarLastMonthEnd);
-      var endDay = DateFormat('dd').format(calendarLastMonthEnd);
-      var endYear = calendarLastMonthEnd.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchSummary();
-
-      print(startDateString);
-      print(endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "This Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year, 1, 1);
-      DateTime yearEnd = DateTime(today.year, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchSummary();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year - 1, 1, 1);
-      DateTime yearEnd = DateTime(today.year - 1, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchSummary();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Custom Date") {
-      setState(() {
-        _isTextEnabled = true;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-
-      _selectDateRange_auto(context);
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
-  }
-
   @override
   Widget build(BuildContext context) {
+    ref.watch(partyClickedNotifierProvider(_args));
+    final vm = _s;
+    final CreditnoteVisibility = vm.creditnoteVisibility;
+    final DebitnoteVisibility = vm.debitnoteVisibility;
+    final JournalVisibility = vm.journalVisibility;
+    final PayableVisibility = vm.payableVisibility;
+    final PaymentVisibility = vm.paymentVisibility;
+    final PurchaseOrderVisibility = vm.purchaseOrderVisibility;
+    final PurchaseVisibility = vm.purchaseVisibility;
+    final ReceiptVisibility = vm.receiptVisibility;
+    final ReceivableVisibility = vm.receivableVisibility;
+    final SalesOrderVisibility = vm.salesOrderVisibility;
+    final SalesVisibility = vm.salesVisibility;
+    final _currencyCode = vm.currencyCode;
+    final _isSearchViewVisible = vm.isSearchViewVisible;
+    final _isLoading = vm.isLoading;
+    final _selecteddate = vm.selectedDate;
+    final avgcreditnoteinvoiceamt = vm.avgcreditnoteinvoiceamt;
+    final avgdebitnoteinvoiceamt = vm.avgdebitnoteinvoiceamt;
+    final avgjournalinvoiceamt = vm.avgjournalinvoiceamt;
+    final avgpaymentinvoiceamt = vm.avgpaymentinvoiceamt;
+    final avgpurchaseinvoiceamt = vm.avgpurchaseinvoiceamt;
+    final avgreceiptinvoiceamt = vm.avgreceiptinvoiceamt;
+    final avgsalesinvoiceamt = vm.avgsalesinvoiceamt;
+    final currencysymbol = vm.currencySymbol;
+    final date_range = this.date_range;
+    final decimal = vm.decimal;
+    final filteredItems_purchase = vm.filteredItemsPurchase;
+    final filteredItems_sold = vm.filteredItemsSold;
+    final isClicked_Purchase = vm.isClickedPurchase;
+    final isClicked_Sold = vm.isClickedSold;
+    final isClicked_Summary = vm.isClickedSummary;
+    final isVisibleNoDataFound = vm.isVisibleNoDataFound;
+    final isVisiblePurchaseList = vm.isVisiblePurchaseList;
+    final isVisiblePurchaseBtn = vm.isVisiblePurchaseBtn;
+    final isVisibleSoldBtn = vm.isVisibleSoldBtn;
+    final isVisibleSoldList = vm.isVisibleSoldList;
+    final isVisibleSummaryBtn = vm.isVisibleSummaryBtn;
+    final isSearchLayoutVisible = vm.isSearchLayoutVisible;
+    final item_count = vm.itemCount;
+    final lastcreditnotedate = vm.lastcreditnotedate;
+    final lastdebitnotedate = vm.lastdebitnotedate;
+    final lastjournaldate = vm.lastjournaldate;
+    final lastpaymentdate = vm.lastpaymentdate;
+    final lastpurchasedate = vm.lastpurchasedate;
+    final lastreceiptdate = vm.lastreceiptdate;
+    final lastsaledate = vm.lastsaledate;
+    final months_list_creditnote = vm.monthsListCreditnote;
+    final months_list_debitnote = vm.monthsListDebitnote;
+    final months_list_journal = vm.monthsListJournal;
+    final months_list_payment = vm.monthsListPayment;
+    final months_list_purchase = vm.monthsListPurchase;
+    final months_list_receipt = vm.monthsListReceipt;
+    final months_list_sales = vm.monthsListSales;
+    final noofcreditnoteinvoice = vm.noofcreditnoteinvoice;
+    final noofdebitnoteinvoice = vm.noofdebitnoteinvoice;
+    final noofjournalinvoice = vm.noofjournalinvoice;
+    final noofpaymentinvoice = vm.noofpaymentinvoice;
+    final noofpurchaseinvoice = vm.noofpurchaseinvoice;
+    final noofreceiptinvoice = vm.noofreceiptinvoice;
+    final noofsalesinvoice = vm.noofsalesinvoice;
+    final onAccountPayable = vm.onAccountPayable;
+    final onAccountReceivable = vm.onAccountReceivable;
+    final payabletotal = vm.payabletotal;
+    final pendingsalesorder = vm.pendingsalesorder;
+    final pendingpurchaseorder = vm.pendingpurchaseorder;
+    final purchase_list = vm.purchaseList;
+    final receivabletotal = vm.receivabletotal;
+    final row1_payable = vm.row1Payable;
+    final row1_payable_heading = vm.row1PayableHeading;
+    final row1_payable_heading_value = vm.row1PayableHeadingValue;
+    final row1_receivable = vm.row1Receivable;
+    final row1_receivable_heading = vm.row1ReceivableHeading;
+    final row1_receivable_heading_value = vm.row1ReceivableHeadingValue;
+    final row2_payable = vm.row2Payable;
+    final row2_payable_heading = vm.row2PayableHeading;
+    final row2_payable_heading_value = vm.row2PayableHeadingValue;
+    final row2_receivable = vm.row2Receivable;
+    final row2_receivable_heading = vm.row2ReceivableHeading;
+    final row2_receivable_heading_value = vm.row2ReceivableHeadingValue;
+    final row3_payable = vm.row3Payable;
+    final row3_payable_heading = vm.row3PayableHeading;
+    final row3_payable_heading_value = vm.row3PayableHeadingValue;
+    final row3_receivable = vm.row3Receivable;
+    final row3_receivable_heading = vm.row3ReceivableHeading;
+    final row3_receivable_heading_value = vm.row3ReceivableHeadingValue;
+    final row4_payable = vm.row4Payable;
+    final row4_payable_heading = vm.row4PayableHeading;
+    final row4_payable_heading_value = vm.row4PayableHeadingValue;
+    final row4_receivable = vm.row4Receivable;
+    final row4_receivable_heading = vm.row4ReceivableHeading;
+    final row4_receivable_heading_value = vm.row4ReceivableHeadingValue;
+    final row5_payable = vm.row5Payable;
+    final row5_payable_heading = vm.row5PayableHeading;
+    final row5_payable_heading_value = vm.row5PayableHeadingValue;
+    final row5_receivable = vm.row5Receivable;
+    final row5_receivable_heading = vm.row5ReceivableHeading;
+    final row5_receivable_heading_value = vm.row5ReceivableHeadingValue;
+    final row6_payable = vm.row6Payable;
+    final row6_payable_heading = vm.row6PayableHeading;
+    final row6_payable_heading_value = vm.row6PayableHeadingValue;
+    final row6_receivable = vm.row6Receivable;
+    final row6_receivable_heading = vm.row6ReceivableHeading;
+    final row6_receivable_heading_value = vm.row6ReceivableHeadingValue;
+    final sold_list = vm.soldList;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
+    final startdate_text = vm.startDateText;
+    final enddate_text = vm.endDateText;
+    final totalcreditnoteamt = vm.totalcreditnoteamt;
+    final totaldebitnoteamt = vm.totaldebitnoteamt;
+    final totaljournalamt = vm.totaljournalamt;
+    final totalpaymentamt = vm.totalpaymentamt;
+    final totalpurchaseamt = vm.totalpurchaseamt;
+    final totalreceiptamt = vm.totalreceiptamt;
+    final totalsaleamt = vm.totalsaleamt;
+    final company = vm.company;
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.party),
       key: _scaffoldKey,
@@ -2507,32 +1255,11 @@ class _PartyClickedPageState extends State<PartyClicked>
                   children: [
                     IconButton(
                       onPressed: () {
-                        counter++;
-                        setState(() {
-                          _isSearchViewVisible = !_isSearchViewVisible;
-
-                          if (!_isSearchViewVisible) {
-                            setState(() {
-                              searchController.clear();
-                              if (isClicked_Sold) {
-                                filteredItems_sold = sold_list;
-                              } else if (isClicked_Purchase) {
-                                filteredItems_purchase = purchase_list;
-                              }
-                            });
-                          }
-                        });
-
-                        /*if (counter % 2 == 0) {
-            setState(() {
-              _isSearchViewVisible = false;
-            });                      }
-          else
-          {
-            setState(() {
-              _isSearchViewVisible = true;
-            });
-          }*/
+                        final wasVisible = _isSearchViewVisible;
+                        _notifier.toggleSearchView();
+                        if (wasVisible) {
+                          searchController.clear();
+                        }
                       },
                       icon: Icon(Icons.search, color: Colors.white, size: 30),
                     ),
@@ -2807,7 +1534,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                       child: _buildModernTabButton(
                                         label: 'SUMMARY',
                                         isSelected: isClicked_Summary,
-                                        onTap: fetchSummary,
+                                        onTap: _notifier.fetchSummary,
                                       ),
                                     ),
                                   if (isVisibleSoldBtn)
@@ -2817,15 +1544,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                         label: 'SOLD',
                                         isSelected: isClicked_Sold,
                                         onTap: () {
-                                          setState(() {
-                                            isClicked_Summary = false;
-                                            isClicked_Sold = true;
-                                            isClicked_Purchase = false;
-                                            isSearchLayoutVisible = true;
-                                            _fetchSoldPurchaseTallyApi(
-                                              'Sales',
-                                            );
-                                          });
+                                          _notifier.selectSoldTab();
                                         },
                                       ),
                                     ),
@@ -2836,15 +1555,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                         label: 'PURCHASED',
                                         isSelected: isClicked_Purchase,
                                         onTap: () {
-                                          setState(() {
-                                            isClicked_Purchase = true;
-                                            isClicked_Sold = false;
-                                            isClicked_Summary = false;
-                                            isSearchLayoutVisible = true;
-                                            _fetchSoldPurchaseTallyApi(
-                                              'Purchase',
-                                            );
-                                          });
+                                          _notifier.selectPurchaseTab();
                                         },
                                       ),
                                     ),
@@ -3385,18 +2096,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                       child: TextField(
                                         controller: searchController,
                                         onChanged: (value) {
-                                          final query = value.toLowerCase();
-                                          setState(() {
-                                            filteredItems_sold = query.isEmpty
-                                                ? sold_list
-                                                : sold_list
-                                                      .where(
-                                                        (item) => item.item
-                                                            .toLowerCase()
-                                                            .contains(query),
-                                                      )
-                                                      .toList();
-                                          });
+                                          _notifier.filterSold(value);
                                         },
                                         style: GoogleFonts.poppins(
                                           fontSize: 15,
@@ -3603,19 +2303,7 @@ class _PartyClickedPageState extends State<PartyClicked>
                                         child: TextField(
                                           controller: searchController,
                                           onChanged: (value) {
-                                            final query = value.toLowerCase();
-                                            setState(() {
-                                              filteredItems_purchase =
-                                                  query.isEmpty
-                                                  ? purchase_list
-                                                  : purchase_list
-                                                        .where(
-                                                          (item) => item.item
-                                                              .toLowerCase()
-                                                              .contains(query),
-                                                        )
-                                                        .toList();
-                                            });
+                                            _notifier.filterPurchase(value);
                                           },
                                           style: GoogleFonts.poppins(
                                             fontSize: 15,
@@ -3925,8 +2613,8 @@ class _PartyClickedPageState extends State<PartyClicked>
       context,
       MaterialPageRoute(
         builder: (context) => PartyDrillDown(
-          startdate_string: startDateString,
-          enddate_string: endDateString,
+          startdate_string: _s.startDateString,
+          enddate_string: _s.endDateString,
           type: vchtype,
           total: amount,
           ledger: partyname,
@@ -3946,8 +2634,8 @@ class _PartyClickedPageState extends State<PartyClicked>
       context,
       MaterialPageRoute(
         builder: (context) => PartyTotalClickedRecPayClicked(
-          startdate_string: startDateString,
-          enddate_string: endDateString,
+          startdate_string: _s.startDateString,
+          enddate_string: _s.endDateString,
           type: type,
           total: total,
           ledger: partyname,
@@ -3969,8 +2657,8 @@ class _PartyClickedPageState extends State<PartyClicked>
       context,
       MaterialPageRoute(
         builder: (context) => PartyTotalClickedRecPayClicked(
-          startdate_string: startDateString,
-          enddate_string: endDateString,
+          startdate_string: _s.startDateString,
+          enddate_string: _s.endDateString,
           type: type,
           total: total,
           ledger: partyname,
@@ -3990,8 +2678,8 @@ class _PartyClickedPageState extends State<PartyClicked>
       context,
       MaterialPageRoute(
         builder: (context) => PartyClickedSalePurcOrder(
-          startdate_string: startDateString,
-          enddate_string: endDateString,
+          startdate_string: _s.startDateString,
+          enddate_string: _s.endDateString,
           type: type,
           ledger: partyname,
           vchtype: vchtype,
