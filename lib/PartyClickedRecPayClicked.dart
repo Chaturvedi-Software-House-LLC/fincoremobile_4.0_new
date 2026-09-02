@@ -1,9 +1,9 @@
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -12,8 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
 import 'widgets/scroll_fab.dart';
-import 'api/ledger_repository.dart';
-import 'api/monthly_bucket_helper.dart' show parseMoneyField;
+import 'providers/party_clicked_rec_pay_clicked_notifier.dart';
 
 class Data {
   final String billno;
@@ -49,7 +48,7 @@ class Data {
   }
 }
 
-class PartyTotalClickedRecPayClicked extends StatefulWidget {
+class PartyTotalClickedRecPayClicked extends ConsumerStatefulWidget {
   final String startdate_string,
       enddate_string,
       type,
@@ -70,7 +69,7 @@ class PartyTotalClickedRecPayClicked extends StatefulWidget {
     this.ledgerMasterId,
   });
   @override
-  _PartyTotalClickedRecPayClickedPageState createState() =>
+  ConsumerState<PartyTotalClickedRecPayClicked> createState() =>
       _PartyTotalClickedRecPayClickedPageState(
         startDateString: startdate_string,
         endDateString: enddate_string,
@@ -84,7 +83,7 @@ class PartyTotalClickedRecPayClicked extends StatefulWidget {
 }
 
 class _PartyTotalClickedRecPayClickedPageState
-    extends State<PartyTotalClickedRecPayClicked>
+    extends ConsumerState<PartyTotalClickedRecPayClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String startDateString = "",
@@ -96,11 +95,6 @@ class _PartyTotalClickedRecPayClickedPageState
       variabletype = "";
   final int? ledgerMasterId;
 
-  int counter = 0;
-  double total_double = 0;
-
-  String total_main = "0";
-
   final List<String> itemList = [
     'Default',
     'Newest to Oldest',
@@ -111,16 +105,7 @@ class _PartyTotalClickedRecPayClickedPageState
     'Amount Low to High',
   ];
 
-  String selectedSortOption = '';
-
-  bool isSortVisible = false;
   final ScrollController _scrollFabController = ScrollController();
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
-
-  late NumberFormat currencyFormat;
-
-  String overdue_value = "", creditlimit = "0", creditperiod = "0";
 
   _PartyTotalClickedRecPayClickedPageState({
     required this.startDateString,
@@ -133,111 +118,36 @@ class _PartyTotalClickedRecPayClickedPageState
     this.ledgerMasterId,
   });
 
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isListVisible = true,
-      isVisibleDays = false;
-
-  String email = "";
-  String name = "";
-
   TextEditingController searchController = TextEditingController();
 
-  bool isVisibleNoDataFound = false;
+  late final _args = PartyClickedRecPayClickedArgs(
+    startDateString: startDateString,
+    endDateString: endDateString,
+    type: type,
+    variable: variable,
+    variabletype: variabletype,
+    ledgerMasterId: ledgerMasterId,
+  );
 
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  late String startdate_text = "", enddate_text = "";
-  String? datetype;
+  PartyClickedRecPayClickedNotifier get _notifier =>
+      ref.read(partyClickedRecPayClickedNotifierProvider(_args).notifier);
+  PartyClickedRecPayClickedState get _s =>
+      ref.read(partyClickedRecPayClickedNotifierProvider(_args));
 
-  late String? startdate_pref, enddate_pref;
+  Map<String, List<Data>> get _itemsByBucket => _notifier.itemsByBucket();
 
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-
-  List<Data> item_list = [];
-  List<Data> filteredItems = []; // default initialization
-
-  // Ageing bucket report - client-side bucketing of the same outstanding
-  // bill list (no new API), so users can see/filter which bucket their
-  // outstanding amount is concentrated in. Boundaries come from the same
-  // AgeingConfig thresholds (SharedPreferences 'heading1'..'heading5')
-  // used by PartyClicked's Receivable/Payable row1-row6 breakdown,
-  // instead of being hardcoded here - so both screens always agree.
-  List<int> _ageingThresholds = [30, 60, 90, 120, 180];
-  String? _selectedAgeingBucket; // null = no bucket filter applied
-
-  List<String> get _ageingBuckets {
-    final t = _ageingThresholds;
-    return [
-      '0-${t[0]}',
-      '${t[0]}-${t[1]}',
-      '${t[1]}-${t[2]}',
-      '${t[2]}-${t[3]}',
-      '${t[3]}-${t[4]}',
-      '${t[4]}+',
-    ];
+  void _scrollToTop() {
+    _scrollFabController.animateTo(
+      0.0,
+      duration: Duration(milliseconds: 500),
+      curve: Curves.easeInOut,
+    );
   }
 
-  Future<void> _loadAgeingThresholds() async {
-    final t = [
-      int.tryParse(prefs.getString('heading1') ?? '') ?? 30,
-      int.tryParse(prefs.getString('heading2') ?? '') ?? 60,
-      int.tryParse(prefs.getString('heading3') ?? '') ?? 90,
-      int.tryParse(prefs.getString('heading4') ?? '') ?? 120,
-      int.tryParse(prefs.getString('heading5') ?? '') ?? 180,
-    ];
-    if (mounted) {
-      setState(() => _ageingThresholds = t);
-    } else {
-      _ageingThresholds = t;
+  void _selectSort(String option) {
+    if (_notifier.selectSortOption(option)) {
+      _scrollToTop();
     }
-  }
-
-  String _bucketFor(String overdueRaw) {
-    final days = int.tryParse(overdueRaw) ?? 0;
-    final t = _ageingThresholds;
-    final buckets = _ageingBuckets;
-    if (days <= t[0]) return buckets[0];
-    if (days <= t[1]) return buckets[1];
-    if (days <= t[2]) return buckets[2];
-    if (days <= t[3]) return buckets[3];
-    if (days <= t[4]) return buckets[4];
-    return buckets[5];
-  }
-
-  Map<String, List<Data>> get _itemsByBucket {
-    final map = {for (final b in _ageingBuckets) b: <Data>[]};
-    for (final item in item_list) {
-      map[_bucketFor(item.overdue)]!.add(item);
-    }
-    return map;
-  }
-
-  // Re-applies both the active search text and the active ageing-bucket
-  // filter together, so the two work in combination rather than one
-  // silently overriding the other.
-  void _applyItemFilters() {
-    Iterable<Data> items = item_list;
-
-    if (_selectedAgeingBucket != null) {
-      items = items.where((i) => _bucketFor(i.overdue) == _selectedAgeingBucket);
-    }
-
-    final query = searchController.text.trim().toLowerCase();
-    if (query.isNotEmpty) {
-      items = items.where((i) => i.billno.toLowerCase().contains(query));
-    }
-
-    setState(() {
-      filteredItems = items.toList();
-    });
   }
 
   // Indexed by bucket position (0 = freshest .. 5 = most overdue) since
@@ -252,6 +162,7 @@ class _PartyTotalClickedRecPayClickedPageState
   ];
 
   Widget _buildAgeingBucketSummary(BuildContext context) {
+    final vm = _s;
     final byBucket = _itemsByBucket;
 
     return Container(
@@ -285,12 +196,9 @@ class _PartyTotalClickedRecPayClickedPageState
                   color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
-              if (_selectedAgeingBucket != null)
+              if (vm.selectedAgeingBucket != null)
                 GestureDetector(
-                  onTap: () {
-                    _selectedAgeingBucket = null;
-                    _applyItemFilters();
-                  },
+                  onTap: () => _notifier.selectAgeingBucket(null),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -320,7 +228,7 @@ class _PartyTotalClickedRecPayClickedPageState
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                for (final entry in _ageingBuckets.asMap().entries)
+                for (final entry in vm.ageingBuckets.asMap().entries)
                   Builder(
                     builder: (context) {
                       final bucket = entry.value;
@@ -330,13 +238,10 @@ class _PartyTotalClickedRecPayClickedPageState
                         0,
                         (sum, i) => sum + i.outstanding,
                       );
-                      final isSelected = _selectedAgeingBucket == bucket;
+                      final isSelected = vm.selectedAgeingBucket == bucket;
 
                       return GestureDetector(
-                        onTap: () {
-                          _selectedAgeingBucket = isSelected ? null : bucket;
-                          _applyItemFilters();
-                        },
+                        onTap: () => _notifier.selectAgeingBucket(bucket),
                         child: Container(
                           width: 96,
                           margin: const EdgeInsets.symmetric(horizontal: 3),
@@ -379,8 +284,8 @@ class _PartyTotalClickedRecPayClickedPageState
                               const SizedBox(height: 4),
                               FittedBox(
                                 child: currencyAmountText(
-                                  currencyCode: _currencyCode,
-                                  symbol: currencysymbol,
+                                  currencyCode: vm.currencyCode,
+                                  symbol: vm.currencySymbol,
                                   amountText:
                                       '${CurrencyFormatter.formatCurrencyParts(total.abs()).number} ${total >= 0 ? 'CR' : 'DR'}',
                                   style: GoogleFonts.poppins(
@@ -454,34 +359,7 @@ class _PartyTotalClickedRecPayClickedPageState
                     // Replace this with your custom tile widget
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          selectedSortOption =
-                              itemList[index]; // Update the selected index
-                        });
-                        switch (selectedSortOption) {
-                          case 'Default':
-                            sortByDefault(); // Call the sorting function
-                            break;
-                          case 'Newest to Oldest':
-                            sortByDateHightoLow(); // Call the sorting function
-                            break;
-                          case 'Oldest to Newest':
-                            sortByDateLowtoHigh(); // Call the sorting function
-                            break;
-                          case 'A->Z':
-                            sortByAlphabetAtoZ(); // Call the sorting function
-                            break;
-                          case 'Z->A':
-                            sortByAlphabetZtoA(); // Call the sorting function
-                            break;
-                          case 'Amount High to Low':
-                            sortByAmountHightoLow(); // Call the sorting function
-                            break;
-                          case 'Amount Low to High':
-                            sortByAmountLowtoHigh(); // Call the sorting function
-                            break;
-                        }
-                        print('Tile $index selected');
+                        _selectSort(itemList[index]);
                         Navigator.pop(
                           context,
                         ); // Close the selection window after a tile is selected
@@ -494,13 +372,14 @@ class _PartyTotalClickedRecPayClickedPageState
                           title: Text(
                             itemList[index],
                             style: GoogleFonts.poppins(
-                              fontWeight: itemList[index] == selectedSortOption
-                                  ? FontWeight.bold
-                                  : FontWeight
-                                        .normal, // Apply bold style to the text if the tile is selected
+                              fontWeight:
+                                  itemList[index] == _s.selectedSortOption
+                                      ? FontWeight.bold
+                                      : FontWeight
+                                            .normal, // Apply bold style to the text if the tile is selected
                             ),
                           ),
-                          trailing: itemList[index] == selectedSortOption
+                          trailing: itemList[index] == _s.selectedSortOption
                               ? Icon(Icons.check, color: Color(0xFF30D5C8))
                               : null, // Show arrow icon if the tile is selected
                         ),
@@ -516,122 +395,14 @@ class _PartyTotalClickedRecPayClickedPageState
     );
   }
 
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems = List.from(item_list);
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetAtoZ() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.billno.compareTo(b.billno));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetZtoA() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.billno.compareTo(a.billno));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.billdate.compareTo(b.billdate));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.billdate.compareTo(a.billdate));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        if (type == "Receivable") {
-          filteredItems.sort((a, b) => b.outstanding.compareTo(a.outstanding));
-          _scrollFabController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems.sort((a, b) => a.outstanding.compareTo(b.outstanding));
-          _scrollFabController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
-  void sortByAmountHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        if (type == "Receivable") {
-          filteredItems.sort((a, b) => a.outstanding.compareTo(b.outstanding));
-          _scrollFabController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          filteredItems.sort((a, b) => b.outstanding.compareTo(a.outstanding));
-          _scrollFabController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
   Future<void> generateAndSharePDF_RecPay() async {
+    final vm = _s;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
 
-    final companyName = company!;
+    final companyName = vm.company;
     final reportname = 'Receivable/Payable Summary';
     final partyname = ledger;
     final overlimit = variabletype;
@@ -645,14 +416,15 @@ class _PartyTotalClickedRecPayClickedPageState
     ];
 
     final itemsPerPage = 10;
-    final pageCount = (item_list.length / itemsPerPage).ceil();
+    final orders = vm.itemList;
+    final pageCount = (orders.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = item_list.sublist(
+      final itemsSubset = orders.sublist(
         startIndex,
-        endIndex > item_list.length ? item_list.length : endIndex,
+        endIndex > orders.length ? orders.length : endIndex,
       );
 
       final tableSubsetRows = itemsSubset.map((item) {
@@ -759,10 +531,11 @@ class _PartyTotalClickedRecPayClickedPageState
     // ✅ Updated share method
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing Receivable/Payable Report of $company');
+    ], text: 'Sharing Receivable/Payable Report of ${vm.company}');
   }
 
   Future<void> generateAndShareCSV_RecPay() async {
+    final vm = _s;
     final List<List<dynamic>> csvData = [];
     final headersRow = [
       'Bill Date',
@@ -773,7 +546,7 @@ class _PartyTotalClickedRecPayClickedPageState
     ];
     csvData.add(headersRow);
 
-    for (final item in item_list) {
+    for (final item in vm.itemList) {
       final rowData = [
         convertDateFormat(item.billdate),
         handleBillNo(item.billno),
@@ -793,7 +566,7 @@ class _PartyTotalClickedRecPayClickedPageState
     // ✅ Updated share method
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing Receivable/Payable Report of $company');
+    ], text: 'Sharing Receivable/Payable Report of ${vm.company}');
   }
 
   String formatCostCenter(String costcenter) {
@@ -831,6 +604,7 @@ class _PartyTotalClickedRecPayClickedPageState
   // already suffix-formatted upstream). Handle both so the symbol/glyph
   // renders correctly either way instead of showing plain unstyled text.
   Widget _totalAmountWidget(String value, TextStyle style) {
+    final vm = _s;
     String cleaned = value.trim();
     String suffix;
     final upper = cleaned.toUpperCase();
@@ -846,8 +620,8 @@ class _PartyTotalClickedRecPayClickedPageState
     final parsed = double.tryParse(cleaned.replaceAll(',', '')) ?? 0.0;
     final parts = CurrencyFormatter.formatCurrencyParts(parsed);
     return currencyAmountText(
-      currencyCode: _currencyCode,
-      symbol: currencysymbol,
+      currencyCode: vm.currencyCode,
+      symbol: vm.currencySymbol,
       amountText: '${parts.number} $suffix',
       style: style,
     );
@@ -890,249 +664,6 @@ class _PartyTotalClickedRecPayClickedPageState
     return formattedDate;
   }
 
-  /// `creditLimit`/`creditPeriod` are already columns on the base
-  /// `/ledgers` list row - no separate endpoint like legacy's `getLedger`
-  /// is needed.
-  Future<void> fetchCreditlimit() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final ledgers = await LedgerRepository.instance.listLedgers();
-      final match = ledgers.firstWhere(
-        (l) => l['masterId'] == ledgerMasterId,
-        orElse: () => const {},
-      );
-
-      final creditLimitValue = parseMoneyField(match['creditLimit']);
-      creditlimit = creditLimitValue.toString();
-
-      final creditPeriodRaw = match['creditPeriod']?.toString();
-      if (creditPeriodRaw == null || creditPeriodRaw.isEmpty) {
-        creditperiod = '0';
-      } else if (creditPeriodRaw.contains('Days')) {
-        setState(() => isVisibleDays = false);
-        creditperiod = creditPeriodRaw;
-      } else {
-        setState(() => isVisibleDays = true);
-        creditperiod = creditPeriodRaw;
-      }
-    } catch (e) {
-      print(e);
-    }
-  }
-
-  /// `reports/ledgers/outstanding-bills` already returns every open bill
-  /// for this ledger with a server-computed `overdueDays` - no separate
-  /// "showAll"/ageing-bucket param needed, since the ageing bucket split
-  /// happens entirely client-side in this screen already
-  /// (`_ageingBuckets`/`_selectedAgeingBucket`). `isDebit == 'true'` (set by
-  /// the caller for the Receivable tile) keeps only bills with a positive
-  /// balance; the Payable tile (isDebit == '') keeps the rest - matching
-  /// `DashboardClicked.dart`'s `_fetchReceivablePayableTallyApi` convention.
-  Future<void> fetchData(final String isDebit) async {
-    setState(() {
-      _isLoading = true;
-      _isListVisible = true;
-      isSortVisible = false;
-    });
-
-    item_list.clear();
-    filteredItems.clear();
-    _selectedAgeingBucket = null;
-
-    try {
-      final bills = await LedgerRepository.instance.outstandingBills(
-        ledgerMasterId: ledgerMasterId,
-      );
-
-      final rows = bills.where((bill) {
-        final balance = parseMoneyField(bill['finalBalance']);
-        return isDebit == 'true' ? balance > 0 : balance <= 0;
-      }).map((bill) {
-        return Data.fromJson({
-          'billno': bill['name'] ?? '',
-          'overdue': bill['overdueDays']?.toString() ?? '0',
-          'outstanding': parseMoneyField(bill['finalBalance']).abs(),
-          'billdate': bill['date'] ?? '',
-          'duedate': bill['dueDate'] ?? 'null',
-        });
-      }).toList();
-
-      isVisibleNoDataFound = false;
-      item_list.addAll(rows);
-      filteredItems = item_list;
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (item_list.isEmpty) {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-    await _loadAgeingThresholds();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-    });
-
-    String? currencyCode = '';
-
-    currencyCode = prefs.getString('currencycode');
-
-    try {
-      if (currencyCode == 'INR' ||
-          currencyCode == 'EUR' ||
-          currencyCode == 'USD' ||
-          currencyCode == 'PKR') {
-        currencyFormat = NumberFormat('#,##0');
-        NumberFormat format = NumberFormat.simpleCurrency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-      } else {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-    } catch (e) {
-      NumberFormat format = NumberFormat.currency(
-        locale: 'en',
-        name: currencyCode,
-      );
-      currencysymbol = format.currencySymbol;
-      currencyFormat = NumberFormat('#,##0');
-    }
-    _currencyCode = currencyCode ?? 'AED';
-
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    startdate_text = convertDateFormat(startDateString);
-    enddate_text = convertDateFormat(endDateString);
-
-    overdue_value = variable + variabletype;
-
-    fetchCreditlimit();
-
-    String isDebit = "";
-    if (type == "Payable") {
-      isDebit = "";
-    } else if (type == "Receivable") {
-      isDebit = "true";
-    }
-
-    /* filteredItems = [
-      Data(
-        billno: 'INV-001245',
-        overdue: '12',
-        outstanding: 1540.75,
-        billdate: '2025-09-01',
-        duedate: '2025-09-15',
-      ),
-      Data(
-        billno: 'INV-001246',
-        overdue: '25',
-        outstanding: 27890.20,
-        billdate: '2025-08-25',
-        duedate: '2025-09-05',
-      ),
-      Data(
-        billno: 'INV-001247',
-        overdue: '5',
-        outstanding: 990.00,
-        billdate: '2025-09-10',
-        duedate: '2025-09-25',
-      ),
-      Data(
-        billno: 'INV-001248',
-        overdue: '60',
-        outstanding: 74500.99,
-        billdate: '2025-07-20',
-        duedate: '2025-08-05',
-      ),
-      Data(
-        billno: 'INV-001249',
-        overdue: '0',
-        outstanding: 459.45,
-        billdate: '2025-09-18',
-        duedate: '2025-10-02',
-      ),
-    ];*/
-    fetchData(isDebit);
-  }
-
   @override
   void dispose() {
     _scrollFabController.dispose();
@@ -1140,14 +671,9 @@ class _PartyTotalClickedRecPayClickedPageState
   }
 
   @override
-  void initState() {
-    super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    ref.watch(partyClickedRecPayClickedNotifierProvider(_args));
+    final vm = _s;
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -1193,31 +719,19 @@ class _PartyTotalClickedRecPayClickedPageState
           ),
           actions: [
             IconButton(
-              onPressed: () {
-                counter++;
-
-                if (counter % 2 == 0) {
-                  setState(() {
-                    _isSearchViewVisible = false;
-                  });
-                } else {
-                  setState(() {
-                    _isSearchViewVisible = true;
-                  });
-                }
-              },
+              onPressed: _notifier.toggleSearchView,
               icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
             // Sort in the app bar, matching standard Material/iOS
             // placement - see PartyDrillDown.dart's identical fix for why
             // the floating pill it replaces was a poor pattern.
             IconButton(
-              onPressed: isSortVisible
+              onPressed: vm.isSortVisible
                   ? () => _showSelectionWindow(context)
                   : null,
               icon: Icon(
                 Icons.sort_rounded,
-                color: isSortVisible ? Colors.white : Colors.white38,
+                color: vm.isSortVisible ? Colors.white : Colors.white38,
                 size: 22,
               ),
             ),
@@ -1246,7 +760,7 @@ class _PartyTotalClickedRecPayClickedPageState
                       child: GestureDetector(
                         onTap: () async {
                           Navigator.pop(context);
-                          if (item_list.isEmpty) return;
+                          if (vm.itemList.isEmpty) return;
                           try {
                             await generateAndSharePDF_RecPay();
                           } catch (e) {
@@ -1286,7 +800,7 @@ class _PartyTotalClickedRecPayClickedPageState
                       child: GestureDetector(
                         onTap: () async {
                           Navigator.pop(context);
-                          if (item_list.isEmpty) return;
+                          if (vm.itemList.isEmpty) return;
                           try {
                             await generateAndShareCSV_RecPay();
                           } catch (e) {
@@ -1403,7 +917,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ),
                                   ),
                                   Text(
-                                    enddate_text,
+                                    vm.endDateText,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 12.5,
@@ -1423,7 +937,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ),
                                   ),
                                   Text(
-                                    overdue_value,
+                                    vm.overdueValue,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 12.5,
@@ -1451,11 +965,11 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ),
                                   ),
                                   currencyAmountText(
-                                    currencyCode: _currencyCode,
-                                    symbol: currencysymbol,
+                                    currencyCode: vm.currencyCode,
+                                    symbol: vm.currencySymbol,
                                     amountText: CurrencyFormatter.formatCurrencyParts(
                                       double.tryParse(
-                                            creditlimit.replaceAll(',', ''),
+                                            vm.creditLimit.replaceAll(',', ''),
                                           ) ??
                                           0.0,
                                     ).number,
@@ -1478,7 +992,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ),
                                   ),
                                   Text(
-                                    creditperiod,
+                                    vm.creditPeriod,
                                     style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 12.5,
@@ -1488,7 +1002,7 @@ class _PartyTotalClickedRecPayClickedPageState
                                     ),
                                   ),
                                   Visibility(
-                                    visible: isVisibleDays,
+                                    visible: vm.isVisibleDays,
                                     child: Text(
                                       ' Days',
                                       style: GoogleFonts.poppins(
@@ -1511,14 +1025,14 @@ class _PartyTotalClickedRecPayClickedPageState
                 ),
               ),
 
-              if (item_list.isNotEmpty)
+              if (vm.itemList.isNotEmpty)
                 SliverToBoxAdapter(child: _buildAgeingBucketSummary(context)),
 
               // Only reserve space/paint this card when it actually has
               // something to show (search field or "no records" state) -
               // otherwise it rendered as an empty decorated box (visible
               // shadow/rounded corners with nothing inside).
-              if (_isSearchViewVisible || isVisibleNoDataFound)
+              if (vm.isSearchViewVisible || vm.isVisibleNoDataFound)
                 SliverToBoxAdapter(
                 child: Container(
                   width: double.infinity,
@@ -1546,7 +1060,7 @@ class _PartyTotalClickedRecPayClickedPageState
                   ),
                   child: Column(
                     children: [
-                      if (_isSearchViewVisible) ...[
+                      if (vm.isSearchViewVisible) ...[
                         Padding(
                           padding: const EdgeInsets.only(
                             left: 12,
@@ -1557,7 +1071,7 @@ class _PartyTotalClickedRecPayClickedPageState
                             height: 46,
                             child: TextField(
                               controller: searchController,
-                              onChanged: (value) => _applyItemFilters(),
+                              onChanged: _notifier.filter,
                               style: GoogleFonts.poppins(
                                 fontSize: 13.5,
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -1604,7 +1118,7 @@ class _PartyTotalClickedRecPayClickedPageState
                         ),
                       ],
 
-                      if (isVisibleNoDataFound)
+                      if (vm.isVisibleNoDataFound)
                         SizedBox(
                           height: MediaQuery.of(context).size.height * 0.5,
                           child: Center(
@@ -1644,7 +1158,7 @@ class _PartyTotalClickedRecPayClickedPageState
               // previous shrinkWrap ListView.builder forced eager layout of
               // every bill up front, which is what caused the same
               // scroll-hang bug already fixed on the Party list.
-              if (_isListVisible)
+              if (vm.isListVisible)
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1652,10 +1166,8 @@ class _PartyTotalClickedRecPayClickedPageState
                   ),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
-                            final card = filteredItems[index];
-                            final curr =
-                                currencysymbol ??
-                                ''; // ✅ currency symbol from prefs
+                            final card = vm.filteredItems[index];
+                            final curr = vm.currencySymbol; // ✅ currency symbol from prefs
 
                             return Container(
                               margin: const EdgeInsets.only(bottom: 14),
@@ -1836,13 +1348,13 @@ class _PartyTotalClickedRecPayClickedPageState
                                 ),
                               ),
                             );
-                    }, childCount: filteredItems.length),
+                    }, childCount: vm.filteredItems.length),
                   ),
                 ),
             ],
           ),
 
-          if (_isLoading)
+          if (vm.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
