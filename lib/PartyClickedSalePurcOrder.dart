@@ -3,9 +3,9 @@ import 'package:FincoreGo/PartyClickedSalePurcOrderClicked.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -13,10 +13,9 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'constants.dart';
-import 'api/ledger_repository.dart';
-import 'api/monthly_bucket_helper.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'providers/party_clicked_sale_purc_order_notifier.dart';
 
 class Data {
   final String item;
@@ -48,7 +47,7 @@ class Data_Top {
   Data_Top({required this.Partyledger});
 }
 
-class PartyClickedSalePurcOrder extends StatefulWidget {
+class PartyClickedSalePurcOrder extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, vchtype;
   final int? ledgerMasterId;
 
@@ -61,7 +60,7 @@ class PartyClickedSalePurcOrder extends StatefulWidget {
     this.ledgerMasterId,
   });
   @override
-  _PartyClickedSalePurcOrderPageState createState() =>
+  ConsumerState<PartyClickedSalePurcOrder> createState() =>
       _PartyClickedSalePurcOrderPageState(
         startDateString: startdate_string,
         endDateString: enddate_string,
@@ -73,7 +72,7 @@ class PartyClickedSalePurcOrder extends StatefulWidget {
 }
 
 class _PartyClickedSalePurcOrderPageState
-    extends State<PartyClickedSalePurcOrder>
+    extends ConsumerState<PartyClickedSalePurcOrder>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scrollFabController = ScrollController();
@@ -81,19 +80,8 @@ class _PartyClickedSalePurcOrderPageState
       endDateString = "",
       type = "",
       ledger = "",
-      total = "",
       vchtype = "";
   int? ledgerMasterId;
-
-  int counter = 0;
-  bool isSortVisible = false;
-  double total_double = 0;
-
-  String selectedSortOption = '';
-
-  String total_main = "0";
-
-  List<Data_Top> dropdownItems = [];
 
   final List<String> itemList = [
     'Default',
@@ -102,9 +90,6 @@ class _PartyClickedSalePurcOrderPageState
     'Amount High to Low',
     'Amount Low to High',
   ];
-
-  List<Data> filteredItems =
-      []; // Initialize an empty list to hold the filtered items
 
   _PartyClickedSalePurcOrderPageState({
     required this.startDateString,
@@ -115,37 +100,37 @@ class _PartyClickedSalePurcOrderPageState
     this.ledgerMasterId,
   });
 
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isListVisible = false;
+  late final _args = PartyClickedSalePurcOrderArgs(
+    startDateString: startDateString,
+    endDateString: endDateString,
+    type: type,
+    ledger: ledger,
+    vchtype: vchtype,
+    ledgerMasterId: ledgerMasterId,
+  );
 
-  String email = "";
-  String name = "";
-
-  Data_Top? selectedTopValue;
+  PartyClickedSalePurcOrderNotifier get _notifier =>
+      ref.read(partyClickedSalePurcOrderNotifierProvider(_args).notifier);
+  PartyClickedSalePurcOrderState get _s =>
+      ref.read(partyClickedSalePurcOrderNotifierProvider(_args));
 
   ScrollController _scrollController = ScrollController();
 
   TextEditingController searchController = TextEditingController();
 
-  bool isVisibleNoDataFound = false;
+  void _scrollToTop() {
+    _scrollController.animateTo(
+      0.0,
+      duration: Duration(milliseconds: 500),
+      curve: Curves.easeInOut,
+    );
+  }
 
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  String? datetype;
-
-  late String? startdate_pref, enddate_pref;
-
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-
-  List<Data> item_list = [];
+  void _selectSort(String option) {
+    if (_notifier.selectSortOption(option)) {
+      _scrollToTop();
+    }
+  }
 
   void _showSelectionWindow(BuildContext context) {
     final List<IconData> icons = [
@@ -195,28 +180,7 @@ class _PartyClickedSalePurcOrderPageState
                     // Replace this with your custom tile widget
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          selectedSortOption =
-                              itemList[index]; // Update the selected index
-                        });
-                        switch (selectedSortOption) {
-                          case 'Default':
-                            sortByDefault(); // Call the sorting function
-                            break;
-                          case 'A->Z':
-                            sortByAlphabetAtoZ(); // Call the sorting function
-                            break;
-                          case 'Z->A':
-                            sortByAlphabetZtoA(); // Call the sorting function
-                            break;
-                          case 'Amount High to Low':
-                            sortByAmountHightoLow(); // Call the sorting function
-                            break;
-                          case 'Amount Low to High':
-                            sortByAmountLowtoHigh(); // Call the sorting function
-                            break;
-                        }
-                        print('Tile $index selected');
+                        _selectSort(itemList[index]);
                         Navigator.pop(
                           context,
                         ); // Close the selection window after a tile is selected
@@ -229,13 +193,14 @@ class _PartyClickedSalePurcOrderPageState
                           title: Text(
                             itemList[index],
                             style: GoogleFonts.poppins(
-                              fontWeight: itemList[index] == selectedSortOption
-                                  ? FontWeight.bold
-                                  : FontWeight
-                                        .normal, // Apply bold style to the text if the tile is selected
+                              fontWeight:
+                                  itemList[index] == _s.selectedSortOption
+                                      ? FontWeight.bold
+                                      : FontWeight
+                                            .normal, // Apply bold style to the text if the tile is selected
                             ),
                           ),
-                          trailing: itemList[index] == selectedSortOption
+                          trailing: itemList[index] == _s.selectedSortOption
                               ? Icon(Icons.check, color: app_color)
                               : null, // Show arrow icon if the tile is selected
                         ),
@@ -251,90 +216,8 @@ class _PartyClickedSalePurcOrderPageState
     );
   }
 
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems = List.from(item_list);
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetAtoZ() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.item.compareTo(b.item));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetZtoA() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.item.compareTo(a.item));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        if (vchtype == 'sales') {
-          filteredItems.sort((a, b) => a.totalAmount.compareTo(b.totalAmount));
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else if (vchtype == 'purchase') {
-          filteredItems.sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
-  void sortByAmountHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        if (vchtype == 'sales') {
-          filteredItems.sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else if (vchtype == 'purchase') {
-          filteredItems.sort((a, b) => a.totalAmount.compareTo(b.totalAmount));
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
   Future<void> generateAndSharePDF_SalePurc() async {
+    final vm = _s;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -347,22 +230,23 @@ class _PartyClickedSalePurcOrderPageState
       typee = 'Pending Purchase Order';
     }
 
-    final companyName = company!;
+    final companyName = vm.company;
     final reportname = '$typee Summary';
-    final partyname = selectedTopValue!.Partyledger;
+    final partyname = vm.selectedTopValue!.Partyledger;
 
     final headersRow3 = ['Item', 'Pending Qty', 'Amount'];
 
     final itemsPerPage = 10;
-    final pageCount = (item_list.length / itemsPerPage).ceil();
+    final orders = vm.itemList;
+    final pageCount = (orders.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
-      final endIndex = (pageNumber + 1) * itemsPerPage > item_list.length
-          ? item_list.length
+      final endIndex = (pageNumber + 1) * itemsPerPage > orders.length
+          ? orders.length
           : (pageNumber + 1) * itemsPerPage;
 
-      final itemsSubset = item_list.sublist(startIndex, endIndex);
+      final itemsSubset = orders.sublist(startIndex, endIndex);
 
       final tableSubsetRows = itemsSubset.map((item) {
         return [
@@ -473,10 +357,11 @@ class _PartyClickedSalePurcOrderPageState
     // ✅ Updated share method
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing $typee Report of $company');
+    ], text: 'Sharing $typee Report of ${vm.company}');
   }
 
   Future<void> generateAndShareCSV_SalePurc() async {
+    final vm = _s;
     String typee = '';
     if (type == 'salesorder') {
       typee = 'Pending Sales Order';
@@ -488,7 +373,7 @@ class _PartyClickedSalePurcOrderPageState
     final headersRow = ['Item', 'Pending Qty', 'Amount'];
     csvData.add(headersRow);
 
-    for (final item in item_list) {
+    for (final item in vm.itemList) {
       final rowData = [
         item.item,
         item.totalQty,
@@ -507,7 +392,7 @@ class _PartyClickedSalePurcOrderPageState
     // ✅ Updated share method
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing $typee Report of $company');
+    ], text: 'Sharing $typee Report of ${vm.company}');
   }
 
   String formatCostCenter(String costcenter) {
@@ -539,153 +424,6 @@ class _PartyClickedSalePurcOrderPageState
     return formattedDate;
   }
 
-  /// Legacy's `getOrderSummary` (`fetchData_Top`) resolved the party
-  /// dropdown *and* triggered the initial item fetch together. The
-  /// cross-party dropdown itself isn't migrated (see `Data_Top`'s
-  /// doc-comment) - this just seeds `dropdownItems`/`selectedTopValue` with
-  /// the single current party, then fetches this party's pending orders via
-  /// `LedgerRepository.pendingOrdersByItem`.
-  Future<void> _fetchOrders() async {
-    final ledgerMasterId = this.ledgerMasterId;
-    if (ledgerMasterId == null) {
-      setState(() {
-        _isLoading = false;
-        isVisibleNoDataFound = true;
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _isListVisible = true;
-      isSortVisible = false;
-      isVisibleNoDataFound = false;
-    });
-
-    item_list.clear();
-    filteredItems.clear();
-
-    try {
-      final from = parseCompactDate(startDateString);
-      final to = parseCompactDate(endDateString);
-      final rows = await LedgerRepository.instance.pendingOrdersByItem(
-        ledgerMasterId,
-        isSales: vchtype == 'sales',
-        from: from,
-        to: to,
-      );
-
-      final items = [
-        for (final row in rows)
-          Data(
-            item: (row['stockItemName'] ?? '').toString(),
-            stockItemMasterId: row['stockItemMasterId'] as int,
-            totalQty: parseMoneyField(row['pendingQuantity']).toString(),
-            totalAmount: parseMoneyField(row['pendingAmount']),
-          ),
-      ];
-
-      setState(() {
-        item_list.addAll(items);
-        filteredItems = item_list;
-        isVisibleNoDataFound = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (item_list.isEmpty) {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        isVisibleNoDataFound = false;
-
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-      /*selectedTopValue = dropdownItems.first;
-      filteredItems= item_list;
-      isVisibleNoDataFound =false;
-      _isListVisible = true;*/
-    });
-
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-      if (!itemList.contains(selectedSortOption)) {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    // See `Data_Top`'s doc-comment - a single no-op entry for the current
-    // party, replacing legacy's multi-party dropdown fetch.
-    setState(() {
-      dropdownItems = [Data_Top(Partyledger: ledger)];
-      selectedTopValue = dropdownItems.first;
-    });
-
-    _fetchOrders();
-  }
-
   String formatTypeTitle(String type) {
     final Map<String, String> typeMappings = {
       'salesorder': 'Pending Sales Order',
@@ -697,13 +435,6 @@ class _PartyClickedSalePurcOrderPageState
   }
 
   @override
-  void initState() {
-    super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
-  }
-
-  @override
   void dispose() {
     _scrollFabController.dispose();
     super.dispose();
@@ -711,6 +442,8 @@ class _PartyClickedSalePurcOrderPageState
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(partyClickedSalePurcOrderNotifierProvider(_args));
+    final vm = _s;
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.party),
       key: _scaffoldKey,
@@ -740,7 +473,7 @@ class _PartyClickedSalePurcOrderPageState
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: DropdownButton<Data_Top>(
-                        value: selectedTopValue,
+                        value: vm.selectedTopValue,
                         style: GoogleFonts.poppins(
                           color: Colors.white,
                           fontSize: 15,
@@ -749,12 +482,9 @@ class _PartyClickedSalePurcOrderPageState
                         icon: Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
                         underline: SizedBox(),
                         onChanged: (newValue) {
-                          setState(() {
-                            selectedTopValue = newValue!;
-                          });
-                          _fetchOrders();
+                          _notifier.selectTopValue(newValue!);
                         },
-                        items: dropdownItems.map((Data_Top value) {
+                        items: vm.dropdownItems.map((Data_Top value) {
                           return DropdownMenuItem<Data_Top>(
                             value: value,
                             child: Text(
@@ -781,18 +511,7 @@ class _PartyClickedSalePurcOrderPageState
 
           actions: [
             IconButton(
-              onPressed: () {
-                counter++;
-                if (counter % 2 == 0) {
-                  setState(() {
-                    _isSearchViewVisible = false;
-                  });
-                } else {
-                  setState(() {
-                    _isSearchViewVisible = true;
-                  });
-                }
-              },
+              onPressed: _notifier.toggleSearchView,
               icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
             // Sort now lives in the app bar (standard Material/iOS
@@ -802,12 +521,12 @@ class _PartyClickedSalePurcOrderPageState
             // (greyed out) rather than hidden when there's nothing to sort,
             // so its position doesn't jump around as data loads.
             IconButton(
-              onPressed: isSortVisible
+              onPressed: vm.isSortVisible
                   ? () => _showSelectionWindow(context)
                   : null,
               icon: Icon(
                 Icons.sort_rounded,
-                color: isSortVisible ? Colors.white : Colors.white38,
+                color: vm.isSortVisible ? Colors.white : Colors.white38,
                 size: 22,
               ),
             ),
@@ -836,7 +555,7 @@ class _PartyClickedSalePurcOrderPageState
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (!item_list.isEmpty) {
+                          if (!vm.itemList.isEmpty) {
                             generateAndSharePDF_SalePurc();
                           }
                         },
@@ -866,7 +585,7 @@ class _PartyClickedSalePurcOrderPageState
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (!item_list.isEmpty) {
+                          if (!vm.itemList.isEmpty) {
                             generateAndShareCSV_SalePurc();
                           }
                         },
@@ -916,7 +635,7 @@ class _PartyClickedSalePurcOrderPageState
                         color: Theme.of(context).scaffoldBackgroundColor,
                           child: Column(
                             children: [
-                              if (_isSearchViewVisible) ...[
+                              if (vm.isSearchViewVisible) ...[
                                 Padding(
                                   padding: const EdgeInsets.only(
                                     left: 12,
@@ -927,25 +646,7 @@ class _PartyClickedSalePurcOrderPageState
                                     height: 46,
                                     child: TextField(
                                       controller: searchController,
-                                      onChanged: (value) {
-                                        if (value.isEmpty) {
-                                          setState(() {
-                                            filteredItems = item_list;
-                                          });
-                                        } else {
-                                          setState(() {
-                                            filteredItems = item_list.where((
-                                              item,
-                                            ) {
-                                              // Filter items based on the search query and the ledgerName property
-                                              final query = value.toLowerCase();
-                                              return item.item
-                                                  .toLowerCase()
-                                                  .contains(query);
-                                            }).toList();
-                                          });
-                                        }
-                                      },
+                                      onChanged: _notifier.filter,
                                       style: GoogleFonts.poppins(
                                         fontSize: 13.5,
                                         color: Theme.of(
@@ -1005,7 +706,7 @@ class _PartyClickedSalePurcOrderPageState
                                 ),
                               ],
 
-                              if (isVisibleNoDataFound)
+                              if (vm.isVisibleNoDataFound)
                                 SizedBox(
                                   height: MediaQuery.of(context).size.height * 0.5,
                                   child: Center(
@@ -1048,7 +749,7 @@ class _PartyClickedSalePurcOrderPageState
               // previous shrinkWrap ListView.builder forced eager layout of
               // every order up front, which is what caused the same
               // scroll-hang bug already fixed on the Party list.
-              if (_isListVisible)
+              if (vm.isListVisible)
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1056,15 +757,15 @@ class _PartyClickedSalePurcOrderPageState
                   ),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
-                                      final card = filteredItems[index];
+                                      final card = vm.filteredItems[index];
 
                                       return GestureDetector(
                                         onTap: () {
-                                          if (selectedTopValue == null) return;
+                                          if (vm.selectedTopValue == null) return;
                                           if (ledgerMasterId == null) return;
                                           String item = card.item;
                                           String party =
-                                              selectedTopValue!.Partyledger;
+                                              vm.selectedTopValue!.Partyledger;
 
                                           Navigator.push(
                                             context,
@@ -1079,7 +780,7 @@ class _PartyClickedSalePurcOrderPageState
                                                     type: type,
                                                     vchtype: vchtype,
                                                     item: item,
-                                                    dropdownItems: item_list,
+                                                    dropdownItems: vm.itemList,
                                                     ledgerMasterId:
                                                         ledgerMasterId!,
                                                     stockItemMasterId:
@@ -1276,13 +977,13 @@ class _PartyClickedSalePurcOrderPageState
                                           ),
                                         ),
                                       );
-                    }, childCount: filteredItems.length),
+                    }, childCount: vm.filteredItems.length),
                   ),
                 ),
             ],
           ),
 
-          if (_isLoading)
+          if (vm.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
