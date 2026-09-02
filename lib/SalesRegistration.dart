@@ -6,6 +6,7 @@ import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -21,17 +22,16 @@ import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
 import 'widgets/signature_capture.dart';
 import 'api/api_exception.dart';
-import 'api/voucher_entry_repository.dart';
-import 'api/voucher_entry_dropdowns_repository.dart';
-import 'api/price_level_repository.dart';
 import 'api/pagination_helper.dart';
+import 'api/price_level_repository.dart';
 import 'api/tally_api_client.dart';
 import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import 'providers/sales_registration_notifier.dart';
 
-class SalesRegistration extends StatefulWidget {
+class SalesRegistration extends ConsumerStatefulWidget {
   const SalesRegistration({Key? key}) : super(key: key);
   @override
-  _SalesRegistrationPageState createState() => _SalesRegistrationPageState();
+  ConsumerState<SalesRegistration> createState() => _SalesRegistrationPageState();
 }
 
 // Debug helper for the bulk multi-item add: records which source
@@ -146,19 +146,11 @@ class LedgerEntry {
   }
 }
 
-class _SalesRegistrationPageState extends State<SalesRegistration>
+class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = true,
-      isVisibleNoUserFound = false;
-
-  bool _isInitialDataLoaded = false;
-
-  bool isVchEditable = false; // state variable
+  SalesRegistrationNotifier get _notifier =>
+      ref.read(salesRegistrationNotifierProvider.notifier);
+  SalesRegistrationState get _s => ref.read(salesRegistrationNotifierProvider);
 
   TextEditingController _itemController = TextEditingController();
   TextEditingController _partyLedgerController = TextEditingController();
@@ -170,61 +162,12 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   final TextEditingController receiverMobileController = TextEditingController();
   Uint8List? receiverSignatureBytes;
 
-  String? selectedPartyLedgerPriceLevel;
   String? selectedItemMasterId;
-
-  // Customer mobile/email for the selected party ledger - fetched in
-  // loadLedgerData() alongside TRN/address/emirate/country, used by the
-  // UniGas POS Tax Invoice PDF format.
-  String? _selectedPartyMobile;
-  String? _selectedPartyEmail;
 
   bool isPriceLevelLoading = false;
   bool isRateFieldEnabled = true;
   bool showRateField = true;
 
-  bool isVoucherTypeLocked = false;
-  bool isSalesLedgerLocked = false;
-  bool isGodownLocked = false;
-
-  String startfrom = '';
-
-  Map<String, String?> partyLedgerPriceLevelMap = {};
-  // Party ledger name -> raw "credit_period" text from the backend (e.g.
-  // "30 Days", or null when the ledger has none) - used to compute
-  // BILLCREDITPERIOD for UniGas's New Ref bill allocation.
-  Map<String, String?> partyLedgerCreditPeriodMap = {};
-
-  // --- tally-api migration state -------------------------------------
-  //
-  // The dropdowns/lists throughout this screen (partyledgerdata,
-  // salesledger_data, vatledgerdata, ledgerdata, vchtypenamedata,
-  // locationsdata) are all still plain `List<String>`/name-keyed - kept
-  // exactly as-is to avoid touching the many widgets that read them.
-  // tally-api's voucher-entries write endpoint needs numeric masterIds
-  // instead of names, so loadData() additionally populates these
-  // name->masterId lookup maps, consulted only when building the
-  // create-entry payload (see the submit handler).
-  final TallyApiClient _tallyApiClient = TallyApiClient();
-  final Map<String, int> _ledgerMasterIdByName = {};
-  final Map<String, int> _voucherTypeMasterIdByName = {};
-  final Map<String, int> _godownMasterIdByName = {};
-  // Every ledger row (name, masterId, tinNumber, address, mobileNumber,
-  // email, stateName, countryName, creditPeriod, ...), cached from
-  // loadData() so loadLedgerData() (legacy: a separate `getLedger` POST
-  // per party selection) can resolve the selected party's contact/TRN
-  // details with a local lookup instead of another round trip.
-  List<Map<String, dynamic>> _allLedgersCache = [];
-  int? _currencyMasterId;
-
-  double ledgerVatAmount = 0,
-      itemsVatAmount = 0,
-      totalVatAmount = 0,
-      totalAmount = 0;
-
-  double totalPriceOfItems = 0,
-      totalAmountForVatAppEntries = 0,
-      totalAmountOfLedgers = 0;
   final FocusNode _textFieldFocusNodeNarration = FocusNode();
 
   late AnimationController _animationController;
@@ -316,8 +259,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           borderRadius: const BorderRadius.all(Radius.circular(8)),
         ),
         child: currencySymbolWidget(
-          currencycode,
-          getCurrencySymbol(currencycode),
+          _s.currencyCode,
+          getCurrencySymbol(_s.currencyCode),
           GoogleFonts.poppins(
             color: Colors.white,
             fontSize: 13,
@@ -339,26 +282,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         borderSide: BorderSide(color: app_color, width: 1.5),
       ),
     );
-  }
-
-  /// `YYYY-MM-DD`, the `z.iso.date()` shape every voucherEntrySchema date
-  /// field expects.
-  String _isoDate(DateTime d) =>
-      '${d.year.toString().padLeft(4, '0')}-'
-      '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
-
-  /// Resolves [unitName] (the display name currently selected on a
-  /// [SaleItem]) back to its tally-api unitMasterId, by matching against
-  /// the item's own `unit` list (as shaped by
-  /// `_shapeStockItemForLegacyItemdata`, each entry carrying a `masterId`).
-  int? _findUnitMasterId(List<dynamic> unitJson, String unitName) {
-    for (final u in unitJson) {
-      if (u is Map && u['name'] == unitName) {
-        return u['masterId'] as int?;
-      }
-    }
-    return null;
   }
 
   /// Parses tally-api's compound "value/unit" price-level rate string (e.g.
@@ -405,9 +328,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   Future<void> fetchPriceLevelDetailsForSelectedItem(
     StateSetter setStateDialog,
   ) async {
-    if (serial_no == null ||
-        serial_no!.trim().isEmpty ||
-        !vanSalesSerialNo.contains(serial_no!.trim())) {
+    final vm = _s;
+    if (vm.serialNo == null ||
+        vm.serialNo!.trim().isEmpty ||
+        !vanSalesSerialNo.contains(vm.serialNo!.trim())) {
       return;
     }
 
@@ -418,8 +342,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       return;
     }
 
-    if (selectedPartyLedgerPriceLevel == null ||
-        selectedPartyLedgerPriceLevel.toString().trim().isEmpty) {
+    if (vm.selectedPartyLedgerPriceLevel == null ||
+        vm.selectedPartyLedgerPriceLevel.toString().trim().isEmpty) {
       setStateDialog(() {
         isRateFieldEnabled = true;
         showRateField = true;
@@ -432,8 +356,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     });
 
     try {
-      final DateTime selectedDate = saledatestring.isNotEmpty
-          ? parseCompactDate(saledatestring)
+      final DateTime selectedDate = vm.saledatestring.isNotEmpty
+          ? parseCompactDate(vm.saledatestring)
           : DateTime.now();
 
       final int? itemMasterId = int.tryParse(selectedItemMasterId!);
@@ -441,7 +365,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           ? null
           : await _priceLevelRate(
               stockItemMasterId: itemMasterId,
-              priceLevelName: selectedPartyLedgerPriceLevel!,
+              priceLevelName: vm.selectedPartyLedgerPriceLevel!,
               asOf: selectedDate,
             );
 
@@ -457,8 +381,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         final double amount = apiRate * qty;
 
         setStateDialog(() {
-          itemRateController.text = apiRate.toStringAsFixed(decimal ?? 2);
-          itemAmountController.text = amount.toStringAsFixed(decimal ?? 2);
+          itemRateController.text = apiRate.toStringAsFixed(vm.decimal);
+          itemAmountController.text = amount.toStringAsFixed(vm.decimal);
           isRateFieldEnabled = false;
           showRateField = true;
         });
@@ -482,120 +406,19 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     }
   }
 
+  /// Deletes the ledger entry, then syncs the read-only VAT/total
+  /// `TextEditingController`s from the notifier's freshly recomputed totals
+  /// (those controllers stay widget-local; the notifier can't touch them).
   void _deleteLedger(int index) {
-    setState(() {
-      ledgerEntries.removeAt(index);
-
-      // Calculate the total amount for VAT-applicable entries
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      // Calculate the total amount of ledgers
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      // Calculate VAT if applicable
-      if (_selectedvatledger != 'Not Applicable') {
-        double vatPerc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vatPerc;
-
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-
-      // Calculate the total amount
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedTotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedTotal.toString();
-
-      isVisibleLedgerHeading = ledgerEntries.isNotEmpty;
-    });
+    _notifier.deleteLedger(index);
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
   }
 
   void _deleteSaleItem(int index) {
-    setState(() {
-      saleItems.removeAt(index);
-
-      // Calculate the total price of items
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedTotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedTotal.toString();
-
-      isVisibleItemHeading = saleItems.isNotEmpty;
-    });
+    _notifier.deleteSaleItem(index);
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
   }
 
   String formatitemKey(int key) {
@@ -605,6 +428,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   }
 
   String convertAmountToWords(num amount) {
+    final decimal = _s.decimal;
+    final currencycode = _s.currencyCode;
     if (amount == null) return "Invalid input";
 
     List<String> units = [
@@ -789,20 +614,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     return words.trim();
   }
 
-  Map<String, dynamic> jsonEntryData = {
-    "DATE": "",
-    "VOUCHERTYPENAME": "",
-    "PARTYLEDGERNAME": "",
-    "NARRATION": "",
-    "VOUCHERNUMBER": "",
-    "REFERENCE": "",
-    "REFERENCEDATE": "",
-    "INVENTORYENTRIES.LIST": [],
-    "LEDGERENTRIES.LIST": [],
-  };
-
-  bool isVisibleItemHeading = false, isVisibleLedgerHeading = false;
-
   bool isVisibleUnit = true;
 
   final _formKey = GlobalKey<FormState>();
@@ -811,51 +622,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
   GlobalKey<FormState> _itemFormkey = GlobalKey<FormState>();
 
-  double roundedtotalVatAmount = 0.0;
-
-  double roundedtotalAmount = 0.0;
-
   GlobalKey<FormState> _ledgerFormkey = GlobalKey<FormState>();
 
-  List<String> salesledger_data = [];
-
-  int? decimal = 2;
-  late List<String> vchtypenamedata = [];
-  late List<String> partyledgerdata = [];
-  late List<String> vatledgerdata = [];
-
-  List<dynamic> itemdata = [];
-  double vatperc = 0.0;
-
-  List<String> locationsdata = []; // Store the locations here
   late String selectedLocation = ''; // Store the selected location here
 
   List<Unit> unitdata = [];
 
-  List<Map<String, dynamic>> ledgerdata = [];
-
-  String user_email_fetched = "", token = '';
-
-  String name = "",
-      email = "",
-      saledatestring = '',
-      saledatetxt = '',
-      refdatestring = '',
-      refdatetxt = '';
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-
-  late SharedPreferences prefs;
-
-  dynamic _selectedledger,
-      _selecteditem,
-      _selectedunit,
-      _selectedsalesledger,
-      _selectedvchtypename,
-      _selectedpartyledger,
-      _selectedvatledger;
+  dynamic _selectedledger, _selecteditem, _selectedunit;
 
   late final TextEditingController controller_narration =
       TextEditingController();
@@ -864,7 +639,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       TextEditingController();
 
   String formatAmountInvoice(String amount) {
-    int? decimal = prefs?.getInt('decimalplace') ?? 2;
+    int decimal = _s.decimal;
 
     if (amount == "null" || amount.isEmpty) {
       amount = "0";
@@ -889,28 +664,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       _isFocused_totalamt = false,
       _isFocused_refno = false;
 
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
-  late DateTime saledate, refdate;
-  // The legacy HttpURL_loadData/loadLedgerData/fetchvchnos/salesEntry
-  // fields (and their `_initSharedPreferences()` assignments) were removed
-  // as part of the tally-api migration - every call site now goes through
-  // lib/api/ repositories instead of a hand-built legacy URL.
-  List<String> vchnos = [];
-
   double selectedMultiplier = 0.0;
-
-  final DateFormat _dateFormat = DateFormat('yyyyMMdd');
-
-  List<SaleItem> saleItems = [];
-  List<LedgerEntry> ledgerEntries = [];
-  String currencycode = '';
 
   final TextEditingController itemQuantityController = TextEditingController();
   final TextEditingController itemRateController = TextEditingController();
@@ -927,8 +681,6 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   final TextEditingController _refdateController = TextEditingController();
 
   final TextEditingController _vchnoController = TextEditingController();
-  String errorMessageVchNo = '';
-  int? unitValue;
 
   late DateTime now = DateTime.now();
 
@@ -978,119 +730,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         yearEndDate = selectedDateRange.end;
       });
 
-      fetchvchnos(_selectedvchtypename);
+      fetchvchnos(_s.selectedVchTypeName);
     }
   }
 
   void checkVchNoExistence(String vchNo) {
-    if (vchNo.isEmpty || vchNo == '') {
-      setState(() {
-        errorMessageVchNo = 'Voucher No. cannot be empty';
-      });
-    } else {
-      if (vchnos.contains(vchNo)) {
-        setState(() {
-          errorMessageVchNo =
-              'Voucher no: $vchNo against $_selectedvchtypename already exists';
-        });
-      } else {
-        setState(() {
-          errorMessageVchNo = '';
-        });
-      }
-    }
+    _notifier.checkVchNoExistence(vchNo);
   }
 
-  String generateNextVchNo(List<String> vchnos) {
-    if (vchnos.isEmpty) return "1";
-
-    Map<String, List<Map<String, dynamic>>> patternGroups = {};
-
-    for (String vch in vchnos) {
-      List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
-
-      if (matches.isNotEmpty) {
-        RegExpMatch selectedMatch = matches.last;
-
-        // 🔥 Ignore year like 2026
-        if (matches.length > 1) {
-          for (int i = matches.length - 1; i >= 0; i--) {
-            String val = matches[i].group(0)!;
-            int num = int.tryParse(val) ?? 0;
-
-            if (!(val.length == 4 && num >= 2000 && num <= 2099)) {
-              selectedMatch = matches[i];
-              break;
-            }
-          }
-        }
-
-        String numberPart = selectedMatch.group(0)!;
-        int number = int.tryParse(numberPart) ?? 0;
-
-        String prefix = vch.substring(0, selectedMatch.start);
-        String suffix = vch.substring(selectedMatch.end);
-
-        String patternKey = prefix + "#" + suffix;
-
-        patternGroups.putIfAbsent(patternKey, () => []);
-
-        bool exists = patternGroups[patternKey]!.any(
-          (e) => e["number"] == number,
-        );
-
-        if (!exists) {
-          patternGroups[patternKey]!.add({
-            "original": vch,
-            "number": number,
-            "length": numberPart.length,
-          });
-        }
-      }
-    }
-
-    if (patternGroups.isEmpty) {
-      return vchnos.last + "1";
-    }
-
-    // ✅ Dominant pattern
-    String selectedPattern = patternGroups.entries
-        .reduce((a, b) => a.value.length > b.value.length ? a : b)
-        .key;
-
-    List<Map<String, dynamic>> selectedList = patternGroups[selectedPattern]!;
-
-    // 🔥 STEP 1: Extract & sort numbers
-    List<int> numbers = selectedList.map((e) => e["number"] as int).toList();
-    numbers = numbers.toSet().toList();
-
-    numbers.sort();
-
-    int length = selectedList.first["length"];
-
-    // 🔥 STEP 2: Find missing number (gap)
-    int expected = numbers.first;
-
-    int nextNumber = numbers.last + 1; // fallback
-
-    for (int num in numbers) {
-      if (num != expected) {
-        nextNumber = expected;
-        break;
-      }
-      expected++;
-    }
-
-    // 🔥 STEP 3: Format number
-    String newNumber = nextNumber.toString().padLeft(length, '0');
-
-    // reconstruct
-    List<String> parts = selectedPattern.split("#");
-    String prefix = parts[0];
-    String suffix = parts[1];
-
-    return prefix + newNumber + suffix;
-  }
 
   double _estimateInvoiceLastRowFillerPadding(int itemCount) {
     // Calibrated against actual rendered output on an A4 page (same
@@ -1115,6 +762,45 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     String emirate,
     String country,
   ) async {
+    final vm = _s;
+    final saleItems = vm.saleItems;
+    final ledgerEntries = vm.ledgerEntries;
+    final totalAmount = vm.totalAmount;
+    final totalVatAmount = vm.totalVatAmount;
+    final roundedtotalAmount = vm.roundedTotalAmount;
+    final roundedtotalVatAmount = vm.roundedTotalVatAmount;
+    final itemsVatAmount = vm.itemsVatAmount;
+    final ledgerVatAmount = vm.ledgerVatAmount;
+    final totalPriceOfItems = vm.totalPriceOfItems;
+    final totalAmountOfLedgers = vm.totalAmountOfLedgers;
+    final company = vm.company;
+    final company_trn = vm.companyTrn;
+    final company_address = vm.companyAddress;
+    final company_emirate = vm.companyEmirate;
+    final company_country = vm.companyCountry;
+    final vatperc = vm.vatperc;
+    final decimal = vm.decimal;
+    final _selectedvchtypename = vm.selectedVchTypeName;
+    final _selectedpartyledger = vm.selectedPartyLedger;
+    final _selectedsalesledger = vm.selectedSalesLedger;
+    final _selectedvatledger = vm.selectedVatLedger;
+    final saledatestring = vm.saledatestring;
+    final saledatetxt = vm.saledatetxt;
+    final refdatestring = vm.refdatestring;
+    final refdatetxt = vm.refdatetxt;
+    final saledate = vm.saledate;
+    final refdate = vm.refdate;
+    final _selectedPartyMobile = vm.selectedPartyMobile;
+    final _selectedPartyEmail = vm.selectedPartyEmail;
+    final vchnos = vm.vchNos;
+    final name = vm.name;
+    final email = vm.email;
+    final vatledgerdata = vm.vatLedgerData;
+    final itemdata = vm.itemData;
+    final locationsdata = vm.locationsData;
+    final ledgerdata = vm.ledgerData;
+    final currencycode = vm.currencyCode;
+    final serial_no = vm.serialNo;
     // UniGas uses a completely separate POS Tax Invoice format (the old
     // A4-style layout is retired for this serial type) - see
     // _generateUniGasTaxInvoicePDF.
@@ -2813,6 +2499,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     ], text: 'Sharing Sale Invoice for $_selectedpartyledger');
 
     _dropFocusBeforeReset();
+    _notifier.resetAfterSave();
 
     setState(() {
       controller_narration.clear();
@@ -2820,131 +2507,29 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       _textFieldFocusNodeNarration.unfocus(); // Unfocus the TextField
 
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-      refdate = DateTime.now();
-      refdatestring = _dateFormat.format(refdate);
-      refdatetxt = formatlastsaledate(refdatestring);
-      _refdateController.text = refdatetxt;
-      // _selectedvchtypename = vchtypenamedata[0];
-      fetchvchnos(_selectedvchtypename);
-      _selectedpartyledger = null;
+      _dateController.text = _s.saledatetxt;
+      _refdateController.text = _s.refdatetxt;
+
+      fetchvchnos(_s.selectedVchTypeName);
       _partyLedgerController.clear();
-      // _selectedsalesledger = salesledger_data[0];
 
-      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+      _selectedledger = _s.ledgerData.isNotEmpty
+          ? _s.ledgerData[0]['name']
+          : null;
 
-      _selectedvatledger = _defaultVatLedger();
-
-      _selecteditem = '${itemdata[0]['name']}';
+      _selecteditem = '${_s.itemData[0]['name']}';
       _itemController.text = _selecteditem;
-      if (locationsdata.isNotEmpty) {
-        selectedLocation = locationsdata[0];
+      if (_s.locationsData.isNotEmpty) {
+        selectedLocation = _s.locationsData[0];
         isVisibleLocation = true;
       } else {
         isVisibleLocation = false;
       }
       _updateUnitDropdown(_selecteditem);
 
-      saleItems.clear();
-      ledgerEntries.clear();
+      controller_vatamt.text = _s.formattedVatAmount;
+      controller_totalamt.text = _s.formattedTotalAmount;
 
-      // making sales list empty and setting values
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (saleItems.isEmpty) {
-        isVisibleItemHeading = false;
-      } else {
-        isVisibleItemHeading = true;
-      }
-      // making ledger list empty and setting values
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (ledgerEntries.isEmpty) {
-        isVisibleLedgerHeading = false;
-      } else {
-        isVisibleLedgerHeading = true;
-      }
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedtotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedtotal.toString();
       _isFocused_vchno = false;
       _isFocused_item = false;
       _isFocused_unit = false;
@@ -2967,11 +2552,51 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     String emirate,
     String country,
   ) async {
+    final vm = _s;
+    final saleItems = vm.saleItems;
+    final ledgerEntries = vm.ledgerEntries;
+    final totalAmount = vm.totalAmount;
+    final totalVatAmount = vm.totalVatAmount;
+    final roundedtotalAmount = vm.roundedTotalAmount;
+    final roundedtotalVatAmount = vm.roundedTotalVatAmount;
+    final itemsVatAmount = vm.itemsVatAmount;
+    final ledgerVatAmount = vm.ledgerVatAmount;
+    final totalPriceOfItems = vm.totalPriceOfItems;
+    final totalAmountOfLedgers = vm.totalAmountOfLedgers;
+    final company = vm.company;
+    final company_trn = vm.companyTrn;
+    final company_address = vm.companyAddress;
+    final company_emirate = vm.companyEmirate;
+    final company_country = vm.companyCountry;
+    final vatperc = vm.vatperc;
+    final decimal = vm.decimal;
+    final _selectedvchtypename = vm.selectedVchTypeName;
+    final _selectedpartyledger = vm.selectedPartyLedger;
+    final _selectedsalesledger = vm.selectedSalesLedger;
+    final _selectedvatledger = vm.selectedVatLedger;
+    final saledatestring = vm.saledatestring;
+    final saledatetxt = vm.saledatetxt;
+    final refdatestring = vm.refdatestring;
+    final refdatetxt = vm.refdatetxt;
+    final saledate = vm.saledate;
+    final refdate = vm.refdate;
+    final _selectedPartyMobile = vm.selectedPartyMobile;
+    final _selectedPartyEmail = vm.selectedPartyEmail;
+    final vchnos = vm.vchNos;
+    final name = vm.name;
+    final email = vm.email;
+    final vatledgerdata = vm.vatLedgerData;
+    final itemdata = vm.itemData;
+    final locationsdata = vm.locationsData;
+    final ledgerdata = vm.ledgerData;
+    final currencycode = vm.currencyCode;
+    final serial_no = vm.serialNo;
     // Resolve the van (vehicle) allocated to this device's serial number
     // from the locally-cached 'spectra_allocations' SharedPreferences
     // value rather than making a fresh network call.
     String vehicleName = '';
     try {
+      final prefs = await SharedPreferences.getInstance();
       final String? spectraAllocationsString = prefs.getString(
         'spectra_allocations',
       );
@@ -3679,41 +3304,33 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   // UniGas direct-print flow, which skips that dialog entirely.
   void _resetSalesInvoiceFormAfterPrint() {
     _dropFocusBeforeReset();
+    _notifier.resetAfterSave();
 
     setState(() {
       controller_narration.clear();
       controller_refno.clear();
       _textFieldFocusNodeNarration.unfocus();
 
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
+      _dateController.text = _s.saledatetxt;
+      _refdateController.text = _s.refdatetxt;
 
-      // Reference Date resets to the voucher date itself, same as the
-      // screen-open default.
-      refdate = saledate;
-      refdatestring = saledatestring;
-      refdatetxt = saledatetxt;
-      _refdateController.text = saledatetxt;
+      fetchvchnos(_s.selectedVchTypeName);
 
-      fetchvchnos(_selectedvchtypename);
-
-      _selectedpartyledger = null;
       _partyLedgerController.clear();
 
       receiverNameController.clear();
       receiverMobileController.clear();
       receiverSignatureBytes = null;
 
-      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-      _selectedvatledger = _defaultVatLedger();
+      _selectedledger = _s.ledgerData.isNotEmpty
+          ? _s.ledgerData[0]['name']
+          : null;
 
-      _selecteditem = '${itemdata[0]['name']}';
+      _selecteditem = '${_s.itemData[0]['name']}';
       _itemController.text = _selecteditem;
 
-      if (locationsdata.isNotEmpty) {
-        selectedLocation = locationsdata[0];
+      if (_s.locationsData.isNotEmpty) {
+        selectedLocation = _s.locationsData[0];
         isVisibleLocation = true;
       } else {
         isVisibleLocation = false;
@@ -3721,18 +3338,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       _updateUnitDropdown(_selecteditem);
 
-      saleItems.clear();
-      ledgerEntries.clear();
-
-      totalPriceOfItems = 0.0;
-      totalAmountOfLedgers = 0.0;
-      totalVatAmount = 0.0;
-
       controller_vatamt.clear();
       controller_totalamt.clear();
-
-      isVisibleItemHeading = false;
-      isVisibleLedgerHeading = false;
 
       _isFocused_vchno = false;
       _isFocused_item = false;
@@ -4004,8 +3611,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   // to (there's no distinct AED symbol glyph in the standard locale data).
   Widget _currencyValueWidget(String numberText, TextStyle style) {
     return currencyAmountText(
-      currencyCode: currencycode,
-      symbol: getCurrencySymbol(currencycode),
+      currencyCode: _s.currencyCode,
+      symbol: getCurrencySymbol(_s.currencyCode),
       amountText: numberText,
       style: style,
       textAlign: TextAlign.right,
@@ -4014,285 +3621,49 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     );
   }
 
+
+  /// Widget-side wrapper of `saveEntry()` - the pre-save validation checks
+  /// (which call `showAppMessage(context, ...)`) stay here, reading the
+  /// notifier's current state; the actual payload-building/submit logic
+  /// moved verbatim into `SalesRegistrationNotifier.saveEntry`. On success,
+  /// this refreshes the party-ledger lookup and shows the print dialog -
+  /// matching the original's trailing `loadLedgerData()` call after a
+  /// successful create.
   Future<void> saveEntry() async {
-    // ❌ Prevent save if Party Ledger not selected
-    if (_selectedpartyledger == null ||
-        _selectedpartyledger.toString().trim().isEmpty) {
+    final vm = _s;
+    if (vm.selectedPartyLedger == null ||
+        vm.selectedPartyLedger.toString().trim().isEmpty) {
       showAppMessage(context, "Please select Party Ledger");
-
       return;
     }
 
-    // ❌ Prevent save if Reference Date is somehow empty (it always
-    // defaults to the voucher date, but this guards against that state
-    // ever slipping through).
-    if (refdatestring.trim().isEmpty) {
+    if (vm.refdatestring.trim().isEmpty) {
       showAppMessage(context, "Please select Reference Date");
-
       return;
     }
 
-    // UniGas only: Receiver Name is mandatory before saving.
     if (isUniGasSerial && receiverNameController.text.trim().isEmpty) {
       showAppMessage(context, "Please enter the Receiver's Name before saving");
-
       return;
     }
 
-    if (saleItems.isEmpty) {
+    if (vm.saleItems.isEmpty) {
       showAppMessage(context, 'Atleast add 1 item');
-    } else {
-      setState(() {
-        _isLoading = true;
-      });
-      String narrationValue = controller_narration.text.trim();
-      String vchnoValue = _vchnoController.text;
-
-      String refnoValue = controller_refno.text;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-
-      // UniGas posts BILLALLOCATIONS.LIST on the party ledger entry
-      // (matching their reference JSON format); every other serial keeps
-      // the existing format unchanged (no bill-wise tracking).
-      final String currentSerialNo = serial_no?.trim() ?? '';
-      final bool isUniGasSerial = vanSalesSerialNo.contains(currentSerialNo);
-
-      double totalItemAmount = 0.0;
-
-      for (SaleItem item in saleItems) {
-        totalItemAmount += double.parse(
-          item.itemAmount.toStringAsFixed(decimal!),
-        ); // calculating item amounts total
-      }
-
-      for (var saleItem in saleItems) {
-        // making sales ledger
-        if (saleItem.accountingAllocationList.isEmpty) {
-          saleItem.accountingAllocationList = {
-            "LEDGERNAME": _selectedsalesledger,
-            "AMOUNT": saleItem.itemAmount.toStringAsFixed(decimal!),
-            "ISDEEMEDPOSITIVE": "No",
-          };
-        }
-      }
-
-      // ---- tally-api voucher-entries payload ------------------------
-      //
-      // Legacy posted a Tally-XML-shaped body (LEDGERENTRIES.LIST/
-      // INVENTORYENTRIES.LIST/BILLALLOCATIONS.LIST/ACCOUNTINGALLOCATIONS.
-      // LIST, ISDEEMEDPOSITIVE strings, compound "12.00/Nos" RATE strings)
-      // to `POST /api/entry/create/:company/:serial`. tally-api's
-      // voucher-entries endpoint (`voucherEntrySchema`, see
-      // voucher_entry_repository.dart) is flatter and numeric-masterId-
-      // keyed instead - every field below carries the same value legacy's
-      // payload used; see the inline comments for anything with no direct
-      // equivalent.
-      final int? voucherTypeMasterId =
-          _voucherTypeMasterIdByName[_selectedvchtypename];
-      final int? partyLedgerMasterId =
-          _ledgerMasterIdByName[_selectedpartyledger];
-      final int? salesLedgerMasterId =
-          _ledgerMasterIdByName[_selectedsalesledger];
-      final int? vatLedgerMasterId = _selectedvatledger != 'Not Applicable'
-          ? _ledgerMasterIdByName[_selectedvatledger]
-          : null;
-
-      if (voucherTypeMasterId == null ||
-          partyLedgerMasterId == null ||
-          salesLedgerMasterId == null ||
-          _currencyMasterId == null) {
-        setState(() {
-          _isLoading = false;
-        });
-        showAppMessage(
-          context,
-          'Could not resolve voucher type/party ledger/sales ledger/currency - please reload and try again.',
-        );
-        return;
-      }
-
-      // Legacy encoded debit/credit via a signed AMOUNT plus a redundant
-      // "ISDEEMEDPOSITIVE" string; the new schema separates that into a
-      // plain positive `amount` and a single `isDebit` boolean.
-      final List<Map<String, dynamic>> entryLedgers = [];
-
-      final List<Map<String, dynamic>> partyBillAllocations = [];
-      if (isUniGasSerial) {
-        // Party's "credit_period" (e.g. "30 Days") -> due date = voucher
-        // date + that many days. Falls back to just the voucher date
-        // itself when the party has no credit period set.
-        final String? creditPeriodText =
-            partyLedgerCreditPeriodMap[_selectedpartyledger];
-        final int? creditDays = creditPeriodText == null
-            ? null
-            : int.tryParse(
-                RegExp(r'\d+').firstMatch(creditPeriodText)?.group(0) ?? '',
-              );
-        final DateTime dueDate = creditDays != null
-            ? saledate.add(Duration(days: creditDays))
-            : saledate;
-
-        // Use the Reference No./Date as the bill name/date when the user
-        // entered a reference (that's what the customer will quote back
-        // when settling this invoice) - falls back to the voucher
-        // number/date otherwise.
-        final bool hasRefNo = refnoValue.trim().isNotEmpty;
-        final String billName = hasRefNo ? refnoValue.trim() : vchnoValue;
-        final DateTime billDate = hasRefNo
-            ? parseCompactDate(refdatestring)
-            : parseCompactDate(saledatestring);
-
-        partyBillAllocations.add({
-          'billName': billName,
-          'billType': 'New Ref',
-          'amount': roundedtotalAmount,
-          'date': _isoDate(billDate),
-          'dueDate': _isoDate(dueDate),
-        });
-        debugPrint('Sales New Ref bill allocation -> $partyBillAllocations');
-      }
-
-      entryLedgers.add({
-        'ledgerMasterId': partyLedgerMasterId,
-        'amount': roundedtotalAmount,
-        'isDebit': true,
-        'isPartyLedger': true,
-        // UniGas's reference JSON expects a bill-wise allocation on the
-        // party ledger entry - always "New Ref" (no "On Account"), using
-        // the voucher number/reference itself as the bill reference name.
-        if (partyBillAllocations.isNotEmpty)
-          'billAllocations': partyBillAllocations,
-      });
-
-      // Aggregate sales-ledger credit entry. Legacy never posted this as
-      // its own LEDGERENTRIES.LIST row - Tally's XML engine derives the
-      // accounting posting from each item's own ACCOUNTINGALLOCATIONS.LIST
-      // instead. The new schema has no equivalent nested per-item ledger-
-      // allocation list (`inventoryEntries[].ledgerMasterId` is a single
-      // ledger reference, not a list of allocations), so this one
-      // aggregate row is added here to keep the entry double-entry-
-      // complete under the new shape.
-      entryLedgers.add({
-        'ledgerMasterId': salesLedgerMasterId,
-        'amount': totalItemAmount,
-        'isDebit': false,
-        'isPartyLedger': false,
-      });
-
-      // Manual "other" ledger entries (freight/discount/etc). Legacy also
-      // sent "VATAPPLICABLE" on these - entryLedgerEntryRowSchema has no
-      // such field (it was only ever an input to this screen's own VAT
-      // total calculation, not something legacy's backend needed back), so
-      // it's dropped here. Any entry whose ledger name doesn't resolve to
-      // a masterId (shouldn't normally happen - names come from the same
-      // loadData() lists) is skipped rather than sent broken.
-      for (final item in ledgerEntries) {
-        final int? ledgerMasterId = _ledgerMasterIdByName[item.ledgerName];
-        if (ledgerMasterId == null) continue;
-        entryLedgers.add({
-          'ledgerMasterId': ledgerMasterId,
-          'amount': item.ledgerAmount,
-          'isDebit': false,
-          'isPartyLedger': false,
-        });
-      }
-
-      if (vatLedgerMasterId != null) {
-        entryLedgers.add({
-          'ledgerMasterId': vatLedgerMasterId,
-          'amount': roundedtotalVatAmount,
-          'isDebit': false,
-          'isPartyLedger': false,
-        });
-      }
-
-      final List<Map<String, dynamic>> entryInventory = [];
-      for (final item in saleItems) {
-        final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
-              (i) => i['name'] == item.itemName,
-              orElse: () => null,
-            )
-            as Map<String, dynamic>?;
-        final int? stockItemMasterId = itemInfo?['masterid'] as int?;
-        final List<dynamic> unitJson =
-            (itemInfo?['unit'] as List?) ?? const [];
-        final int? unitMasterId = _findUnitMasterId(unitJson, item.itemUnit);
-
-        if (stockItemMasterId == null || unitMasterId == null) {
-          // Can't build a valid inventory entry without both masterIds -
-          // skip rather than send a request the server will reject.
-          debugPrint(
-            'Skipping inventory entry for "${item.itemName}" - could not '
-            'resolve stockItemMasterId/unitMasterId',
-          );
-          continue;
-        }
-
-        final double qty = double.tryParse(item.itemQuantity) ?? 0;
-        final int? godownMasterId = _godownMasterIdByName[item.itemLocation];
-
-        entryInventory.add({
-          'stockItemMasterId': stockItemMasterId,
-          'quantity': qty,
-          'rate': item.itemPrice,
-          'unitMasterId': unitMasterId,
-          'amount': item.itemAmount,
-          'ledgerMasterId': salesLedgerMasterId,
-          'isDebitQuantity': false,
-          'description': item.basicUserDescriptions,
-          if (godownMasterId != null)
-            'batchAllocations': [
-              {
-                'godownMasterId': godownMasterId,
-                // Tally's own default batch name for a godown-only
-                // (non-lot-tracked) allocation - these items aren't real
-                // Tally batches, but entryBatchAllocationRowSchema still
-                // requires a non-empty batchName.
-                'batchName': 'Primary Batch',
-                'quantity': qty,
-              },
-            ],
-        });
-      }
-
-      final Map<String, dynamic> voucherEntryBody = {
-        'voucherTypeMasterId': voucherTypeMasterId,
-        'date': _isoDate(parseCompactDate(saledatestring)),
-        'currencyMasterId': _currencyMasterId,
-        'narration': narrationValue,
-        if (refnoValue.trim().isNotEmpty) 'reference': refnoValue.trim(),
-        'referenceDate': _isoDate(parseCompactDate(refdatestring)),
-        if (vchnoValue.trim().isNotEmpty) 'voucherNumber': vchnoValue.trim(),
-        'ledgerEntries': entryLedgers,
-        'inventoryEntries': entryInventory,
-      };
-
-      // Plain print() doesn't chunk long strings - Android/iOS truncate
-      // each log line at a fixed byte length, clipping this JSON mid-way
-      // for any entry with more than a couple items. debugPrint's
-      // wrapWidth splits it into multiple lines first, so the full
-      // payload actually shows up in the console.
-      debugPrint(jsonEncode(voucherEntryBody), wrapWidth: 1024);
-
-      try {
-        await VoucherEntryRepository.instance.create(voucherEntryBody);
-        loadLedgerData();
-      } on ApiException catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
-        showAppMessage(context, e.message);
-      } catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
-        debugPrint('SalesRegistration saveEntry failed: $e');
-        showAppMessage(context, 'Something went wrong!!!');
-      }
+      return;
     }
-    setState(() {
-      _isLoading = false;
-    });
+
+    final error = await _notifier.saveEntry(
+      narration: controller_narration.text.trim(),
+      vchno: _vchnoController.text,
+      refno: controller_refno.text,
+    );
+
+    if (error != null) {
+      showAppMessage(context, error);
+      return;
+    }
+
+    await loadLedgerData();
   }
 
   void showSalesInvoiceDialog(
@@ -4302,6 +3673,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     String emirate,
     String country,
   ) {
+    final ledgerdata = _s.ledgerData;
+    final itemdata = _s.itemData;
+    final locationsdata = _s.locationsData;
+    final decimal = _s.decimal;
     // UniGas prints directly - no "created successfully / Share" dialog.
     if (isUniGasSerial) {
       generateInvoicePDF(trn, address, emirate, country);
@@ -4366,30 +3741,22 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                         onPressed: () {
                           Navigator.pop(context);
                           _dropFocusBeforeReset();
+                          _notifier.resetAfterSave();
                           setState(() {
                             controller_narration.clear();
                             controller_refno.clear();
                             _textFieldFocusNodeNarration.unfocus();
 
-                            saledate = DateTime.now();
-                            saledatestring = _dateFormat.format(saledate);
-                            saledatetxt = formatlastsaledate(saledatestring);
-                            _dateController.text = saledatetxt;
+                            _dateController.text = _s.saledatetxt;
+                            _refdateController.text = _s.refdatetxt;
 
-                            refdate = DateTime.now();
-                            refdatestring = _dateFormat.format(refdate);
-                            refdatetxt = formatlastsaledate(refdatestring);
-                            _refdateController.text = refdatetxt;
+                            fetchvchnos(_s.selectedVchTypeName);
 
-                            fetchvchnos(_selectedvchtypename);
-
-                            _selectedpartyledger = null;
                             _partyLedgerController.clear();
 
                             _selectedledger = ledgerdata.isNotEmpty
                                 ? ledgerdata[0]['name']
                                 : null;
-                            _selectedvatledger = _defaultVatLedger();
 
                             _selecteditem = '${itemdata[0]['name']}';
                             _itemController.text = _selecteditem;
@@ -4403,18 +3770,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
                             _updateUnitDropdown(_selecteditem);
 
-                            saleItems.clear();
-                            ledgerEntries.clear();
-
-                            totalPriceOfItems = 0.0;
-                            totalAmountOfLedgers = 0.0;
-                            totalVatAmount = 0.0;
-
                             controller_vatamt.clear();
                             controller_totalamt.clear();
-
-                            isVisibleItemHeading = false;
-                            isVisibleLedgerHeading = false;
 
                             _isFocused_vchno = false;
                             _isFocused_item = false;
@@ -4652,622 +4009,42 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   /// `_resolvePriceLevelRateForItem` now resolve a real per-party price
   /// level again instead of always falling through to the "no price level"
   /// branch.
+
+  /// Widget-side wrapper of `loadData()` - the actual dropdown/master-id
+  /// fetch moved verbatim into `SalesRegistrationNotifier.loadData`; this
+  /// just surfaces any error via `showAppMessage` and syncs the item-picker
+  /// `TextEditingController` to the notifier's freshly-selected default item
+  /// (that controller stays widget-local).
   Future<void> loadData() async {
-    vchtypenamedata.clear();
-    itemdata.clear();
-    salesledger_data.clear();
-    partyledgerdata.clear();
-    vatledgerdata.clear();
-    ledgerdata.clear();
-    locationsdata.clear();
-    _ledgerMasterIdByName.clear();
-    _voucherTypeMasterIdByName.clear();
-    _godownMasterIdByName.clear();
-    _allLedgersCache = [];
-    _currencyMasterId = null;
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    // Van Allocation prefill/lock now comes from tally-api's
-    // master-restrictions feature instead of the legacy 'spectra_allocations'
-    // SharedPreferences blob: the /godowns and /voucher-types data fetched
-    // below are already filtered server-side to this company-user's GODOWN /
-    // VOUCHER_TYPE restriction - a single row back means this company-user
-    // is locked to one vehicle/voucher type; unrestricted returns every row.
-    try {
-      final String currentSerialNo = serial_no?.trim() ?? '';
-      final bool isUniGasSerial = vanSalesSerialNo.contains(currentSerialNo);
-
-      debugPrint('sales loadData serial_no -> $currentSerialNo');
-      debugPrint('sales loadData isUniGasSerial -> $isUniGasSerial');
-
-      final results = await Future.wait([
-        VoucherEntryDropdownsRepository.instance.salesData(),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany(
-            '/currencies?page=$page&limit=100',
-          ),
-        ),
-      ]);
-
-      final salesData = results[0] as Map<String, dynamic>;
-      final currencies = results[1] as List<Map<String, dynamic>>;
-
-      final voucherTypes = (salesData['vchTypes'] as List)
-          .cast<Map<String, dynamic>>();
-      final partyLedgers = (salesData['partyLedgers'] as List)
-          .cast<Map<String, dynamic>>();
-      final salesLedgers = (salesData['salesLedgers'] as List)
-          .cast<Map<String, dynamic>>();
-      final vatLedgers = (salesData['vatLedgers'] as List)
-          .cast<Map<String, dynamic>>();
-      final otherLedgersRaw = (salesData['otherLedgers'] as List)
-          .cast<Map<String, dynamic>>();
-      final stockItems = (salesData['items'] as List)
-          .cast<Map<String, dynamic>>();
-      final godowns = (salesData['godowns'] as List)
-          .cast<Map<String, dynamic>>();
-
-      /// Trims a raw `priceLevel`/`creditPeriod` string from `partyLedgers`,
-      /// collapsing blank to `null` - matches the old
-      /// `creditPeriodByLedgerName` trimming behavior this replaces.
-      String? trimOrNull(String? raw) =>
-          (raw?.trim().isEmpty ?? true) ? null : raw!.trim();
-
-      String? voucherTypeToFetch;
-
-      setState(() {
-        vchtypenamedata = [for (final vt in voucherTypes) vt['name'] as String];
-        _voucherTypeMasterIdByName
-          ..clear()
-          ..addAll({
-            for (final vt in voucherTypes)
-              vt['name'] as String: vt['masterId'] as int,
-          });
-
-        // Van Allocation: tally-api's master-restrictions feature already
-        // filters this company-user's SALES voucher types server-side - a
-        // single one back means this company-user is locked to one vehicle's
-        // voucher type.
-        isVoucherTypeLocked = vchtypenamedata.length == 1;
-        _selectedvchtypename = vchtypenamedata.isNotEmpty
-            ? vchtypenamedata[0]
-            : null;
-
-        voucherTypeToFetch = _selectedvchtypename;
-
-        // The dropdown bundle above already scopes every list to the
-        // dropdowns this screen actually offers - merge them all into one
-        // name->masterId map for saveEntry()'s lookups (covers every ledger
-        // reachable through any picker on this screen).
-        _allLedgersCache = [
-          ...partyLedgers,
-          ...salesLedgers,
-          ...vatLedgers,
-          ...otherLedgersRaw,
-        ];
-        _ledgerMasterIdByName.clear();
-        for (final ledger in _allLedgersCache) {
-          _ledgerMasterIdByName[ledger['name'] as String] =
-              ledger['masterId'] as int;
-        }
-
-        if (isUniGasSerial) {
-          partyledgerdata.clear();
-          partyLedgerPriceLevelMap.clear();
-          partyLedgerCreditPeriodMap.clear();
-
-          for (final ledger in partyLedgers) {
-            final String ledgerName = (ledger['name'] as String).trim();
-            if (ledgerName.isEmpty) continue;
-
-            if (!partyledgerdata.contains(ledgerName)) {
-              partyledgerdata.add(ledgerName);
-            }
-
-            partyLedgerPriceLevelMap[ledgerName] = trimOrNull(
-              ledger['priceLevel'] as String?,
-            );
-            partyLedgerCreditPeriodMap[ledgerName] = trimOrNull(
-              ledger['creditPeriod'] as String?,
-            );
-          }
-        } else {
-          partyledgerdata = [
-            for (final l in partyLedgers) (l['name'] as String),
-          ];
-        }
-        partyledgerdata.sort(
-          (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
-        );
-
-        salesledger_data = [for (final l in salesLedgers) l['name'] as String];
-
-        // Sales ledger soft default (not master-restriction-gated): the one
-        // ledger under a Group whose reservedName is SALES, company-wide.
-        // Never locked - just a starting selection the user can still change.
-        final String? defaultSalesLedgerName = salesledger_data.length == 1
-            ? salesledger_data.first
-            : null;
-
-        if (defaultSalesLedgerName != null &&
-            defaultSalesLedgerName.isNotEmpty &&
-            salesledger_data.contains(defaultSalesLedgerName)) {
-          _selectedsalesledger = defaultSalesLedgerName;
-        } else {
-          _selectedsalesledger = salesledger_data.isNotEmpty
-              ? salesledger_data[0]
-              : null;
-        }
-        isSalesLedgerLocked = false;
-
-        vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll([for (final l in vatLedgers) l['name'] as String]);
-
-        // "Other ledgers" (the manual Ledger Entry add list) - the bundle's
-        // own `otherLedgers` classification (see the dropdowns service's
-        // doc-comment: SALES/expense/income/asset/liability groups).
-        ledgerdata = [
-          for (final l in otherLedgersRaw) {'name': l['name']},
-        ];
-
-        _selectedledger = ledgerdata.isNotEmpty
-            ? ledgerdata[0]['name']
-            : null;
-
-        _selectedvatledger = _defaultVatLedger();
-
-        itemdata = [
-          for (final item in stockItems) _shapeStockItemForLegacyItemdata(item),
-        ];
-
-        if (itemdata.isNotEmpty) {
-          _selecteditem = '${itemdata[0]['name']}';
-          _itemController.text = _selecteditem ?? '';
-          _updateUnitDropdown(_selecteditem);
-        }
-
-        locationsdata = [for (final g in godowns) g['name'] as String];
-        _godownMasterIdByName
-          ..clear()
-          ..addAll({
-            for (final g in godowns) g['name'] as String: g['masterId'] as int,
-          });
-
-        if (locationsdata.isNotEmpty) {
-          selectedLocation = locationsdata[0];
-          isVisibleLocation = true;
-        } else {
-          isVisibleLocation = false;
-        }
-
-        // Exactly one server-side master-restriction-filtered godown means
-        // this company-user is locked to one vehicle; otherwise
-        // (unrestricted, or none synced yet) leave it a normal editable
-        // picker with no default lock.
-        isGodownLocked = locationsdata.length == 1;
-
-        // Resolve the voucher-entry currency once here - matches the
-        // company's configured `currencycode` (prefs), falling back to
-        // whatever currency tally-api returns first (every Tally company
-        // has at least a base currency).
-        Map<String, dynamic>? matchedCurrency;
-        for (final c in currencies) {
-          final iso = (c['isoCurrencyCode'] as String?)?.toUpperCase();
-          final symbol = (c['symbol'] as String?)?.toUpperCase();
-          if (iso == currencycode.toUpperCase() ||
-              symbol == currencycode.toUpperCase()) {
-            matchedCurrency = c;
-            break;
-          }
-        }
-        matchedCurrency ??= currencies.isNotEmpty ? currencies.first : null;
-        _currencyMasterId = matchedCurrency?['masterId'] as int?;
-      });
-
-      if (voucherTypeToFetch != null && voucherTypeToFetch!.isNotEmpty) {
-        fetchvchnos(voucherTypeToFetch!);
-      }
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      debugPrint('SalesRegistration loadData failed: $e');
-      showAppMessage(context, 'Something went wrong!!!');
+    final error = await _notifier.loadData();
+    if (error != null) showAppMessage(context, error);
+    if (_s.itemData.isNotEmpty) {
+      _selecteditem = '${_s.itemData[0]['name']}';
+      _itemController.text = _selecteditem ?? '';
+      _updateUnitDropdown(_selecteditem);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
+    if (_s.locationsData.isNotEmpty) {
+      selectedLocation = _s.locationsData[0];
+      isVisibleLocation = true;
+    } else {
+      isVisibleLocation = false;
+    }
   }
 
-  /// Reshapes one tally-api stock-items row into the legacy key names this
-  /// screen's item picker/unit-dropdown/bulk-add code already reads
-  /// (`name`/`masterid`/`saleprice`/`standardprice`/`unit`/`part`) - see
-  /// loadData()'s doc comment.
-  Map<String, dynamic> _shapeStockItemForLegacyItemdata(
-    Map<String, dynamic> item,
-  ) {
-    final int? baseUnitMasterId = item['baseUnitMasterId'] as int?;
-    final String? baseUnitSymbol = (item['baseUnitSymbol'] as String?)
-        ?.trim();
-    final int? additionalUnitMasterId = item['additionalUnitMasterId'] as int?;
-    final String? additionalUnitSymbol =
-        (item['additionalUnitSymbol'] as String?)?.trim();
-    // "1 additionalUnit = denominator baseUnits" (see Items.dart's own
-    // qty-conversion comment for this same field) - saleprice/standardprice
-    // below are priced per base unit, so the additional unit's rate
-    // multiplier is that same denominator.
-    final double denominator = parseMoneyField(item['denominator']);
-
-    final units = <Map<String, dynamic>>[];
-    if (baseUnitMasterId != null &&
-        baseUnitSymbol != null &&
-        baseUnitSymbol.isNotEmpty) {
-      units.add({
-        'name': baseUnitSymbol,
-        'multiplier': '1',
-        'masterId': baseUnitMasterId,
-      });
-    }
-    if (additionalUnitMasterId != null &&
-        additionalUnitSymbol != null &&
-        additionalUnitSymbol.isNotEmpty) {
-      units.add({
-        'name': additionalUnitSymbol,
-        'multiplier': (denominator == 0 ? 1 : denominator).toString(),
-        'masterId': additionalUnitMasterId,
-      });
-    }
-    if (units.isEmpty) {
-      // Every real Tally stock item has at least a base unit - this only
-      // guards `_updateUnitDropdown()`'s `unitdata[0]` access for the
-      // unexpected case of a completely unresolved unit.
-      units.add({'name': '', 'multiplier': '1', 'masterId': null});
-    }
-
-    return {
-      'name': item['name'],
-      'masterid': item['masterId'],
-      'saleprice': item['lastSalePrice']?.toString() ?? 'null',
-      // tally-api's own field name (misspelled server-side, see Items.dart).
-      'standardprice': item['stardardPrice']?.toString() ?? 'null',
-      'unit': units,
-      'part': (item['partNo'] as List?)?.cast<String>().join(', ') ?? '',
-    };
-  }
-
-  /*Future<void> loadData() async {
-    vchtypenamedata.clear();
-    itemdata.clear();
-    salesledger_data.clear();
-    partyledgerdata.clear();
-    vatledgerdata.clear();
-
-    ledgerdata.clear();
-    locationsdata.clear();
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final url = Uri.parse(HttpURL_loadData!);
-
-      Map<String, String> headers = {
-        'Authorization': 'Bearer $token',
-        "Content-Type": "application/json",
-      };
-
-      final String currentSerialNo = serial_no?.trim() ?? '';
-      final bool isUniGasSerial = vanSalesSerialNo.contains(currentSerialNo);
-
-      String godownName = '';
-      String? allocationString = prefs.getString('spectra_allocations');
-
-      if (isUniGasSerial &&
-          allocationString != null &&
-          allocationString.isNotEmpty) {
-        try {
-          List<dynamic> allocations = jsonDecode(allocationString);
-
-          if (allocations.isNotEmpty) {
-            godownName = allocations.first['godown']?.toString() ?? '';
-          }
-        } catch (e) {
-          debugPrint('allocation decode error -> $e');
-        }
-      }
-
-      var body = jsonEncode({
-        "type": "sales",
-        if (isUniGasSerial && godownName.isNotEmpty)
-          "godownName": godownName,
-      });
-
-      debugPrint('sales loadData serial_no -> $currentSerialNo');
-      debugPrint('sales loadData isUniGasSerial -> $isUniGasSerial');
-      debugPrint('sales loadData godownName -> $godownName');
-      debugPrint('sales loadData body -> $body');
-
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: body,
-      );
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = json.decode(utf8.decode(response.bodyBytes));
-
-        debugPrint('sales loadData response -> $jsonResponse');
-
-        setState(() {
-          vchtypenamedata = List<String>.from(
-            (jsonResponse["vchTypes"] ?? [])
-                .where((e) => e != null)
-                .map((e) => e.toString()),
-          );
-
-          _selectedvchtypename =
-          vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null;
-
-          fetchvchnos(_selectedvchtypename);
-
-
-
-          if (vanSalesSerialNo.contains(currentSerialNo)) {
-            partyledgerdata.clear();
-            partyLedgerPriceLevelMap.clear();
-            partyLedgerCreditPeriodMap.clear();
-
-            for (var ledger in (jsonResponse["partyLedgers"] ?? [])) {
-              if (ledger == null) continue;
-
-              final String ledgerName =
-                  ledger['name']?.toString().trim() ?? '';
-
-              final dynamic rawPriceLevel = ledger['price_level'];
-
-              final String? priceLevel = rawPriceLevel == null ||
-                  rawPriceLevel.toString().trim().isEmpty ||
-                  rawPriceLevel.toString().trim().toLowerCase() == 'null'
-                  ? null
-                  : rawPriceLevel.toString().trim();
-
-              final dynamic rawCreditPeriod = ledger['credit_period'];
-              final String? creditPeriod = rawCreditPeriod == null ||
-                  rawCreditPeriod.toString().trim().isEmpty ||
-                  rawCreditPeriod.toString().trim().toLowerCase() == 'null'
-                  ? null
-                  : rawCreditPeriod.toString().trim();
-
-              if (ledgerName.isEmpty) continue;
-
-              if (!partyledgerdata.contains(ledgerName)) {
-                partyledgerdata.add(ledgerName);
-              }
-
-              partyLedgerPriceLevelMap[ledgerName] = priceLevel;
-              partyLedgerCreditPeriodMap[ledgerName] = creditPeriod;
-            }
-          }
-          else {
-            partyledgerdata = List<String>.from(
-              (jsonResponse["partyLedgers"] ?? [])
-                  .where((e) => e != null)
-                  .map((e) => e.toString()),
-            );
-          }
-          partyledgerdata.sort(
-            (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
-          );
-
-          // _selectedpartyledger = partyledgerdata.isNotEmpty ? partyledgerdata[0] : null;
-
-          // _partyLedgerController.text = _selectedpartyledger ?? '';
-
-
-
-          salesledger_data = List<String>.from(
-            (jsonResponse["salesLedgers"] ?? [])
-                .where((e) => e != null)
-                .map((e) => e.toString()),
-          );
-
-          _selectedsalesledger =
-          salesledger_data.isNotEmpty ? salesledger_data[0] : null;
-
-          if (allocationString != null &&
-              allocationString.isNotEmpty) {
-
-            List<dynamic> allocations =
-            jsonDecode(allocationString);
-
-            if (allocations.isNotEmpty) {
-
-              final allocation =
-              allocations.first as Map<String, dynamic>;
-
-              final savedSalesLedger =
-              allocation['sales_ledger']?.toString();
-
-              if (savedSalesLedger != null &&
-                  savedSalesLedger.isNotEmpty &&
-                  salesledger_data.contains(savedSalesLedger)) {
-
-                _selectedsalesledger = savedSalesLedger;
-
-                // LOCK DROPDOWN
-                isSalesLedgerLocked = true;
-
-              } else if (salesledger_data.isNotEmpty) {
-
-                _selectedsalesledger = salesledger_data[0];
-
-                isSalesLedgerLocked = false;
-              }
-            }
-          }
-          else if (salesledger_data.isNotEmpty) {
-
-            _selectedsalesledger = salesledger_data[0];
-
-            isSalesLedgerLocked = false;
-          }
-
-          ledgerdata = List<Map<String, dynamic>>.from(
-            jsonResponse['otherLedgers'] ?? [],
-          );
-
-          _selectedledger =
-          ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-
-          vatledgerdata.add('Not Applicable');
-          vatledgerdata.addAll(
-            List<String>.from(
-              (jsonResponse["vatLedgers"] ?? [])
-                  .where((e) => e != null)
-                  .map((e) => e.toString()),
-            ),
-          );
-
-          _selectedvatledger = _defaultVatLedger();
-
-          itemdata = jsonResponse["items"] ?? [];
-
-          if (itemdata.isNotEmpty) {
-            _selecteditem = '${itemdata[0]['name']}';
-            _itemController.text = _selecteditem;
-            _updateUnitDropdown(_selecteditem);
-          }
-
-          locationsdata = List<String>.from(
-            (jsonResponse['locations'] ?? [])
-                .where((e) => e != null)
-                .map((e) => e.toString()),
-          );
-
-          if (locationsdata.isNotEmpty) {
-            selectedLocation = locationsdata[0];
-            isVisibleLocation = true;
-          } else {
-            isVisibleLocation = false;
-          }
-
-          if (isUniGasSerial &&
-              godownName.isNotEmpty &&
-              locationsdata.contains(godownName)) {
-            selectedLocation = godownName;
-            isVisibleLocation = true;
-          }
-
-          if (allocationString != null) {
-            List<dynamic> allocations = jsonDecode(allocationString);
-
-            if (allocations.isNotEmpty) {
-              final allocation = allocations.first;
-
-              // GODOWN
-              if (allocation['godown'] != null &&
-                  locationsdata.contains(allocation['godown'])) {
-                selectedLocation = allocation['godown'];
-
-                isVisibleLocation = true;
-
-              }
-
-              // SALES LEDGER
-              */ /*if (allocation['sales_ledger'] != null &&
-            salesledger_data.contains(allocation['sales_ledger'])) {
-          _selectedsalesledger = allocation['sales_ledger'];
-        }*/ /*
-
-              // VOUCHER TYPE
-              final savedVoucherType =
-              allocation['sales_voucher_type']?.toString();
-
-              if (savedVoucherType != null &&
-                  savedVoucherType.isNotEmpty &&
-                  vchtypenamedata.contains(savedVoucherType)) {
-
-                _selectedvchtypename = savedVoucherType;
-
-                isVoucherTypeLocked = true;
-
-                // optional if your app fetches voucher numbers on selection
-                fetchvchnos(_selectedvchtypename);
-
-              } else if (vchtypenamedata.isNotEmpty) {
-
-                _selectedvchtypename = vchtypenamedata[0];
-
-                isVoucherTypeLocked = false;
-
-                fetchvchnos(_selectedvchtypename);
-              }
-
-              setState(() {});
-            }
-          }
-
-        });
-      } else {
-        Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        String error = '';
-
-        if (data.containsKey('error')) {
-          error = data['error'];
-        } else {
-          error = 'Something went wrong!!!';
-        }
-
-        showAppMessage(context, error);
-      }
-    } catch (e) {
-      print(e);
-    }
-
-    setState(() {
-      _isLoading = false;
-    });
-  }*/
-
-  /// Replaces legacy's `POST /api/ledger/getLedger/:company/:serial`
-  /// (looked up the selected party ledger's TRN/address/state/country/
-  /// mobile/email server-side). tally-api's ledger list already carries all
-  /// of those fields, so this is now a local lookup against
-  /// `_allLedgersCache` (populated by loadData()) instead of a network
-  /// call.
+  /// Widget-side wrapper of `loadLedgerData()` - the lookup moved verbatim
+  /// into the notifier; this just shows the print dialog with the result
+  /// (that dialog needs `context`).
   Future<void> loadLedgerData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final ledger = _allLedgersCache.firstWhere(
-        (l) => l['name'] == _selectedpartyledger,
-        orElse: () => const {},
+    final result = await _notifier.loadLedgerData();
+    if (result != null) {
+      showSalesInvoiceDialog(
+        context,
+        result.tin,
+        result.address,
+        result.emirate,
+        result.country,
       );
-
-      final String tinValue = ledger['tinNumber']?.toString() ?? 'null';
-      final String address =
-          (ledger['address'] as List?)?.cast<String>().join(', ') ?? 'null';
-      final String emirate = ledger['stateName']?.toString() ?? 'null';
-      final String country = ledger['countryName']?.toString() ?? 'null';
-
-      setState(() {
-        _selectedPartyMobile = ledger['mobileNumber']?.toString();
-        _selectedPartyEmail = ledger['email']?.toString();
-        showSalesInvoiceDialog(context, tinValue, address, emirate, country);
-      });
-    } catch (e) {
-      debugPrint('SalesRegistration loadLedgerData failed: $e');
     }
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   /// Replaces legacy's `GET /api/entry/nos/:company/:serial` (server-side
@@ -5286,58 +4063,19 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   /// `generateNextVchNo`, and stays a plain editable text field the user
   /// can always override (`checkVchNoExistence` still flags a clash
   /// against this same [vchnos] list before submit).
+  /// Widget-side wrapper of `fetchvchnos()` - the fetch/sort logic moved
+  /// verbatim into `SalesRegistrationNotifier.fetchVchNos`; this surfaces
+  /// any error and syncs `_vchnoController` (widget-local) to the notifier's
+  /// freshly-recomputed voucher-number suggestion.
   Future<void> fetchvchnos(String vchname) async {
-    vchnos.clear();
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
-
-      if (voucherTypeMasterId != null) {
-        final String fromParam = DateFormat('yyyy-MM-dd').format(
-          parseCompactDate(startfrom),
-        );
-        final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
-
-        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
-          voucherTypeMasterId: voucherTypeMasterId,
-          from: fromParam,
-          to: toParam,
-        );
-      }
-
-      setState(() {
-        // SORT first
-        vchnos.sort((a, b) {
-          RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
-          int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
-          int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
-          return numA.compareTo(numB);
-        });
-
-        debugPrint('vch nos from tally-api voucher-numbers -> $vchnos');
-
-        // GENERATE NEXT
-        String nextVch = generateNextVchNo(vchnos);
-
-        _vchnoController.text = nextVch;
-      });
-    } on ApiException catch (e) {
-      vchnos.clear();
-      showAppMessage(context, e.message);
-    } catch (e) {
-      vchnos.clear();
-      debugPrint('SalesRegistration fetchvchnos failed: $e');
-    }
-
-    setState(() {
-      _isLoading = false;
-    });
+    final error = await _notifier.fetchVchNos(vchname, yearEndDate);
+    if (error != null) showAppMessage(context, error);
+    _vchnoController.text = _notifier.generateNextVchNo();
   }
 
   void _updateUnitDropdown(dynamic _selectedItem) {
+    final itemdata = _s.itemData;
+    final decimal = _s.decimal;
     setState(() {
       selectedMultiplier = 0.0;
       isVisibleUnit = true;
@@ -5406,6 +4144,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   }
 
   void updateRateAndAmount() {
+    final decimal = _s.decimal;
     String qtyValue = itemQuantityController.text;
 
     if (qtyValue.isEmpty) {
@@ -5419,16 +4158,17 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     double amountValue = (double.parse(qtyValue) * double.parse(rateValue));
 
     double roundedAmountValue = double.parse(
-      amountValue.toStringAsFixed(decimal!),
+      amountValue.toStringAsFixed(decimal),
     );
 
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
+    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal}', 'en_US');
     String formattedAmount = formatter.format(roundedAmountValue);
 
     itemAmountController.text = formattedAmount.toString();
   }
 
   void updateAmount() {
+    final decimal = _s.decimal;
     String qtyValue = itemQuantityController.text;
 
     if (qtyValue.isEmpty) {
@@ -5442,10 +4182,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     double amountValue = (double.parse(qtyValue) * double.parse(rateValue));
 
     double roundedAmountValue = double.parse(
-      amountValue.toStringAsFixed(decimal!),
+      amountValue.toStringAsFixed(decimal),
     );
 
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
+    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal}', 'en_US');
     String formattedAmount = formatter.format(roundedAmountValue);
 
     itemAmountController.text = formattedAmount.toString();
@@ -5463,7 +4203,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     });
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: saledate,
+      initialDate: _s.saledate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2101),
       builder: (BuildContext context, Widget? child) {
@@ -5477,13 +4217,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         );
       },
     );
-    if (picked != null && picked != saledate)
-      setState(() {
-        saledate = picked;
-        saledatestring = _dateFormat.format(saledate);
-        saledatetxt = formatlastsaledate(saledatestring);
-        _dateController.text = saledatetxt;
-      });
+    if (picked != null && picked != _s.saledate) {
+      _notifier.setSaleDate(picked);
+    }
   }
 
   Future<void> _selectrefDate(BuildContext context) async {
@@ -5493,7 +4229,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     });
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: refdate,
+      initialDate: _s.refdate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2101),
       builder: (BuildContext context, Widget? child) {
@@ -5508,13 +4244,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       },
     );
 
-    if (picked != null && picked != refdate)
-      setState(() {
-        refdate = picked;
-        refdatestring = _dateFormat.format(refdate);
-        refdatetxt = formatlastsaledate(refdatestring);
-        _refdateController.text = refdatetxt;
-      });
+    if (picked != null && picked != _s.refdate) {
+      _notifier.setRefDate(picked);
+    }
   }
 
   /*Future<void> _showItemDetailsPopup(BuildContext context) async {
@@ -6028,19 +4760,20 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   // flow already uses. Returns null if the party has no price level, or
   // the API has no rate for this item under that price level.
   Future<double?> _resolvePriceLevelRateForItem(String itemMasterId) async {
-    if (serial_no == null ||
-        serial_no!.trim().isEmpty ||
-        !vanSalesSerialNo.contains(serial_no!.trim())) {
+    final vm = _s;
+    if (vm.serialNo == null ||
+        vm.serialNo!.trim().isEmpty ||
+        !vanSalesSerialNo.contains(vm.serialNo!.trim())) {
       return null;
     }
-    if (selectedPartyLedgerPriceLevel == null ||
-        selectedPartyLedgerPriceLevel!.trim().isEmpty) {
+    if (vm.selectedPartyLedgerPriceLevel == null ||
+        vm.selectedPartyLedgerPriceLevel!.trim().isEmpty) {
       return null;
     }
 
     try {
-      final DateTime selectedDate = saledatestring.isNotEmpty
-          ? parseCompactDate(saledatestring)
+      final DateTime selectedDate = vm.saledatestring.isNotEmpty
+          ? parseCompactDate(vm.saledatestring)
           : DateTime.now();
 
       final int? parsedItemMasterId = int.tryParse(itemMasterId);
@@ -6048,7 +4781,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
       return await _priceLevelRate(
         stockItemMasterId: parsedItemMasterId,
-        priceLevelName: selectedPartyLedgerPriceLevel!,
+        priceLevelName: vm.selectedPartyLedgerPriceLevel!,
         asOf: selectedDate,
       );
     } catch (e) {
@@ -6057,53 +4790,14 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     return null;
   }
 
-  // Mirrors the totals recalculation addItem() does, kept separate so
-  // this experimental flow can't regress the existing single-item logic.
-  void _recalcTotalsAfterBulkAdd() {
+  /// Syncs the read-only VAT/total `TextEditingController`s after the
+  /// notifier's `addSelectedItemsInBulk` has recomputed totals (its
+  /// `_recalculateTotals()` is the same canonical logic
+  /// `_recalcTotalsAfterBulkAdd` used to duplicate inline).
+  void _syncTotalsControllersAfterBulkAdd() {
     setState(() {
-      isVisibleItemHeading = saleItems.isNotEmpty;
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      double vat_perc = vatperc / 100;
-      if (_selectedvatledger != 'Not Applicable') {
-        double totalAmountForVatAppEntries = ledgerEntries
-            .where((entry) => entry.vatApp)
-            .fold(0.0, (double previousAmount, LedgerEntry entry) {
-              return previousAmount + entry.ledgerAmount;
-            });
-        double ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-      } else {
-        totalVatAmount = 0;
-      }
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-      final vatFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = vatFormatter.format(roundedtotalVatAmount);
-
-      double totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      final totalFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_totalamt.text = totalFormatter.format(roundedtotalAmount);
+      controller_vatamt.text = _s.formattedVatAmount;
+      controller_totalamt.text = _s.formattedTotalAmount;
     });
   }
 
@@ -6224,6 +4918,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   }
 
   Future<void> _showMultiItemSelectPopup(BuildContext context) async {
+    final itemdata = _s.itemData;
+    final locationsdata = _s.locationsData;
+    final decimal = _s.decimal;
+    final currencycode = _s.currencyCode;
     final Set<String> selectedItemNames = {};
     // Shows exactly where each item's rate came from — Price Level,
     // Item Rate, or Manual (empty, needs entry).
@@ -7305,6 +6003,11 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     );
   }
 
+  /// Widget-side wrapper of `_addSelectedItemsInBulk` - resolves each
+  /// selected item's editable rate/qty/unit/location/description
+  /// `TextEditingController`s (widget-local) into plain [BulkAddEntry]
+  /// values, then delegates the actual merge-or-append + totals recompute
+  /// (verbatim-ported) to the notifier.
   Future<void> _addSelectedItemsInBulk(
     Set<String> selectedItemNames,
     Map<String, TextEditingController> rateEditControllers,
@@ -7313,6 +6016,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     Map<String, String> selectedLocationPerItem,
     Map<String, List<TextEditingController>> descriptionControllers,
   ) async {
+    final itemdata = _s.itemData;
+    final entries = <BulkAddEntry>[];
+
     for (final name in selectedItemNames) {
       final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
         (i) => i['name'] == name,
@@ -7342,57 +6048,27 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
           double.tryParse(rateEditControllers[name]?.text.trim() ?? '') ?? 0.0;
       final int parsedQty =
           int.tryParse(qtyEditControllers[name]?.text.trim() ?? '') ?? 1;
-      final String qty = (parsedQty < 1 ? 1 : parsedQty).toString();
-      // Matches updateRateAndAmount()/addItem(): amount is rounded to the
-      // configured decimal places before being stored, not left raw.
-      final double amount = double.parse(
-        (resolvedRate * double.parse(qty)).toStringAsFixed(decimal!),
-      );
-      final int existingIndex = saleItems.indexWhere(
-        (i) =>
-            i.itemName == name &&
-            double.parse(i.itemPrice.toStringAsFixed(decimal!)) ==
-                double.parse(resolvedRate.toStringAsFixed(decimal!)) &&
-            i.itemUnit == unitName,
-      );
 
-      if (existingIndex != -1) {
-        final existing = saleItems[existingIndex];
-        // BigInt, not int - a manually-typed quantity can run past int64
-        // range and int.parse() throws FormatException on that instead of
-        // silently erroring, crashing the add-item flow outright.
-        final String newQty =
-            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
-                .toString();
-        saleItems[existingIndex] = existing
-            .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
-      } else {
-        saleItems.add(
-          SaleItem(
-            itemName: name,
-            itemQuantity: qty,
-            itemPrice: resolvedRate,
-            itemAmount: amount,
-            itemLocation: itemLocationName,
-            itemUnit: unitName,
-            accountingAllocationList: {},
-            batchAllocationList: {
-              'GODOWNNAME': itemLocationName,
-              'AMOUNT': amount,
-              'ACTUALQTY': '$qty $unitName',
-              'BILLEDQTY': '$qty $unitName',
-            },
-            basicUserDescriptions: itemDescriptions,
-          ),
-        );
-      }
+      entries.add(
+        BulkAddEntry(
+          name: name,
+          quantity: parsedQty,
+          rate: resolvedRate,
+          unit: unitName,
+          location: itemLocationName,
+          descriptions: itemDescriptions,
+        ),
+      );
     }
 
-    _recalcTotalsAfterBulkAdd();
+    _notifier.addSelectedItemsInBulk(entries);
+    _syncTotalsControllersAfterBulkAdd();
   }
 
   Future<void> _showItemDetailsPopup(BuildContext context) async {
+    final itemdata = _s.itemData;
+    final locationsdata = _s.locationsData;
+    final serial_no = _s.serialNo;
     _selecteditem = null;
     _itemController.clear();
     itemRateController.clear();
@@ -7819,13 +6495,13 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                 context,
                                               ).colorScheme.onSurface,
                                             ),
-                                            onChanged: isGodownLocked
+                                            onChanged: _s.isGodownLocked
                                                 ? null
                                                 : (val) => setStateDialog(
                                                     () => selectedLocation = val!,
                                                   ),
                                             decoration: InputDecoration(
-                                              labelText: isGodownLocked
+                                              labelText: _s.isGodownLocked
                                                   ? "Location Locked"
                                                   : "Location",
                                               labelStyle: GoogleFonts.poppins(
@@ -8294,6 +6970,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
   }*/
 
   void _showLedgerDetailsPopup(BuildContext context) {
+    final ledgerdata = _s.ledgerData;
+    final currencycode = _s.currencyCode;
     final TextEditingController _ledgerController = TextEditingController();
 
     _ledgerController.clear();
@@ -8794,67 +7472,11 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     );
   }
 
-  void _recalculateTotals() {
-    // Agar items empty hain to heading chhupao
-    isVisibleItemHeading = saleItems.isNotEmpty;
-
-    // Total items ka price
-    totalPriceOfItems = saleItems.fold(0.0, (
-      double previousAmount,
-      SaleItem item,
-    ) {
-      return previousAmount +
-          (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-              double.parse(item.itemQuantity));
-    });
-
-    // VAT calculation
-    if (_selectedvatledger != 'Not Applicable') {
-      double vatPerc = vatperc / 100;
-
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double prev, LedgerEntry entry) {
-            return prev + entry.ledgerAmount;
-          });
-
-      ledgerVatAmount = totalAmountForVatAppEntries * vatPerc;
-      itemsVatAmount = double.parse(
-        (totalPriceOfItems * vatPerc).toStringAsFixed(decimal!),
-      );
-      totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = formatter
-          .format(roundedtotalVatAmount)
-          .toString();
-    } else {
-      totalVatAmount = 0;
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = formatter.format(0).toString();
-    }
-
-    // Ledger totals
-    totalAmountOfLedgers = ledgerEntries.fold(
-      0.0,
-      (double prev, entry) => prev + entry.ledgerAmount,
-    );
-
-    // Final total
-    totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-    roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-    controller_totalamt.text = formatter.format(roundedtotalAmount).toString();
-  }
-
+  /// Widget-side wrapper of `addItem()` - the merge-or-append + totals
+  /// recompute moved verbatim into
+  /// `SalesRegistrationNotifier.addOrMergeSaleItem`; this keeps the
+  /// pre-add validation (`showAppMessage`), dialog/controller dismissal,
+  /// and the trailing dialog-field resets (all widget-local concerns).
   void addItem() {
     final itemName = _selecteditem;
     final itemQuantity = itemQuantityController.text;
@@ -8886,142 +7508,40 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
         'BILLEDQTY': qty_unit,
       };
 
-      // Check if the item already exists in the list with the same name and price
-      int existingIndex = saleItems.indexWhere(
-        (item) =>
-            item.itemName == itemName &&
-            double.parse(item.itemPrice.toStringAsFixed(decimal!)) ==
-                parsedPrice &&
-            item.itemUnit == itemUnit,
+      final newItem = SaleItem(
+        itemName: itemName,
+        itemQuantity: parsedQuantity,
+        itemPrice: parsedPrice,
+        itemAmount: parsedAmount,
+        itemLocation: itemLocation,
+        itemUnit: itemUnit,
+        accountingAllocationList: {},
+        batchAllocationList: batchAllocation,
+        basicUserDescriptions: isUniGasSerial
+            ? itemDescriptionControllers
+                  .map((c) => c.text.trim())
+                  .where((t) => t.isNotEmpty)
+                  .toList()
+            : const [],
       );
-      if (existingIndex != -1) {
-        // Item already exists with the same name, price, and unit, update its quantity and amount
-        SaleItem existingItem = saleItems[existingIndex];
-        // BigInt, not int - a manually-typed quantity can run past int64
-        // range and int.parse() throws FormatException on that instead of
-        // silently erroring, crashing the add-item flow outright.
-        String newQuantity =
-            (BigInt.parse(existingItem.itemQuantity) +
-                    BigInt.parse(parsedQuantity))
-                .toString();
-        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
-        saleItems[existingIndex] = existingItem
-            .updateQuantity(newQuantity)
-            .updateItemAmount(newAmount);
-      } else {
-        // Item doesn't exist, create a new SaleItem object and add it to the list
-        final newItem = SaleItem(
-          itemName: itemName,
-          itemQuantity: parsedQuantity,
-          itemPrice: parsedPrice,
-          itemAmount: parsedAmount,
-          itemLocation: itemLocation,
-          itemUnit: itemUnit,
-          accountingAllocationList: {},
-          batchAllocationList: batchAllocation,
-          basicUserDescriptions: isUniGasSerial
-              ? itemDescriptionControllers
-                    .map((c) => c.text.trim())
-                    .where((t) => t.isNotEmpty)
-                    .toList()
-              : const [],
-        );
 
-        setState(() {
-          saleItems.add(newItem);
-          // Rest of your code...
-        });
-      }
+      _notifier.addOrMergeSaleItem(newItem);
+
       for (final c in itemDescriptionControllers) {
         c.dispose();
       }
       itemDescriptionControllers = [TextEditingController()];
 
       setState(() {
-        if (saleItems.isEmpty) {
-          isVisibleItemHeading = false;
+        controller_vatamt.text = _s.formattedVatAmount;
+        controller_totalamt.text = _s.formattedTotalAmount;
+
+        _selecteditem = '${_s.itemData[0]['name']}';
+        if (_s.locationsData.isNotEmpty) {
+          selectedLocation = _s.locationsData[0];
+          isVisibleLocation = true;
         } else {
-          isVisibleItemHeading = true;
-        }
-
-        totalPriceOfItems = saleItems.fold(0.0, (
-          double previousAmount,
-          SaleItem item,
-        ) {
-          return previousAmount +
-              (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                  double.parse(item.itemQuantity));
-        });
-
-        if (_selectedvatledger != 'Not Applicable') {
-          // Calculate the total price of items
-
-          double vat_perc = vatperc / 100;
-
-          totalAmountForVatAppEntries = ledgerEntries
-              .where((entry) => entry.vatApp)
-              .fold(0.0, (double previousAmount, LedgerEntry entry) {
-                return previousAmount + entry.ledgerAmount;
-              });
-
-          ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-
-          itemsVatAmount = double.parse(
-            (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-          );
-          totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(roundedtotalVatAmount);
-          controller_vatamt.text = formattedVat.toString();
-        } else {
-          totalVatAmount = 0;
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(0);
-          controller_vatamt.text = formattedVat.toString();
-        }
-
-        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-          double previousAmount,
-          LedgerEntry entry,
-        ) {
-          return previousAmount + entry.ledgerAmount;
-        });
-
-        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-        roundedtotalAmount = double.parse(
-          totalAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalAmount);
-        controller_totalamt.text = formattedtotal.toString();
-
-        _selecteditem = '${itemdata[0]['name']}';
-        if (locationsdata.isNotEmpty) {
-          selectedLocation = locationsdata[0];
-          setState(() {
-            isVisibleLocation = true;
-          });
-        } else {
-          setState(() {
-            isVisibleLocation = false;
-          });
+          isVisibleLocation = false;
         }
         _updateUnitDropdown(_selecteditem);
         itemQuantityController.text = 1.toString();
@@ -9031,204 +7551,57 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
     }
   }
 
+  /// Widget-side wrapper of `addLedger()` - the merge-or-append + totals
+  /// recompute moved verbatim into
+  /// `SalesRegistrationNotifier.addOrMergeLedger`.
   void addLedger() {
-    Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
-      (ledger) => ledger['name'] == _selectedledger,
-    );
-
-    final ledgerName = specificLedger['name'];
+    final ledgerName = _selectedledger as String;
     final ledgerAmount = ledgerAmountController.text;
 
-    int vatApplicable = specificLedger['vatapplicable'];
-    final vatApp = vatApplicable == 1 ? true : false;
-
     if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      // Create a new SaleItem object and add it to the list
       Navigator.of(context).pop();
-      int existingIndex = ledgerEntries.indexWhere(
-        (entry) => entry.ledgerName == ledgerName,
-      );
       double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
 
-      if (existingIndex != -1) {
-        // Ledger already exists, update its amount
-        LedgerEntry existingLedger = ledgerEntries[existingIndex];
-        double newAmount = existingLedger.ledgerAmount + parsedAmount;
+      _notifier.addOrMergeLedger(ledgerName, parsedAmount);
 
-        // Update vatApp if necessary
-        bool newVatApp =
-            existingLedger.vatApp; // Initialize with the existing value
-        newVatApp = vatApp;
-
-        ledgerEntries[existingIndex] = existingLedger.updateAmount(
-          newAmount,
-          newVatApp,
-        );
-      } else {
-        // Ledger doesn't exist, create a new LedgerEntry object and add it to the list
-        final newItem = LedgerEntry(
-          ledgerName: ledgerName,
-          ledgerAmount: parsedAmount,
-          vatApp: vatApp,
-        );
-        setState(() {
-          ledgerEntries.add(newItem);
-        });
-      }
       setState(() {
-        if (ledgerEntries.isEmpty) {
-          isVisibleLedgerHeading = false;
-        } else {
-          isVisibleLedgerHeading = true;
-        }
-
-        totalPriceOfItems = saleItems.fold(0.0, (
-          double previousAmount,
-          SaleItem item,
-        ) {
-          return previousAmount +
-              (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                  double.parse(item.itemQuantity));
-        });
-
-        if (_selectedvatledger != 'Not Applicable') {
-          // Calculate the total ledger amount for entries with vatApp set to true
-          totalAmountForVatAppEntries = ledgerEntries
-              .where((entry) => entry.vatApp)
-              .fold(0.0, (double previousAmount, LedgerEntry entry) {
-                return previousAmount + entry.ledgerAmount;
-              });
-
-          double vat_perc = vatperc / 100;
-
-          itemsVatAmount = double.parse(
-            (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-          );
-          ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-
-          /*print('Total Ledger Amount for VAT-Applicable Entries: $totalAmountForVatAppEntries');
-          print('5% VAT Amount: $ledgerVatAmount');*/
-
-          totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(roundedtotalVatAmount);
-          controller_vatamt.text = formattedVat.toString();
-        } else {
-          totalVatAmount = 0;
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(0);
-          controller_vatamt.text = formattedVat.toString();
-        }
-        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-          double previousAmount,
-          LedgerEntry entry,
-        ) {
-          return previousAmount + entry.ledgerAmount;
-        });
-
-        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-        roundedtotalAmount = double.parse(
-          totalAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalAmount);
-        controller_totalamt.text = formattedtotal.toString();
-        _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+        controller_vatamt.text = _s.formattedVatAmount;
+        controller_totalamt.text = _s.formattedTotalAmount;
+        _selectedledger = _s.ledgerData.isNotEmpty
+            ? _s.ledgerData[0]['name']
+            : null;
         ledgerAmountController.clear();
       });
     }
   }
 
-  late String company_trn, company_address, company_emirate, company_country;
+  /// Widget-side wrapper - the actual session/prefs loading (and the
+  /// `loadData()` call it used to trigger) moved verbatim into
+  /// `SalesRegistrationNotifier._init()`, invoked automatically the first
+  /// time the provider is read (here). `build()`'s own
+  /// `!_s.isInitialDataLoaded` skeleton gate (unchanged from the original)
+  /// handles showing/hiding the loading state as the notifier's state
+  /// changes; this only sets the item-quantity/VAT/total controllers to
+  /// their fixed defaults and syncs the date controllers once via
+  /// `_syncDateControllers`, registered as a one-time-per-change listener
+  /// in `initState`.
+  void _initSharedPreferences() {
+    itemQuantityController.text = 1.toString();
+    controller_vatamt.text = 0.toString();
+    controller_totalamt.text = 0.toString();
+    // Trigger provider creation (and its _init()) eagerly, matching the
+    // original's initState-time kickoff rather than waiting for build().
+    _notifier;
+  }
 
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
-      currencycode = prefs.getString('currencycode') ?? 'AED';
-      startfrom =
-          prefs.getString('startfrom') ??
-          DateFormat('yyyyMMdd').format(yearStartDate);
-
-      company_trn = prefs.getString("company_trn") ?? "null";
-      company_address = prefs.getString("company_address") ?? "null";
-      company_emirate = prefs.getString("company_emirate") ?? "null";
-      company_country = prefs.getString("company_country") ?? "null";
-
-      vatperc = prefs.getDouble('vatperc') ?? 5.0;
-
-      decimal = prefs.getInt('decimalplace') ?? 2;
-
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-
-      // Reference Date defaults to the voucher date itself (not a
-      // separately-computed "now") - kept in sync so BILLDATE's
-      // ref-no-empty fallback (saledatestring) and this default always
-      // agree until the user actually picks a different reference date.
-      refdate = saledate;
-      refdatestring = saledatestring;
-      refdatetxt = saledatetxt;
-      _refdateController.text = saledatetxt;
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      itemQuantityController.text = 1.toString();
-      controller_vatamt.text = 0.toString();
-
-      controller_totalamt.text = 0.toString();
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    await loadData();
-    if (mounted) {
-      setState(() {
-        _isInitialDataLoaded = true;
-      });
-    }
+  void _syncDateControllers(SalesRegistrationState state) {
+    _dateController.text = state.saledatetxt;
+    _refdateController.text = state.refdatetxt;
   }
 
   @override
   void initState() {
     super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
     _animationController = AnimationController(
       duration: const Duration(seconds: 1),
       vsync: this,
@@ -9238,27 +7611,16 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _initSharedPreferences();
+    ref.listenManual<SalesRegistrationState>(
+      salesRegistrationNotifierProvider,
+      (previous, next) => _syncDateControllers(next),
+      fireImmediately: true,
+    );
   }
 
   bool get isUniGasSerial {
-    final currentSerial = serial_no?.trim() ?? '';
-
-    // 👇 put only that one serial here
-
+    final currentSerial = _s.serialNo?.trim() ?? '';
     return currentSerial == uniGasSerialNumber;
-  }
-
-  // vatledgerdata[0] is always the synthetic "Not Applicable" entry added
-  // ahead of the API's real VAT ledgers. For UniGas, default to the first
-  // real ledger (vatledgerdata[1]) instead of "Not Applicable" - UniGas
-  // sales/deliveries are always VAT-applicable in practice. Every other
-  // serial keeps the existing "Not Applicable" default.
-  String? _defaultVatLedger() {
-    if (vatledgerdata.isEmpty) return null;
-    if (isUniGasSerial && vatledgerdata.length > 1) {
-      return vatledgerdata[1];
-    }
-    return vatledgerdata[0];
   }
 
   @override
@@ -9306,6 +7668,67 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(salesRegistrationNotifierProvider);
+    final vm = _s;
+    final vchtypenamedata = vm.vchTypeNameData;
+    final partyledgerdata = vm.partyLedgerData;
+    final vatledgerdata = vm.vatLedgerData;
+    final salesledger_data = vm.salesLedgerData;
+    final itemdata = vm.itemData;
+    final locationsdata = vm.locationsData;
+    final ledgerdata = vm.ledgerData;
+    final vchnos = vm.vchNos;
+    final saleItems = vm.saleItems;
+    final ledgerEntries = vm.ledgerEntries;
+    final totalPriceOfItems = vm.totalPriceOfItems;
+    final totalAmountForVatAppEntries = vm.totalAmountForVatAppEntries;
+    final totalAmountOfLedgers = vm.totalAmountOfLedgers;
+    final itemsVatAmount = vm.itemsVatAmount;
+    final ledgerVatAmount = vm.ledgerVatAmount;
+    final totalVatAmount = vm.totalVatAmount;
+    final totalAmount = vm.totalAmount;
+    final roundedtotalVatAmount = vm.roundedTotalVatAmount;
+    final roundedtotalAmount = vm.roundedTotalAmount;
+    final isVisibleItemHeading = vm.isVisibleItemHeading;
+    final isVisibleLedgerHeading = vm.isVisibleLedgerHeading;
+    final isVoucherTypeLocked = vm.isVoucherTypeLocked;
+    final isSalesLedgerLocked = vm.isSalesLedgerLocked;
+    final isGodownLocked = vm.isGodownLocked;
+    final _isLoading = vm.isLoading;
+    final _isInitialDataLoaded = vm.isInitialDataLoaded;
+    final hostname = vm.hostname;
+    final company = vm.company;
+    final company_lowercase = vm.companyLowercase;
+    final serial_no = vm.serialNo;
+    final username = vm.username;
+    final token = vm.token;
+    final currencycode = vm.currencyCode;
+    final startfrom = vm.startfrom;
+    final company_trn = vm.companyTrn;
+    final company_address = vm.companyAddress;
+    final company_emirate = vm.companyEmirate;
+    final company_country = vm.companyCountry;
+    final vatperc = vm.vatperc;
+    final decimal = vm.decimal;
+    final SecuritybtnAcessHolder = vm.securitybtnAccessHolder;
+    final name = vm.name;
+    final email = vm.email;
+    final saledate = vm.saledate;
+    final refdate = vm.refdate;
+    final saledatestring = vm.saledatestring;
+    final saledatetxt = vm.saledatetxt;
+    final refdatestring = vm.refdatestring;
+    final refdatetxt = vm.refdatetxt;
+    final _selectedvchtypename = vm.selectedVchTypeName;
+    final _selectedpartyledger = vm.selectedPartyLedger;
+    final _selectedsalesledger = vm.selectedSalesLedger;
+    final _selectedvatledger = vm.selectedVatLedger;
+    final errorMessageVchNo = vm.errorMessageVchNo;
+    final _selectedPartyMobile = vm.selectedPartyMobile;
+    final _selectedPartyEmail = vm.selectedPartyEmail;
+    final selectedPartyLedgerPriceLevel = vm.selectedPartyLedgerPriceLevel;
+    final partyLedgerPriceLevelMap = vm.partyLedgerPriceLevelMap;
+    final partyLedgerCreditPeriodMap = vm.partyLedgerCreditPeriodMap;
     if (!_isInitialDataLoaded) {
       return Scaffold(
         bottomNavigationBar: const AppBottomNav(
@@ -9475,10 +7898,8 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               );
                             }).toList(),
                             onChanged: (value) async {
-                              setState(() {
-                                _selectedvchtypename = value!;
-                                fetchvchnos(_selectedvchtypename);
-                              });
+                              _notifier.setSelectedVchType(value!);
+                              fetchvchnos(value);
                             },
                           ),
 
@@ -9576,13 +7997,9 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                                 size: 20,
                                               ),
                                               onPressed: () {
-                                                setState(() {
-                                                  _partyLedgerController
-                                                      .clear();
-                                                  _selectedpartyledger = "";
-                                                  selectedPartyLedgerPriceLevel =
-                                                      null;
-                                                });
+                                                _partyLedgerController.clear();
+                                                _notifier
+                                                    .clearSelectedPartyLedger();
                                               },
                                             ),
                                           Icon(
@@ -9649,20 +8066,10 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                   );
                                 },
                                 onSelected: (String suggestion) {
-                                  setState(() {
-                                    _selectedpartyledger = suggestion;
-                                    _partyLedgerController.text = suggestion;
-                                    selectedPartyLedgerPriceLevel =
-                                        partyLedgerPriceLevelMap[suggestion];
-                                    debugPrint(
-                                      'selected party ledger -> $_selectedpartyledger',
-                                    );
-                                    debugPrint(
-                                      'selected price level -> $selectedPartyLedgerPriceLevel',
-                                    );
-                                    FocusManager.instance.primaryFocus
-                                        ?.unfocus();
-                                  });
+                                  _partyLedgerController.text = suggestion;
+                                  _notifier.selectPartyLedger(suggestion);
+                                  FocusManager.instance.primaryFocus
+                                      ?.unfocus();
                                 },
                                 emptyBuilder: (context) => Padding(
                                   padding: const EdgeInsets.all(12.0),
@@ -9703,9 +8110,7 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                               );
                             }).toList(),
                             onChanged: (value) async {
-                              setState(() {
-                                _selectedsalesledger = value!;
-                              });
+                              _notifier.setSelectedSalesLedger(value!);
                             },
                           ),
                         ],
@@ -9825,29 +8230,22 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                   ),
                                 ),
                                 onIncrement: () {
-                                  int currentQty =
-                                      int.tryParse(item.itemQuantity) ?? 0;
+                                  _notifier.incrementItemQuantity(index);
                                   setState(() {
-                                    item.itemQuantity = (currentQty + 1)
-                                        .toString();
-                                    _recalculateTotals();
+                                    controller_vatamt.text =
+                                        _s.formattedVatAmount;
+                                    controller_totalamt.text =
+                                        _s.formattedTotalAmount;
                                   });
                                 },
                                 onDecrement: () {
-                                  int currentQty =
-                                      int.tryParse(item.itemQuantity) ?? 0;
-                                  if (currentQty > 1) {
-                                    setState(() {
-                                      item.itemQuantity = (currentQty - 1)
-                                          .toString();
-                                      _recalculateTotals();
-                                    });
-                                  } else {
-                                    setState(() {
-                                      saleItems.removeAt(index);
-                                      _recalculateTotals();
-                                    });
-                                  }
+                                  _notifier.decrementItemQuantity(index);
+                                  setState(() {
+                                    controller_vatamt.text =
+                                        _s.formattedVatAmount;
+                                    controller_totalamt.text =
+                                        _s.formattedTotalAmount;
+                                  });
                                 },
                                 onDelete: () {
                                   _deleteSaleItem(index);
@@ -9984,101 +8382,15 @@ class _SalesRegistrationPageState extends State<SalesRegistration>
                                     items: vatledgerdata,
                                     itemLabel: (item) => item,
                                     onChanged: (value) {
+                                      _notifier
+                                          .setSelectedVatLedgerAndRecalculate(
+                                            value!,
+                                          );
                                       setState(() {
-                                        _selectedvatledger = value!;
-
-                                        totalPriceOfItems = saleItems.fold(
-                                          0.0,
-                                          (double prev, SaleItem item) =>
-                                              prev +
-                                              (double.parse(
-                                                    item.itemPrice
-                                                        .toStringAsFixed(
-                                                          decimal!,
-                                                        ),
-                                                  ) *
-                                                  double.parse(
-                                                    item.itemQuantity,
-                                                  )),
-                                        );
-
-                                        totalAmountOfLedgers = ledgerEntries
-                                            .fold(
-                                              0.0,
-                                              (
-                                                double prev,
-                                                LedgerEntry entry,
-                                              ) => prev + entry.ledgerAmount,
-                                            );
-
-                                        if (_selectedvatledger ==
-                                            'Not Applicable') {
-                                          totalVatAmount = 0;
-                                          roundedtotalVatAmount = double.parse(
-                                            totalVatAmount.toStringAsFixed(
-                                              decimal!,
-                                            ),
-                                          );
-                                          NumberFormat formatter = NumberFormat(
-                                            '#,##0.${'0' * decimal!}',
-                                            'en_US',
-                                          );
-                                          controller_vatamt.text = formatter
-                                              .format(0);
-                                        } else {
-                                          double
-                                          totalAmountForLedgerVatAppEntries =
-                                              ledgerEntries
-                                                  .where(
-                                                    (entry) => entry.vatApp,
-                                                  )
-                                                  .fold(
-                                                    0.0,
-                                                    (
-                                                      double prev,
-                                                      LedgerEntry entry,
-                                                    ) =>
-                                                        prev +
-                                                        entry.ledgerAmount,
-                                                  );
-
-                                          double vat_perc = vatperc / 100;
-                                          itemsVatAmount = double.parse(
-                                            (totalPriceOfItems * vat_perc)
-                                                .toStringAsFixed(decimal!),
-                                          );
-                                          ledgerVatAmount =
-                                              totalAmountForLedgerVatAppEntries *
-                                              vat_perc;
-                                          totalVatAmount =
-                                              itemsVatAmount + ledgerVatAmount;
-
-                                          roundedtotalVatAmount = double.parse(
-                                            totalVatAmount.toStringAsFixed(
-                                              decimal!,
-                                            ),
-                                          );
-                                          NumberFormat formatter = NumberFormat(
-                                            '#,##0.${'0' * decimal!}',
-                                            'en_US',
-                                          );
-                                          controller_vatamt.text = formatter
-                                              .format(roundedtotalVatAmount);
-                                        }
-
-                                        totalAmount =
-                                            totalPriceOfItems +
-                                            totalAmountOfLedgers +
-                                            totalVatAmount;
-                                        roundedtotalAmount = double.parse(
-                                          totalAmount.toStringAsFixed(decimal!),
-                                        );
-                                        NumberFormat formatter = NumberFormat(
-                                          '#,##0.${'0' * decimal!}',
-                                          'en_US',
-                                        );
-                                        controller_totalamt.text = formatter
-                                            .format(roundedtotalAmount);
+                                        controller_vatamt.text =
+                                            _s.formattedVatAmount;
+                                        controller_totalamt.text =
+                                            _s.formattedTotalAmount;
                                       });
                                     },
                                   ),
