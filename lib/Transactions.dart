@@ -6,6 +6,7 @@ import 'package:FincoreGo/utils/currency_helper.dart';
 /*import 'package:FincoreGo/currencyFormat.dart';*/
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,11 +24,7 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/voucher_repository.dart';
-import 'api/tally_api_client.dart';
-import 'api/pagination_helper.dart';
-import 'api/api_exception.dart';
-import 'api/monthly_bucket_helper.dart' show parseCompactDate, parseMoneyField;
+import 'providers/transactions_notifier.dart';
 
 class transactions {
   final String ledger;
@@ -70,36 +67,14 @@ class transactions {
   }
 }
 
-class Transactions extends StatefulWidget {
+class Transactions extends ConsumerStatefulWidget {
   @override
-  _TransactionsPageState createState() => _TransactionsPageState();
+  ConsumerState<Transactions> createState() => _TransactionsPageState();
 }
 
-class _TransactionsPageState extends State<Transactions>
+class _TransactionsPageState extends ConsumerState<Transactions>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  bool isVisiblePostdatedTransaction =
-      false; // to adjust post dated transactions visibility
-
-  bool isClicked_transaction = true;
-
-  late String startdate_text = "", enddate_text = "";
-
-  String selectedSortOption = '';
-
-  int counter = 0;
-
-  bool isVisibleAlias = true;
-
-  DateTime _startDate = DateTime.now();
-
-  DateTime _endDate = DateTime.now().add(Duration(days: 7));
-
-  List<transactions> filteredItems_transactions =
-      []; // Initialize an empty list to hold the filtered items
-
-  String transactions_count = "0";
 
   final List<String> itemList = [
     'Default',
@@ -111,61 +86,6 @@ class _TransactionsPageState extends State<Transactions>
     'Amount Low to High',
   ];
 
-  String startDateString = "", endDateString = "";
-
-  bool _isTextEnabled = true;
-
-  bool _isDashVisible = true,
-      _isEnddateVisible = true,
-      _IsSizeboxVisible = true;
-
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isAllList = false;
-
-  String email = "";
-  String name = "";
-
-  String? datetype;
-
-  late int? decimal;
-
-  TextEditingController searchController = TextEditingController();
-
-  bool isVisibleNoDataFound = false, isSortVisible = false;
-
-  String ledgroups =
-      "Sundry Debtors, Sundry Creditors, Customers, Suppliers, Creditors, Debtors";
-
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-
-  late SharedPreferences prefs;
-
-  ScrollController _scrollController_transactions = ScrollController();
-  final ScrollController _scrollFabController = ScrollController();
-
-  void filterPostDatedTransactions() {
-    setState(() {
-      /*if (isVisiblePostdatedTransaction) {
-        transactions_list = transactions_list
-            .where((transaction) => transaction.ispostdated == '1' || transaction.ispostdated == '0')
-            .toList();
-      } */
-
-      if (!isVisiblePostdatedTransaction) {
-        transactions_list = transactions_list
-            .where((transaction) => transaction.ispostdated == '0')
-            .toList();
-      }
-    });
-  }
-
-  dynamic _selecteddate;
   List<String> date_range = [
     'Today',
     'Yesterday',
@@ -177,110 +97,26 @@ class _TransactionsPageState extends State<Transactions>
     'Custom Date',
   ];
 
-  late NumberFormat currencyFormat;
+  TextEditingController searchController = TextEditingController();
 
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
+  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
 
-  String? company = "", username = "";
+  final ScrollController _scrollFabController = ScrollController();
 
-  bool _isLoading = false;
+  TransactionsNotifier get _notifier =>
+      ref.read(transactionsNotifierProvider.notifier);
+  TransactionsState get _s => ref.read(transactionsNotifierProvider);
 
-  // Toggles between the transaction list and the voucher-type trend
-  // chart - having both stacked on screen at once was too cluttered, so
-  // only one shows at a time now, tab-style.
-  bool _isTrendTabSelected = false;
-
-  // Quick filter chips - postdated/optional vouchers are exactly the
-  // transactions users specifically need to track/follow up on, so a
-  // one-tap filter is more useful day-to-day than another chart.
-  String _quickFilter = 'All';
-
-  // Client-side-only search-across-unloaded-pages guard: tally-api's
-  // `/vouchers` has no search-by-number filter (only page/limit/since/
-  // voucherTypeMasterId/from/to - see VoucherRepository's doc comment), and
-  // this screen only loads pages incrementally as the user scrolls (see
-  // this class's paging-state doc comment) - so a plain client-side search
-  // over `transactions_list` would wrongly report "no results" for a
-  // voucher that exists but sits on a page not yet loaded. [_applyTransactionFilters]
-  // instead keeps loading pages in the background (bounded by the current
-  // date/voucher-type filter's own page count, not the whole company) while
-  // a search query has zero matches so far, stopping as soon as a match
-  // appears or every page in range has been checked.
-  // Single-flight guard for the loop below - but the loop itself always
-  // re-reads `searchController.text` live on every iteration rather than
-  // closing over the query that started it, so it self-adjusts to
-  // whatever's currently typed instead of exiting stale on the next
-  // keystroke. A version keyed to a frozen query string would starve
-  // itself on fast typing: each new character re-triggers
-  // [_applyTransactionFilters], the guard drops that new call while the
-  // previous (now-stale) query's loop is still mid-page-fetch, and that
-  // loop exits as soon as it notices the text changed - net result, the
-  // final query the user actually typed never gets its own loop started.
-  bool _isAutoSearchLoading = false;
-
-  Future<void> _autoLoadPagesForSearch() async {
-    if (_isAutoSearchLoading) return;
-    _isAutoSearchLoading = true;
-    try {
-      while (true) {
-        final query = searchController.text.trim().toLowerCase();
-        if (query.isEmpty || _txCursor == null) break;
-        final hasMatch = transactions_list.any(
-          (t) => t.vchno.toLowerCase().contains(query),
-        );
-        if (hasMatch) break;
-
-        await _loadNextTransactionsPage(silent: true);
-
-        final stillQuery = searchController.text.trim().toLowerCase();
-        if (stillQuery.isEmpty) break;
-        final matches = transactions_list.where(
-          (t) => t.vchno.toLowerCase().contains(stillQuery),
-        );
-        setState(() {
-          filteredItems_transactions = matches.toList();
-          transactions_count = filteredItems_transactions.length.toString();
-          isVisibleNoDataFound =
-              filteredItems_transactions.isEmpty && _txCursor == null;
-        });
-      }
-    } finally {
-      _isAutoSearchLoading = false;
-    }
-  }
-
-  void _applyTransactionFilters() {
-    Iterable<transactions> items = transactions_list;
-
-    if (_quickFilter == 'Postdated') {
-      items = items.where((t) => t.ispostdated == '1');
-    } else if (_quickFilter == 'Optional') {
-      items = items.where((t) => t.isoptional == '1');
-    }
-
-    final query = searchController.text.trim().toLowerCase();
-    if (query.isNotEmpty) {
-      items = items.where((t) => t.vchno.toLowerCase().contains(query));
-    }
-
-    setState(() {
-      filteredItems_transactions = items.toList();
-      transactions_count = filteredItems_transactions.length.toString();
-    });
-
-    if (query.isNotEmpty &&
-        filteredItems_transactions.isEmpty &&
-        _txCursor != null) {
-      _autoLoadPagesForSearch();
-    }
-  }
+  String _currentSearchQuery() => searchController.text;
 
   Widget _buildQuickFilterChips() {
+    final vm = _s;
     final counts = {
-      'All': transactions_list.length,
-      'Postdated': transactions_list.where((t) => t.ispostdated == '1').length,
-      'Optional': transactions_list.where((t) => t.isoptional == '1').length,
+      'All': vm.transactionsList.length,
+      'Postdated':
+          vm.transactionsList.where((t) => t.ispostdated == '1').length,
+      'Optional':
+          vm.transactionsList.where((t) => t.isoptional == '1').length,
     };
 
     return Padding(
@@ -301,12 +137,11 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Widget _buildQuickFilterChip(String label, int count) {
-    final isSelected = _quickFilter == label;
+    final isSelected = _s.quickFilter == label;
     return GestureDetector(
       onTap: () {
-        _quickFilter = label;
         searchController.clear();
-        _applyTransactionFilters();
+        _notifier.setQuickFilter(label, _currentSearchQuery);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -337,49 +172,6 @@ class _TransactionsPageState extends State<Transactions>
       ),
     );
   }
-
-  dynamic _selectedtransaction = "All Transactions";
-
-  List<String> spinner_list = ["All Transactions"];
-  final Map<String, int> _voucherTypeMasterIdByName = {};
-
-  List<transactions> transactions_list = [];
-
-  // --- Incremental (infinite-scroll) paging state for the tally-api list.
-  // tally-api's `/vouchers` list now takes `from`/`to` server-side (added
-  // after this screen was first migrated, when the endpoint had no date
-  // filter at all and this had to walk every page client-side instead -
-  // see VoucherRepository's doc comment), so paging is now a plain forward
-  // walk over the already-date-filtered result set.
-  static const int _txPageLimit = 30;
-  int _txTotalPages = 1;
-  int? _txCursor; // next page to fetch; null = exhausted
-  bool _isLoadingMoreTx = false;
-  DateTime? _txFrom, _txTo;
-  int? _txVoucherTypeMasterId;
-
-  // Bumped every time a new date-range/voucher-type fetch starts (including
-  // the initial one from `initState`, which can still be mid-flight when
-  // the user changes the filter again before it finishes). Every async
-  // result below (the initial page and every incremental page load) is
-  // stamped with the generation active when it *started* and discarded on
-  // arrival if a newer fetch has since begun - without this, an older,
-  // slower-to-complete fetch's pages kept landing in `transactions_list`
-  // after a newer filter selection's own results, corrupting the display
-  // with the wrong date range's rows. Invisible with a small dataset (every
-  // fetch resolved near-instantly); a real, reproducible bug once a fetch
-  // takes multiple page round-trips.
-  int _txRequestGen = 0;
-
-  // The Overview/trend chart aggregates the COMPLETE date-filtered voucher
-  // set (a monthly total that's missing most of the range would be
-  // misleading) - unlike the plain Transactions list above, so it's kept
-  // in its own separately, fully-fetched list rather than reusing the
-  // incrementally-loaded transactions_list. Mirrors Items.dart's Item
-  // Ageing/Stock Valuation tabs staying on a full fetch for the same
-  // "needs the whole dataset to aggregate correctly" reason.
-  List<transactions> _chartTransactionsList = [];
-  bool _isChartDataStale = true;
 
   void _showSelectionWindow(BuildContext context) {
     final List<IconData> icons = [
@@ -432,35 +224,7 @@ class _TransactionsPageState extends State<Transactions>
                     // Replace this with your custom tile widget
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          selectedSortOption =
-                              itemList[index]; // Update the selected value
-                        });
-                        // Now, you can use a switch or if-else statement to check the selected value
-                        switch (selectedSortOption) {
-                          case 'Default':
-                            sortByDefault(); // Call the sorting function
-                            break;
-                          case 'Newest to Oldest':
-                            sortByDateHightoLow(); // Call the sorting function
-                            break;
-                          case 'Oldest to Newest':
-                            sortByDateLowtoHigh(); // Call the sorting function
-                            break;
-                          case 'A->Z':
-                            sortByAlphabetAtoZ(); // Call the sorting function
-                            break;
-                          case 'Z->A':
-                            sortByAlphabetZtoA(); // Call the sorting function
-                            break;
-                          case 'Amount High to Low':
-                            sortByAmountHightoLow(); // Call the sorting function
-                            break;
-                          case 'Amount Low to High':
-                            sortByAmountLowtoHigh(); // Call the sorting function
-                            break;
-                        }
-                        print('Tile $index selected');
+                        _notifier.applySortOption(itemList[index]);
                         Navigator.pop(
                           context,
                         ); // Close the selection window after a tile is selected
@@ -476,14 +240,15 @@ class _TransactionsPageState extends State<Transactions>
                           title: Text(
                             itemList[index],
                             style: GoogleFonts.poppins(
-                              fontWeight: itemList[index] == selectedSortOption
+                              fontWeight:
+                                  itemList[index] == _s.selectedSortOption
                                   ? FontWeight.bold
                                   : FontWeight
                                         .normal, // Apply bold style to the text if the tile is selected
                               color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
-                          trailing: itemList[index] == selectedSortOption
+                          trailing: itemList[index] == _s.selectedSortOption
                               ? Icon(Icons.check, color: Color(0xFF30D5C8))
                               : null, // Show arrow icon if the tile is selected
                         ),
@@ -499,138 +264,6 @@ class _TransactionsPageState extends State<Transactions>
     );
   }
 
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions = List.from(transactions_list);
-        transactions_count = filteredItems_transactions.length.toString();
-
-        if (_scrollController_transactions.hasClients) {
-          _scrollController_transactions.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
-  void sortByAlphabetAtoZ() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions.sort(
-          (a, b) => a.vchname.compareTo(b.vchname),
-        );
-        transactions_count = filteredItems_transactions.length.toString();
-
-        _scrollController_transactions.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetZtoA() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions.sort(
-          (a, b) => b.vchname.compareTo(a.vchname),
-        );
-        transactions_count = filteredItems_transactions.length.toString();
-
-        _scrollController_transactions.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateLowtoHigh() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions.sort(
-          (a, b) => a.vchdate.compareTo(b.vchdate),
-        );
-        transactions_count = filteredItems_transactions.length.toString();
-
-        _scrollController_transactions.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateHightoLow() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions.sort(
-          (a, b) => b.vchdate.compareTo(a.vchdate),
-        );
-        transactions_count = filteredItems_transactions.length.toString();
-
-        _scrollController_transactions.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountLowtoHigh() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions.sort((a, b) => a.amount.compareTo(b.amount));
-        transactions_count = filteredItems_transactions.length.toString();
-
-        if (_scrollController_transactions.hasClients) {
-          _scrollController_transactions.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
-  void sortByAmountHightoLow() {
-    setState(() {
-      if (filteredItems_transactions.isNotEmpty) {
-        filteredItems_transactions.sort((a, b) => b.amount.compareTo(a.amount));
-        transactions_count = filteredItems_transactions.length.toString();
-
-        _scrollController_transactions.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  /// Fetches the full, unpaginated transaction list on demand for PDF/CSV
-  /// export - export is an occasional explicit action (not the initial
-  /// screen render infinite scroll is optimizing), so it's fine for it to
-  /// fetch everything for the current date range/voucher-type rather than
-  /// being limited to whatever's been scrolled into view so far
-  /// (`transactions_list` only holds the pages loaded/auto-chained so far).
-  Future<List<transactions>> _fullTransactionsForExport() async {
-    if (_txFrom == null || _txTo == null) return transactions_list;
-    final vouchers = await VoucherRepository.instance.listInRange(
-      from: _txFrom!,
-      to: _txTo!,
-      voucherTypeMasterId: _txVoucherTypeMasterId,
-    );
-    return _mapVouchersToTransactions(vouchers);
-  }
 
   String formatledger_report(String ledger) {
     if (ledger == 'null') {
@@ -640,6 +273,11 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Future<void> generateAndSharePDF_Transactions(List<transactions> items) async {
+    final vm = _s;
+    final company = vm.company;
+    final _selectedtransaction = vm.selectedTransaction;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
@@ -810,6 +448,11 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Future<void> generateAndShareCSV_Transactions(List<transactions> items) async {
+    final vm = _s;
+    final company = vm.company;
+    final _selectedtransaction = vm.selectedTransaction;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
     final List<List<dynamic>> csvData = [];
     final headersRow = [
       'Vch No',
@@ -857,73 +500,50 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Future<void> _selectDateRange(BuildContext context) async {
-    if (_isTextEnabled) {
-      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
-      String? startfrom = prefs.getString('startfrom');
-      DateTime earliestDate =
-          DateTime.tryParse(startfrom ?? '') ?? DateTime(2000);
+    if (!_s.isTextEnabled) return;
+    final initialDateRange = DateTimeRange(
+      start: _notifier.startDate,
+      end: _notifier.endDate,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    String? startfrom = prefs.getString('startfrom');
+    DateTime earliestDate =
+        DateTime.tryParse(startfrom ?? '') ?? DateTime(2000);
 
-      DateTimeRange? selectedDateRange = await showDateRangePicker(
-        context: context,
-        initialDateRange: initialDateRange,
-        firstDate: earliestDate,
-        lastDate: DateTime(2100),
-        builder: (BuildContext context, Widget? child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: app_color, // main accent color
-                onPrimary: Colors.white,
-                surface: Theme.of(context).colorScheme.surface,
-                onSurface: Theme.of(context).colorScheme.onSurface,
-              ),
-              datePickerTheme: DatePickerThemeData(
-                rangeSelectionBackgroundColor: app_color.withOpacity(
-                  0.15,
-                ), // 🔹 light shade of your app_color
-                rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                  app_color.withOpacity(0.15),
-                ),
+    DateTimeRange? selectedDateRange = await showDateRangePicker(
+      context: context,
+      initialDateRange: initialDateRange,
+      firstDate: earliestDate,
+      lastDate: DateTime(2100),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+              primary: app_color, // main accent color
+              onPrimary: Colors.white,
+              surface: Theme.of(context).colorScheme.surface,
+              onSurface: Theme.of(context).colorScheme.onSurface,
+            ),
+            datePickerTheme: DatePickerThemeData(
+              rangeSelectionBackgroundColor: app_color.withOpacity(
+                0.15,
+              ), // 🔹 light shade of your app_color
+              rangeSelectionOverlayColor: MaterialStatePropertyAll(
+                app_color.withOpacity(0.15),
               ),
             ),
-            child: child!,
-          );
-        },
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (selectedDateRange != null) {
+      _notifier.setCustomDateRange(
+        selectedDateRange.start,
+        selectedDateRange.end,
+        _currentSearchQuery,
       );
-
-      if (selectedDateRange != null) {
-        setState(() {
-          _startDate = selectedDateRange.start;
-          _endDate = selectedDateRange.end;
-
-          DateTime start = _startDate;
-          DateTime end = _endDate;
-
-          String startMonth = DateFormat('MMM').format(start);
-          String sdf = DateFormat(
-            'MM',
-          ).format(start); // converting month into string
-          String startDay = DateFormat('dd').format(start);
-          int startYear = start.year;
-
-          String endMonth = DateFormat('MMM').format(end);
-          String sdfEnd = DateFormat('MM').format(end);
-          String endDay = DateFormat('dd').format(end);
-          int endYear = end.year;
-
-          startDateString = '$startYear$sdf$startDay';
-          endDateString = '$endYear$sdfEnd$endDay';
-
-          startdate_text =
-              startDay + "-" + startMonth + "-" + startYear.toString();
-          enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-          print(startDateString);
-          print(endDateString);
-
-          fetchMainData();
-        });
-      }
     }
   }
 
@@ -952,35 +572,6 @@ class _TransactionsPageState extends State<Transactions>
     Color(0xFFE53935),
     Color(0xFF3949AB),
   ];
-
-  Map<String, Map<String, double>> _buildVoucherStackedTotals() {
-    final totalsByTypeAndMonth = <String, Map<String, double>>{};
-
-    for (final t in _chartTransactionsList) {
-      final date = DateTime.tryParse(t.vchdate);
-      if (date == null) continue;
-      final monthLabel = DateFormat('MMMM yyyy').format(date);
-      final byMonth = totalsByTypeAndMonth.putIfAbsent(t.vchname, () => {});
-      byMonth[monthLabel] = (byMonth[monthLabel] ?? 0) + t.amount.abs();
-    }
-
-    return totalsByTypeAndMonth;
-  }
-
-  // Transaction COUNT per month (not amount) - summing mixed voucher-type
-  // amounts together (Sales + Purchase + Receipt + Payment + Journal...)
-  // doesn't produce a meaningful number since they're different kinds of
-  // economic events. Count is meaningful regardless of the type mix.
-  Map<String, int> _buildVoucherMonthCounts() {
-    final countByMonth = <String, int>{};
-    for (final t in _chartTransactionsList) {
-      final date = DateTime.tryParse(t.vchdate);
-      if (date == null) continue;
-      final monthLabel = DateFormat('MMMM yyyy').format(date);
-      countByMonth[monthLabel] = (countByMonth[monthLabel] ?? 0) + 1;
-    }
-    return countByMonth;
-  }
 
   // Compact dropdown for the header - a small icon-labelled pill instead
   // of a full-width bordered box, so the two dropdowns can sit side by
@@ -1042,6 +633,7 @@ class _TransactionsPageState extends State<Transactions>
   }
 
   Widget _buildTransactionsTabRow() {
+    final isTrendTabSelected = _s.isTrendTabSelected;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(
@@ -1049,10 +641,10 @@ class _TransactionsPageState extends State<Transactions>
           Expanded(
             child: _buildTransTabButton(
               label: 'Overview',
-              isSelected: _isTrendTabSelected,
+              isSelected: isTrendTabSelected,
               onTap: () {
-                setState(() => _isTrendTabSelected = true);
-                _ensureChartData();
+                _notifier.setTrendTabSelected(true);
+                _notifier.ensureChartData();
               },
             ),
           ),
@@ -1060,8 +652,8 @@ class _TransactionsPageState extends State<Transactions>
           Expanded(
             child: _buildTransTabButton(
               label: 'Transactions',
-              isSelected: !_isTrendTabSelected,
-              onTap: () => setState(() => _isTrendTabSelected = false),
+              isSelected: !isTrendTabSelected,
+              onTap: () => _notifier.setTrendTabSelected(false),
             ),
           ),
         ],
@@ -1120,802 +712,16 @@ class _TransactionsPageState extends State<Transactions>
     );
   }
 
-  Future<void> fetchParentData(final String ledGroups) async {
-    return _fetchParentDataTallyApi();
-  }
-
-  /// Populates [spinner_list] from `/voucher-types` (the same master list
-  /// `DashboardClicked`'s filter dropdown already uses), appended after the
-  /// existing "All Transactions" entry so that stays the default selection.
-  Future<void> _fetchParentDataTallyApi() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final voucherTypes = await fetchAllPages(
-        (page) => TallyApiClient().getForCompany(
-          '/voucher-types?page=$page&limit=100',
-        ),
-      );
-      _voucherTypeMasterIdByName.clear();
-      for (final row in voucherTypes) {
-        final name = row['name']?.toString();
-        if (name != null && name.isNotEmpty && !spinner_list.contains(name)) {
-          spinner_list.add(name);
-          final masterId = row['masterId'];
-          if (masterId is int) _voucherTypeMasterIdByName[name] = masterId;
-        }
-      }
-      setState(() {
-        _selectedtransaction = spinner_list[0];
-      });
-      fetchtransactionsData();
-    } on ApiException catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      showAppMessage(context, e.message);
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-  }
-
-  void _handleDate(String value) {
-    setState(() {
-      _selecteddate = value;
-    });
-
-    if (_selecteddate == "Today") {
-      DateTime currentDate = DateTime.now();
-      String startMonth = DateFormat('MMM').format(currentDate);
-      String sdf = DateFormat(
-        'MM',
-      ).format(currentDate); // converting month into string
-
-      String startDay = DateFormat('dd').format(currentDate);
-      int startYear = currentDate.year;
-
-      String endMonth = DateFormat('MMM').format(currentDate);
-      String sdfEnd = DateFormat('MM').format(currentDate);
-
-      String endDay = DateFormat('dd').format(currentDate);
-      int endYear = currentDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-    } else if (_selecteddate == "Year To Date") {
-      DateTime now = DateTime.now();
-      DateTime startDate = DateTime(
-        now.year,
-        1,
-        1,
-      ); // Start of the current year
-      DateTime endDate = DateTime(now.year, now.month, now.day); // Today's date
-
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(startDate).substring(3, 6);
-      String sdf = DateFormat('MM').format(startDate);
-
-      String startDay = dateFormat.format(startDate).substring(0, 2);
-      int startYear = startDate.year;
-
-      String endMonth = dateFormat.format(endDate).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(endDate);
-
-      String endDay = dateFormat.format(endDate).substring(0, 2);
-      int endYear = endDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Yesterday") {
-      DateTime yesterday = DateTime.now().subtract(Duration(days: 1));
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yesterday); // converting month into string
-
-      String startDay = dateFormat.format(yesterday).substring(0, 2);
-      int startYear = yesterday.year;
-
-      String endMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(yesterday);
-
-      String endDay = dateFormat.format(yesterday).substring(0, 2);
-      int endYear = yesterday.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-    } else if (_selecteddate == "This Month") {
-      DateTime now = DateTime.now();
-      DateTime startOfMonth = DateTime(now.year, now.month, 1);
-      DateTime endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-      String startMonth = DateFormat('MMM').format(startOfMonth);
-      String sdf = DateFormat(
-        'MM',
-      ).format(startOfMonth); // converting month into string
-      String startDay = DateFormat('dd').format(startOfMonth);
-      int startYear = startOfMonth.year;
-
-      String endMonth = DateFormat('MMM').format(endOfMonth);
-      String sdfEnd = DateFormat('MM').format(endOfMonth);
-      String endDay = DateFormat('dd').format(endOfMonth);
-      int endYear = endOfMonth.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Month") {
-      var calendarLastMonthStart = DateTime.now();
-      var calendarLastMonthEnd = DateTime.now();
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month - 1,
-        1,
-      );
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month,
-        1,
-      );
-      calendarLastMonthEnd = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month + 1,
-        0,
-      );
-
-      var startMonth = DateFormat('MMM').format(calendarLastMonthStart);
-      var sdf = DateFormat('MM').format(calendarLastMonthStart);
-      var startDay = DateFormat('dd').format(calendarLastMonthStart);
-      var startYear = calendarLastMonthStart.year;
-
-      var endMonth = DateFormat('MMM').format(calendarLastMonthEnd);
-      var sdfEnd = DateFormat('MM').format(calendarLastMonthEnd);
-      var endDay = DateFormat('dd').format(calendarLastMonthEnd);
-      var endYear = calendarLastMonthEnd.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "This Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year, 1, 1);
-      DateTime yearEnd = DateTime(today.year, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year - 1, 1, 1);
-      DateTime yearEnd = DateTime(today.year - 1, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchMainData();
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Custom Date") {
-      // _startDate/_endDate are already loaded from the same 'startdate'/
-      // 'enddate' prefs Dashboard saved (see _initSharedPreferences) - use
-      // that range directly instead of forcing the native date-range
-      // picker open every time this runs. The picker should only appear
-      // when the user explicitly taps the date-range pill (_selectDateRange),
-      // not automatically on load - that was popping up unprompted and,
-      // if dismissed without picking, crashed on a force-unwrapped null.
-      setState(() {
-        _isTextEnabled = true;
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-
-        DateTime start = _startDate;
-        DateTime end = _endDate;
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat('MM').format(start);
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-      });
-
-      fetchMainData();
-    }
-  }
-
-  late String PostDatedTransactionsHolder;
-
-  void fetchMainData() {
-    if (_selectedtransaction == "All Transactions") {
-      String parent = "";
-      fetchall_transactions(startDateString, endDateString, parent, 'amount');
-    } else {
-      String parent = _selectedtransaction;
-      fetchall_transactions(startDateString, endDateString, parent, 'amount');
-    }
-  }
-
-  void fetchtransactionsData() {
-    _handleDate(_selecteddate);
-  }
-
-  Future<void> fetchall_transactions(
-    final String startdate,
-    final String enddate,
-    final String vchname,
-    final String orderby,
-  ) async {
-    setState(() {
-      transactions_count = "0";
-      _isLoading = true;
-      _isAllList = false;
-      isClicked_transaction = true;
-      isVisibleNoDataFound = false;
-      isSortVisible = false;
-    });
-
-    filteredItems_transactions.clear();
-    _quickFilter = 'All';
-
-    transactions_list.clear();
-
-    int myGen = _txRequestGen;
-    try {
-      myGen = await _fetchAllTransactionsTallyApi(startdate, enddate, vchname);
-    } catch (e) {
-      if (myGen == _txRequestGen) {
-        setState(() {
-          _isAllList = false;
-          _isLoading = false;
-        });
-      }
-      print(e);
-    }
-
-    // A newer date-range/voucher-type selection superseded this call while
-    // it was in flight - let that newer call's own tail update the UI
-    // instead of this stale one clobbering it (see _txRequestGen's doc
-    // comment).
-    if (myGen != _txRequestGen) return;
-
-    setState(() {
-      if (transactions_list.isEmpty) {
-        transactions_count = "0";
-        _isAllList = false;
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        _applySelectedSort();
-      }
-      _isLoading = false;
-    });
-  }
-
-  /// Applies whichever sort option is currently selected - extracted out
-  /// of [fetchall_transactions]'s tail so incremental page loads (which
-  /// don't go through that tail) can re-sort the growing list too.
-  void _applySelectedSort() {
-    switch (selectedSortOption) {
-      case 'Default':
-        sortByDefault();
-        break;
-      case 'Newest to Oldest':
-        sortByDateHightoLow();
-        break;
-      case 'Oldest to Newest':
-        sortByDateLowtoHigh();
-        break;
-      case 'A->Z':
-        sortByAlphabetAtoZ();
-        break;
-      case 'Z->A':
-        sortByAlphabetZtoA();
-        break;
-      case 'Amount High to Low':
-        sortByAmountHightoLow();
-        break;
-      case 'Amount Low to High':
-        sortByAmountLowtoHigh();
-        break;
-    }
-  }
-
-  /// Reapplies the current search/quick-filter and sort over whatever's in
-  /// `transactions_list` right now - called after every incremental page
-  /// load (see `_loadNextTransactionsPage`) so the visible list stays
-  /// consistent as more pages arrive.
-  void _reapplyTransactionDisplay() {
-    _applyTransactionFilters();
-    _applySelectedSort();
-  }
-
-  /// Maps raw tally-api voucher rows to [transactions] - same
-  /// simplification as `DashboardClicked`'s equivalent functions: the
-  /// displayed "ledger" is the voucher's first ledger entry, and `amount`
-  /// is the sum of its debit-side entries (see
-  /// `_fetchSalesPurchaseCashTallyApi`'s doc comment for why), kept
-  /// consistent with how that screen already renders tally-api vouchers.
-  /// A voucher with no ledger entries at all is skipped.
-  List<transactions> _mapVouchersToTransactions(
-    List<Map<String, dynamic>> vouchers,
-  ) {
-    final rows = <transactions>[];
-    for (final voucher in vouchers) {
-      final entries =
-          (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-          const [];
-      if (entries.isEmpty) continue;
-
-      final debitTotal = entries
-          .where((e) => e['isDebit'] == true)
-          .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-
-      rows.add(
-        transactions.fromJson({
-          'ledger': entries.first['ledgerName'] ?? '',
-          'vchname': voucher['voucherTypeName'] ?? '',
-          'vchno': voucher['number'] ?? '',
-          'amount': debitTotal,
-          'vchdate': voucher['date'] ?? '',
-          'isoptional': voucher['isOptional'] ?? false,
-          'ispostdated': voucher['isPostDated'] ?? false,
-          'refno': voucher['reference'] ?? '',
-          'refdate': voucher['referenceDate'] ?? '',
-          'masterid': voucher['masterId'] ?? '',
-        }),
-      );
-    }
-    return rows;
-  }
-
-  /// [_mapVouchersToTransactions] - the raw page is already server-side
-  /// filtered to [from]..[to] via `VoucherRepository.listPage`'s `from`/`to`
-  /// params, so [from]/[to] here only guard against a voucher whose `date`
-  /// fails to parse at all (defensive, not a real filter pass any more).
-  List<transactions> _filterMapVoucherPage(
-    List<Map<String, dynamic>> rawVouchers,
-    DateTime from,
-    DateTime to,
-  ) {
-    final inRange = rawVouchers.where((v) {
-      final date = DateTime.tryParse(v['date'] as String? ?? '');
-      if (date == null) return false;
-      return !date.isBefore(DateTime(from.year, from.month, from.day)) &&
-          !date.isAfter(DateTime(to.year, to.month, to.day, 23, 59, 59));
-    });
-    return _mapVouchersToTransactions(inRange.toList());
-  }
-
-  /// tally-api path: starts (or restarts, e.g. on date-range/voucher-type
-  /// change) forward incremental paging over `/vouchers`, now that it
-  /// accepts `from`/`to` server-side - the result set page 1 returns is
-  /// already exactly this date range, so no auto-chaining/backward-walking
-  /// is needed any more (see this class's paging-state doc comment).
-  ///
-  /// Bumps [_txRequestGen] and stamps every mutation below with the
-  /// generation active when this call started, so a still-in-flight older
-  /// fetch (e.g. the initial load kicked off from `initState` with a
-  /// leftover date range, superseded moments later by the user picking a
-  /// different one) can never land its pages after this newer fetch has
-  /// already started/finished - see that field's doc comment.
-  /// Returns the request generation this call was assigned, so the caller
-  /// ([fetchall_transactions]) can tell whether it's still the active one
-  /// before running its own tail.
-  Future<int> _fetchAllTransactionsTallyApi(
-    final String startdate,
-    final String enddate,
-    final String vchname,
-  ) async {
-    final myGen = ++_txRequestGen;
-    final from = parseCompactDate(startdate);
-    final to = parseCompactDate(enddate);
-    final voucherTypeMasterId = (vchname.isEmpty || vchname == 'All Transactions')
-        ? null
-        : _voucherTypeMasterIdByName[vchname];
-
-    _txFrom = from;
-    _txTo = to;
-    _txVoucherTypeMasterId = voucherTypeMasterId;
-    _isChartDataStale = true;
-
-    final first = await VoucherRepository.instance.listPage(
-      page: 1,
-      limit: _txPageLimit,
-      voucherTypeMasterId: voucherTypeMasterId,
-      from: from,
-      to: to,
-    );
-    if (myGen != _txRequestGen) return myGen; // superseded while awaiting
-
-    _txTotalPages = first.totalPages;
-    transactions_list.addAll(_filterMapVoucherPage(first.items, from, to));
-    _txCursor = _txTotalPages > 1 ? 2 : null;
-
-    isVisibleNoDataFound = false;
-    filterPostDatedTransactions();
-    _reapplyTransactionDisplay();
-
-    setState(() {
-      transactions_count = filteredItems_transactions.length.toString();
-      _isAllList = true;
-      _isLoading = false;
-    });
-    return myGen;
-  }
-
-  /// Loads one more page (30 rows) walking forward from page 2 onward
-  /// within the already date/voucher-type-filtered server-side result set,
-  /// appending matches to `transactions_list`. Called by the
-  /// scroll-near-bottom listener. Captures [_txRequestGen] at call time and
-  /// discards the result if a newer fetch has since started (see that
-  /// field's doc comment) - otherwise a slow page load for a since-
-  /// abandoned date range could still land after the user switched filters.
-  Future<void> _loadNextTransactionsPage({bool silent = false}) async {
-    if (_isLoadingMoreTx) return;
-    final myGen = _txRequestGen;
-    final page = _txCursor;
-    if (page == null || page > _txTotalPages) {
-      _txCursor = null; // exhausted
-      return;
-    }
-
-    if (!silent) setState(() => _isLoadingMoreTx = true);
-    try {
-      final result = await VoucherRepository.instance.listPage(
-        page: page,
-        limit: _txPageLimit,
-        voucherTypeMasterId: _txVoucherTypeMasterId,
-        from: _txFrom,
-        to: _txTo,
-      );
-      if (myGen != _txRequestGen) {
-        // Superseded while awaiting - don't apply this page, but still
-        // clear the loading flag the newer fetch didn't set (it started
-        // its own, unrelated to this one).
-        if (!silent) setState(() => _isLoadingMoreTx = false);
-        return;
-      }
-
-      transactions_list.addAll(
-        _filterMapVoucherPage(result.items, _txFrom!, _txTo!),
-      );
-      _txCursor = page + 1 <= _txTotalPages ? page + 1 : null;
-
-      if (!silent) {
-        filterPostDatedTransactions();
-        _reapplyTransactionDisplay();
-        setState(() {
-          _isLoadingMoreTx = false;
-          transactions_count = filteredItems_transactions.length.toString();
-          isVisibleNoDataFound = transactions_list.isEmpty && _txCursor == null;
-        });
-      }
-    } catch (e) {
-      if (!silent && myGen == _txRequestGen) {
-        setState(() => _isLoadingMoreTx = false);
-      }
-    }
-  }
-
   void _onTransactionsScroll() {
-    if (_isTrendTabSelected) return;
-    if (_isLoadingMoreTx) return;
-    if (_txCursor == null) return;
+    final vm = _s;
+    if (vm.isTrendTabSelected) return;
+    if (vm.isLoadingMoreTx) return;
+    if (!_notifier.canLoadMore) return;
     if (!_scrollFabController.hasClients) return;
     final position = _scrollFabController.position;
     if (position.pixels >= position.maxScrollExtent - 400) {
-      _loadNextTransactionsPage();
+      _notifier.loadNextTransactionsPage(_currentSearchQuery);
     }
-  }
-
-  /// Ensures `_chartTransactionsList` reflects the CURRENT date range/
-  /// voucher-type filter, fully (see this class's paging-state doc comment
-  /// for why the trend chart can't just reuse the incrementally-loaded
-  /// `transactions_list`). No-op if already fresh.
-  Future<void> _ensureChartData() async {
-    if (!_isChartDataStale) return;
-    if (_txFrom == null || _txTo == null) return;
-
-    setState(() => _isLoading = true);
-    try {
-      final vouchers = await VoucherRepository.instance.listInRange(
-        from: _txFrom!,
-        to: _txTo!,
-        voucherTypeMasterId: _txVoucherTypeMasterId,
-      );
-      setState(() {
-        _chartTransactionsList = _mapVouchersToTransactions(vouchers);
-        _isChartDataStale = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name') ?? '';
-      username = prefs.getString('username');
-      datetype = prefs.getString('datetype') ?? date_range.first;
-      decimal = prefs?.getInt('decimalplace') ?? 2;
-
-      String? currencyCode = '';
-
-      try {
-        currencyCode = prefs.getString('currencycode');
-        if (currencyCode == null) {
-          currencyCode = 'AED';
-        }
-      } catch (e) {
-        if (currencyCode == null) {
-          currencyCode = 'AED';
-        }
-      }
-      currencyFormat = new NumberFormat();
-
-      try {
-        if (currencyCode == 'INR' ||
-            currencyCode == 'EUR' ||
-            currencyCode == 'USD' ||
-            currencyCode == 'PKR') {
-          currencyFormat = NumberFormat('#,##0');
-          NumberFormat format = NumberFormat.simpleCurrency(
-            locale: 'en',
-            name: currencyCode,
-          );
-          currencysymbol = format.currencySymbol;
-        } else {
-          NumberFormat format = NumberFormat.currency(
-            locale: 'en',
-            name: currencyCode,
-          );
-          currencysymbol = format.currencySymbol;
-          currencyFormat = NumberFormat('#,##0');
-        }
-      } catch (e) {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-      _currencyCode = currencyCode ?? 'AED';
-
-      PostDatedTransactionsHolder =
-          prefs.getString("postdatedtransactions") ?? "True";
-
-      if (PostDatedTransactionsHolder == "True") {
-        setState(() {
-          isVisiblePostdatedTransaction = true;
-        });
-      } else {
-        setState(() {
-          isVisiblePostdatedTransaction = false;
-        });
-      }
-
-      _selecteddate = datetype;
-
-      if (_selecteddate == 'Custom Date') {
-        // Dashboard can leave 'datetype'='Custom Date' saved without a
-        // matching startdate/enddate (e.g. the range picker was
-        // cancelled) - DateTime.parse(...)! on a null/empty string threw
-        // here, uncaught, aborting the rest of this setState (and every
-        // fetch that follows it), which is why the whole screen loaded
-        // nothing. Fall back to a sensible default range instead.
-        _startDate =
-            DateTime.tryParse(prefs.getString('startdate') ?? '') ??
-            DateTime.now().subtract(const Duration(days: 30));
-        _endDate =
-            DateTime.tryParse(prefs.getString('enddate') ?? '') ??
-            DateTime.now();
-
-        DateTime start = _startDate;
-        DateTime end = _endDate;
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-      }
-    });
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-    fetchParentData(ledgroups);
   }
 
   @override
@@ -1923,7 +729,6 @@ class _TransactionsPageState extends State<Transactions>
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
     _scrollFabController.addListener(_onTransactionsScroll);
-    _initSharedPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
@@ -1938,6 +743,29 @@ class _TransactionsPageState extends State<Transactions>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(transactionsNotifierProvider);
+    final vm = _s;
+    final selectedSortOption = vm.selectedSortOption;
+    final startdate_text = vm.startDateText;
+    final enddate_text = vm.endDateText;
+    final startDateString = vm.startDateString;
+    final endDateString = vm.endDateString;
+    final _isTextEnabled = vm.isTextEnabled;
+    final _selecteddate = vm.selectedDate;
+    final filteredItems_transactions = vm.filteredItemsTransactions;
+    final transactions_count = vm.transactionsCount;
+    final _selectedtransaction = vm.selectedTransaction;
+    final spinner_list = vm.spinnerList;
+    final transactions_list = vm.transactionsList;
+    final isVisibleNoDataFound = vm.isVisibleNoDataFound;
+    final isSortVisible = vm.isSortVisible;
+    final _isLoading = vm.isLoading;
+    final _isLoadingMoreTx = vm.isLoadingMoreTx;
+    final _isTrendTabSelected = vm.isTrendTabSelected;
+    final currencysymbol = vm.currencySymbol;
+    final _currencyCode = vm.currencyCode;
+    final decimal = vm.decimal;
+    final company = vm.company;
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.transactions,
@@ -2053,7 +881,7 @@ class _TransactionsPageState extends State<Transactions>
                         onTap: () async {
                           Navigator.pop(context);
                           if (transactions_list.isEmpty) return;
-                          final items = await _fullTransactionsForExport();
+                          final items = await _notifier.fullTransactionsForExport();
                           if (items.isEmpty) return;
                           generateAndSharePDF_Transactions(items);
                         },
@@ -2083,7 +911,7 @@ class _TransactionsPageState extends State<Transactions>
                           Navigator.pop(context);
 
                           if (transactions_list.isEmpty) return;
-                          final items = await _fullTransactionsForExport();
+                          final items = await _notifier.fullTransactionsForExport();
                           if (items.isEmpty) return;
                           generateAndShareCSV_Transactions(items);
                         },
@@ -2167,9 +995,10 @@ class _TransactionsPageState extends State<Transactions>
                                 items: date_range,
                                 itemLabel: (item) => item.toString(),
                                 onChanged: (value) {
-                                  setState(() {
-                                    _handleDate(value);
-                                  });
+                                  _notifier.handleDate(
+                                    value,
+                                    _currentSearchQuery,
+                                  );
                                 },
                               ),
                             ),
@@ -2181,10 +1010,10 @@ class _TransactionsPageState extends State<Transactions>
                                 items: spinner_list,
                                 itemLabel: (item) => item,
                                 onChanged: (newValue) {
-                                  setState(() {
-                                    _selectedtransaction = newValue;
-                                  });
-                                  fetchtransactionsData();
+                                  _notifier.selectTransactionType(
+                                    newValue!,
+                                    _currentSearchQuery,
+                                  );
                                 },
                               ),
                             ),
@@ -2252,8 +1081,8 @@ class _TransactionsPageState extends State<Transactions>
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: VoucherOverviewChart(
-                        totalsByTypeAndMonth: _buildVoucherStackedTotals(),
-                        countByMonth: _buildVoucherMonthCounts(),
+                        totalsByTypeAndMonth: _notifier.buildVoucherStackedTotals(),
+                        countByMonth: _notifier.buildVoucherMonthCounts(),
                         palette: _voucherTrendPalette,
                         currencysymbol: currencysymbol,
                         currencyCode: _currencyCode,
@@ -2285,8 +1114,10 @@ class _TransactionsPageState extends State<Transactions>
                                 height: 46,
                                 child: TextField(
                                   controller: searchController,
-                                  onChanged: (value) =>
-                                      _applyTransactionFilters(),
+                                  onChanged: (value) => _notifier
+                                      .applyTransactionFilters(
+                                        _currentSearchQuery,
+                                      ),
                                   style: GoogleFonts.poppins(
                                     color: Theme.of(
                                       context,
