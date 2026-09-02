@@ -1,12 +1,11 @@
 import 'dart:io';
 import 'package:FincoreGo/Items.dart';
-import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'PendingSalesOrderEntry.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -16,18 +15,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
-import 'api/api_exception.dart';
-import 'api/ledger_repository.dart';
-import 'api/monthly_bucket_helper.dart';
-import 'api/pagination_helper.dart';
-import 'api/stock_repository.dart';
-import 'api/tally_api_client.dart';
-import 'api/voucher_entry_repository.dart';
+import 'providers/sales_order_registration_notifier.dart';
 
-class SalesOrderRegistration extends StatefulWidget {
+class SalesOrderRegistration extends ConsumerStatefulWidget {
   const SalesOrderRegistration({Key? key}) : super(key: key);
   @override
-  _SalesOrderRegistrationPageState createState() =>
+  ConsumerState<SalesOrderRegistration> createState() =>
       _SalesOrderRegistrationPageState();
 }
 
@@ -135,43 +128,25 @@ class LedgerEntry {
   }
 }
 
-class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
+class _SalesOrderRegistrationPageState
+    extends ConsumerState<SalesOrderRegistration>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = true,
-      isVisibleNoUserFound = false;
-
-  bool _isInitialDataLoaded = false;
+  SalesOrderRegistrationNotifier get _notifier =>
+      ref.read(salesOrderRegistrationNotifierProvider.notifier);
+  SalesOrderRegistrationState get _s =>
+      ref.read(salesOrderRegistrationNotifierProvider);
 
   bool isVchEditable = false; // state variable
 
   TextEditingController _itemController = TextEditingController();
   TextEditingController _partyLedgerController = TextEditingController();
 
-  double ledgerVatAmount = 0,
-      itemsVatAmount = 0,
-      totalVatAmount = 0,
-      totalAmount = 0;
-
-  double totalPriceOfItems = 0,
-      totalAmountForVatAppEntries = 0,
-      totalAmountOfLedgers = 0;
   final FocusNode _textFieldFocusNodeNarration = FocusNode();
 
   late AnimationController _animationController;
   late Animation<double> _animation;
 
-  bool get isUniGasSerial {
-    final currentSerial = serial_no?.trim() ?? '';
-
-    // 👇 put only that one serial here
-
-    return currentSerial == uniGasSerialNumber;
-  }
+  bool get isUniGasSerial => _notifier.isUniGasSerial;
 
   void _confirmLedgerDeletion(
     BuildContext context,
@@ -216,153 +191,10 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     );
   }
 
-  String generateNextVchNo(List<String> vchnos) {
-    if (vchnos.isEmpty) return "1";
-
-    Map<String, List<Map<String, dynamic>>> patternGroups = {};
-
-    for (String vch in vchnos) {
-      List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
-
-      if (matches.isNotEmpty) {
-        RegExpMatch selectedMatch = matches.last;
-
-        // 🔥 Ignore year like 2026
-        if (matches.length > 1) {
-          for (int i = matches.length - 1; i >= 0; i--) {
-            String val = matches[i].group(0)!;
-            int num = int.tryParse(val) ?? 0;
-
-            if (!(val.length == 4 && num >= 2000 && num <= 2099)) {
-              selectedMatch = matches[i];
-              break;
-            }
-          }
-        }
-
-        String numberPart = selectedMatch.group(0)!;
-        int number = int.tryParse(numberPart) ?? 0;
-
-        String prefix = vch.substring(0, selectedMatch.start);
-        String suffix = vch.substring(selectedMatch.end);
-
-        String patternKey = prefix + "#" + suffix;
-
-        patternGroups.putIfAbsent(patternKey, () => []);
-
-        bool exists = patternGroups[patternKey]!.any(
-          (e) => e["number"] == number,
-        );
-
-        if (!exists) {
-          patternGroups[patternKey]!.add({
-            "original": vch,
-            "number": number,
-            "length": numberPart.length,
-          });
-        }
-      }
-    }
-
-    if (patternGroups.isEmpty) {
-      return vchnos.last + "1";
-    }
-
-    // ✅ Dominant pattern
-    String selectedPattern = patternGroups.entries
-        .reduce((a, b) => a.value.length > b.value.length ? a : b)
-        .key;
-
-    List<Map<String, dynamic>> selectedList = patternGroups[selectedPattern]!;
-
-    // 🔥 STEP 1: Extract & sort numbers
-    List<int> numbers = selectedList.map((e) => e["number"] as int).toList();
-    numbers = numbers.toSet().toList();
-
-    numbers.sort();
-
-    int length = selectedList.first["length"];
-
-    // 🔥 STEP 2: Find missing number (gap)
-    int expected = numbers.first;
-
-    int nextNumber = numbers.last + 1; // fallback
-
-    for (int num in numbers) {
-      if (num != expected) {
-        nextNumber = expected;
-        break;
-      }
-      expected++;
-    }
-
-    // 🔥 STEP 3: Format number
-    String newNumber = nextNumber.toString().padLeft(length, '0');
-
-    // reconstruct
-    List<String> parts = selectedPattern.split("#");
-    String prefix = parts[0];
-    String suffix = parts[1];
-
-    return prefix + newNumber + suffix;
-  }
-
   void _deleteLedger(int index) {
-    setState(() {
-      ledgerEntries.removeAt(index);
-
-      // Calculate the total amount for VAT-applicable entries
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      // Calculate the total amount of ledgers
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      // Calculate VAT if applicable
-      if (_selectedvatledger != 'Not Applicable') {
-        double vatPerc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vatPerc;
-
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-
-      // Calculate the total amount
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedTotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedTotal.toString();
-
-      isVisibleLedgerHeading = ledgerEntries.isNotEmpty;
-    });
+    _notifier.deleteLedger(index);
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
   }
 
   void _confirmItemDeletion(BuildContext context, int index, String itemname) {
@@ -405,61 +237,9 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   void _deleteSaleItem(int index) {
-    setState(() {
-      saleItems.removeAt(index);
-
-      // Calculate the total price of items
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (item.itemPrice * double.parse(item.itemQuantity));
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedTotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedTotal.toString();
-
-      isVisibleItemHeading = saleItems.isNotEmpty;
-    });
+    _notifier.deleteSaleItem(index);
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
   }
 
   String formatitemKey(int key) {
@@ -469,6 +249,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   String convertAmountToWords(num amount) {
+    final decimal = _s.decimal;
+    final currencycode = _s.currencyCode;
     if (amount == null) return "Invalid input";
 
     List<String> units = [
@@ -653,8 +435,6 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     return words.trim();
   }
 
-  bool isVisibleItemHeading = false, isVisibleLedgerHeading = false;
-
   bool isVisibleUnit = true;
 
   final _formKey = GlobalKey<FormState>();
@@ -663,48 +443,20 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
 
   GlobalKey<FormState> _itemFormkey = GlobalKey<FormState>();
 
-  double roundedtotalVatAmount = 0.0;
-
-  double roundedtotalAmount = 0.0;
-
   GlobalKey<FormState> _ledgerFormkey = GlobalKey<FormState>();
-
-  List<String> salesledger_data = [];
-
-  int? decimal = 2;
-  late List<String> vchtypenamedata = [];
-  late List<String> partyledgerdata = [];
-  late List<String> vatledgerdata = [];
-
-  List<dynamic> itemdata = [];
-
-  double vatperc = 0.0;
-
-  List<String> locationsdata = []; // Store the locations here
 
   late String selectedLocation = ''; // Store the selected location here
 
   List<Unit> unitdata = [];
 
-  List<Map<String, dynamic>> ledgerdata = [];
-
-  String user_email_fetched = "", token = '';
-
-  String name = "", email = "", saledatestring = '', saledatetxt = '';
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
 
-  late SharedPreferences prefs;
-
-  dynamic _selectedledger,
-      _selecteditem,
-      _selectedunit,
-      _selectedsalesledger,
-      _selectedvchtypename,
-      _selectedpartyledger,
-      _selectedvatledger;
+  // Dialog-composition-only fields (the "Add Ledger"/single-item-add
+  // dialogs' own currently-being-typed selection) - meaningless outside an
+  // open dialog, same treatment as this screen's `TextEditingController`s.
+  dynamic _selectedledger, _selecteditem, _selectedunit;
 
   late final TextEditingController controller_narration =
       TextEditingController();
@@ -713,7 +465,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       TextEditingController();
 
   String formatAmountInvoice(String amount) {
-    int? decimal = prefs?.getInt('decimalplace') ?? 2;
+    int? decimal = _s.decimal ?? 2;
 
     if (amount == "null" || amount.isEmpty) {
       amount = "0";
@@ -738,41 +490,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       _isFocused_totalamt = false,
       _isFocused_orderno = false;
 
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
-  late DateTime saledate, refdate;
-  List<String> vchnos = [];
-
-  // --- tally-api migration: masterId lookups -------------------------------
-  // The legacy `getSalesData`/`entry/create` endpoints spoke Tally's own
-  // XML-tag names (LEDGERNAME/STOCKITEMNAME/GODOWNNAME/...) end-to-end, so
-  // the UI never needed a numeric id for anything - it just round-tripped
-  // display names. tally-api's `voucher-entries` write endpoint needs
-  // `ledgerMasterId`/`stockItemMasterId`/`unitMasterId`/`godownMasterId`/
-  // `voucherTypeMasterId`/`currencyMasterId` instead, so these maps (built
-  // once in loadData(), from the same master lists already fetched for the
-  // dropdowns) resolve a selected display name back to its masterId at
-  // submit time, without changing any of the existing name-based dropdown/
-  // validation logic above.
-  final TallyApiClient _tallyApiClient = TallyApiClient();
-  final Map<String, int> _ledgerMasterIdByName = {};
-  final Map<String, int> _godownMasterIdByName = {};
-  final Map<String, int> _voucherTypeMasterIdByName = {};
-  int? _currencyMasterId;
-
   double selectedMultiplier = 0.0;
-
-  final DateFormat _dateFormat = DateFormat('yyyyMMdd');
-
-  List<SaleItem> saleItems = [];
-  List<LedgerEntry> ledgerEntries = [];
-  String currencycode = '';
 
   final TextEditingController itemQuantityController = TextEditingController();
   final TextEditingController itemRateController = TextEditingController();
@@ -782,21 +500,12 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   final TextEditingController controller_orderno = TextEditingController();
 
   final TextEditingController _vchnoController = TextEditingController();
-  String errorMessageVchNo = '';
-  int? unitValue;
-
-  late DateTime now = DateTime.now();
-
-  // Current year start date
-  late DateTime yearStartDate = DateTime(now.year, 1, 1);
-
-  // Current year end date
-  late DateTime yearEndDate = DateTime(now.year, 12, 31);
 
   Future<void> _selectDateRangeVchNo(BuildContext context) async {
+    final vm = _s;
     final initialDateRange = DateTimeRange(
-      start: yearStartDate,
-      end: yearEndDate,
+      start: vm.yearStartDate,
+      end: vm.yearEndDate,
     );
 
     DateTimeRange? selectedDateRange = await showDateRangePicker(
@@ -828,35 +537,36 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     );
 
     if (selectedDateRange != null && selectedDateRange != initialDateRange) {
-      setState(() {
-        yearStartDate = selectedDateRange.start;
-        yearEndDate = selectedDateRange.end;
-      });
+      _notifier.setVchNoDateRange(
+        selectedDateRange.start,
+        selectedDateRange.end,
+      );
 
-      fetchvchnos(_selectedvchtypename);
+      fetchvchnos(_s.selectedVchTypeName);
     }
   }
 
   void checkVchNoExistence(String vchNo) {
-    if (vchNo.isEmpty || vchNo == '') {
-      setState(() {
-        errorMessageVchNo = 'Voucher No. cannot be empty';
-      });
-    } else {
-      if (vchnos.contains(vchNo)) {
-        setState(() {
-          errorMessageVchNo =
-              'Voucher no: $vchNo against $_selectedvchtypename already exists';
-        });
-      } else {
-        setState(() {
-          errorMessageVchNo = '';
-        });
-      }
-    }
+    _notifier.checkVchNoExistence(vchNo);
   }
 
   Future<void> generateSalesOrderPDF() async {
+    final vm = _s;
+    final saleItems = vm.saleItems;
+    final ledgerEntries = vm.ledgerEntries;
+    final decimal = vm.decimal;
+    final company = vm.company;
+    final _selectedpartyledger = vm.selectedPartyLedger;
+    final saledatestring = vm.saledatestring;
+    final saledatetxt = vm.saledatetxt;
+    final currencycode = vm.currencyCode;
+    final totalVatAmount = vm.totalVatAmount;
+    final roundedtotalAmount = vm.roundedTotalAmount;
+    final totalAmount = vm.totalAmount;
+    final vatperc = vm.vatperc;
+    final vatledgerdata = vm.vatLedgerData;
+    final _selectedvatledger = vm.selectedVatLedger;
+
     final pdf = pw.Document();
 
     int totalQuantity = 0;
@@ -2309,134 +2019,28 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     // its suggestions overlay back open right after reset.
     FocusManager.instance.primaryFocus?.unfocus();
 
+    _resetAfterSave();
+  }
+
+  /// Shared post-save reset (identical in the original between
+  /// `generateSalesOrderPDF()`'s tail and `showSalesOrderDialog`'s
+  /// "No, Thanks" button) - delegates the data-field reset to the notifier,
+  /// then resets this screen's own dialog-composition fields/controllers
+  /// from the resulting state, matching the original's single combined
+  /// `setState` block.
+  void _resetAfterSave() {
+    _notifier.resetAfterSave();
+    final vm = _s;
     setState(() {
-      controller_narration.clear();
-      controller_orderno.clear();
-
-      _textFieldFocusNodeNarration.unfocus(); // Unfocus the TextField
-
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-
-      _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
-      fetchvchnos(_selectedvchtypename);
-      _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
-
-      _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
-
-      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-
-      _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
-
-      _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
+      _selectedledger = vm.ledgerData.isNotEmpty ? vm.ledgerData[0]['name'] : null;
+      _selecteditem = '${(vm.itemData.isNotEmpty ? vm.itemData[0]['name'] : '')}';
       _itemController.text = _selecteditem;
-      if (locationsdata.isNotEmpty) {
-        selectedLocation = locationsdata[0];
+      if (vm.locationsData.isNotEmpty) {
+        selectedLocation = vm.locationsData[0];
         isVisibleLocation = true;
       } else {
         isVisibleLocation = false;
       }
-      _updateUnitDropdown(_selecteditem);
-
-      saleItems.clear();
-      ledgerEntries.clear();
-
-      // making sales list empty and setting values
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (item.itemPrice * double.parse(item.itemQuantity));
-      });
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (saleItems.isEmpty) {
-        isVisibleItemHeading = false;
-      } else {
-        isVisibleItemHeading = true;
-      }
-      // making ledger list empty and setting values
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (ledgerEntries.isEmpty) {
-        isVisibleLedgerHeading = false;
-      } else {
-        isVisibleLedgerHeading = true;
-      }
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedtotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedtotal.toString();
       _isFocused_vchno = false;
       _isFocused_item = false;
       _isFocused_unit = false;
@@ -2446,6 +2050,14 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       _isFocused_vatamt = false;
       _isFocused_orderno = false;
     });
+    _updateUnitDropdown(_selecteditem);
+    controller_narration.clear();
+    controller_orderno.clear();
+    _textFieldFocusNodeNarration.unfocus();
+    _dateController.text = vm.saledatetxt;
+    controller_vatamt.text = vm.formattedVatAmount;
+    controller_totalamt.text = vm.formattedTotalAmount;
+    fetchvchnos(vm.selectedVchTypeName);
   }
 
   String getCurrencySymbol(String currencyCode) {
@@ -2482,6 +2094,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   // instead of the literal "AED" text that getCurrencySymbol() falls back
   // to (there's no distinct AED symbol glyph in the standard locale data).
   Widget _currencyValueWidget(String numberText, TextStyle style) {
+    final currencycode = _s.currencyCode;
     return currencyAmountText(
       currencyCode: currencycode,
       symbol: getCurrencySymbol(currencycode),
@@ -2491,212 +2104,37 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   Future<void> saveEntry() async {
-    // ❌ Prevent save if Party Ledger not selected
-    if (_selectedpartyledger == null ||
-        _selectedpartyledger.toString().trim().isEmpty) {
+    // Prevent save if Party Ledger not selected - the notifier method
+    // itself has no BuildContext, so this pre-check (and the
+    // saleItems-empty check below) stay here, matching the SalesRegistration
+    // sibling's `saveEntry` wrapper pattern.
+    final vm = _s;
+    if (vm.selectedPartyLedger == null ||
+        vm.selectedPartyLedger.toString().trim().isEmpty) {
       showAppMessage(context, "Please select Party Ledger");
-
       return;
     }
 
-    if (saleItems.isEmpty) {
+    if (vm.saleItems.isEmpty) {
       showAppMessage(context, 'Atleast add 1 item');
-    } else {
-      setState(() {
-        _isLoading = true;
-      });
-      String narrationValue = controller_narration.text.trim();
-      String vchnoValue = _vchnoController.text.trim();
-      String refnoValue = controller_orderno.text.trim();
-
-      // --- tally-api migration: resolve every display name this screen
-      // works with back to the masterId `voucher-entries` needs (see the
-      // lookup maps built by loadData()).
-      final int? voucherTypeMasterId =
-          _voucherTypeMasterIdByName[_selectedvchtypename];
-      final int? partyLedgerMasterId =
-          _ledgerMasterIdByName[_selectedpartyledger];
-      final int? salesLedgerMasterId =
-          _ledgerMasterIdByName[_selectedsalesledger];
-      final int? currencyMasterId = _currencyMasterId;
-
-      if (voucherTypeMasterId == null) {
-        showAppMessage(context, 'Please select a Voucher Type');
-        setState(() => _isLoading = false);
-        return;
-      }
-      if (partyLedgerMasterId == null) {
-        showAppMessage(context, 'Unknown Party Ledger - please reselect it');
-        setState(() => _isLoading = false);
-        return;
-      }
-      if (salesLedgerMasterId == null) {
-        showAppMessage(context, 'Please select a Sales Ledger');
-        setState(() => _isLoading = false);
-        return;
-      }
-      if (currencyMasterId == null) {
-        showAppMessage(context, 'Could not resolve the company currency');
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      double totalItemAmount = 0.0;
-      for (SaleItem item in saleItems) {
-        totalItemAmount += item.itemAmount; // calculating item amounts total
-      }
-
-      // Builds each inventory entry - resolves stockItemMasterId/
-      // unitMasterId from the same itemdata list the item/unit dropdowns
-      // use. godownMasterId comes from the item's chosen location; when the
-      // company has no godowns at all, batchAllocations is omitted for that
-      // item entirely rather than guessing, since tally-api requires a real
-      // godownMasterId on every batch row.
-      final List<Map<String, dynamic>> inventoryEntries = [];
-      for (final item in saleItems) {
-        final Map<String, dynamic> itemInfo = itemdata
-            .cast<Map<String, dynamic>>()
-            .firstWhere((i) => i['name'] == item.itemName, orElse: () => {});
-        final int? stockItemMasterId = itemInfo['masterId'] as int?;
-        final List<Map<String, dynamic>> units =
-            ((itemInfo['unit'] as List?) ?? const [])
-                .cast<Map<String, dynamic>>();
-        final Map<String, dynamic> unitInfo = units.firstWhere(
-          (u) => u['name'] == item.itemUnit,
-          orElse: () => {},
-        );
-        final int? unitMasterId = unitInfo['masterId'] as int?;
-
-        if (stockItemMasterId == null || unitMasterId == null) {
-          showAppMessage(
-            context,
-            'Could not resolve item/unit for "${item.itemName}" - please re-add it',
-          );
-          setState(() => _isLoading = false);
-          return;
-        }
-
-        final int? godownMasterId = _godownMasterIdByName[item.itemLocation];
-        final quantity = double.tryParse(item.itemQuantity) ?? 0;
-
-        inventoryEntries.add({
-          'stockItemMasterId': stockItemMasterId,
-          'quantity': quantity,
-          'rate': item.itemPrice,
-          'unitMasterId': unitMasterId,
-          'amount': item.itemAmount,
-          'ledgerMasterId': salesLedgerMasterId,
-          'isDebitQuantity': false,
-          if (godownMasterId != null)
-            'batchAllocations': [
-              {
-                'godownMasterId': godownMasterId,
-                // tally-api requires a batchName on every allocation row;
-                // this screen has no batch-tracking UI of its own, so
-                // 'Primary' - Tally's own default batch name for
-                // non-batch-tracked stock items - is used here, matching
-                // what a real Tally sync would show for the same item.
-                'batchName': 'Primary',
-                'quantity': quantity,
-              },
-            ],
-        });
-      }
-
-      double totalLedgerAmount = 0.0;
-      for (LedgerEntry ledger in ledgerEntries) {
-        // calculating total ledger amount
-        totalLedgerAmount +=
-            ledger.ledgerAmount; // calculating ledger amounts total
-      }
-
-      // Double-entry ledgerEntries: the Party ledger is debited for the
-      // full invoice value; the Sales ledger, any additional ledgers, and
-      // VAT (when applicable) are credited for their respective shares -
-      // the same net effect as legacy's signed-AMOUNT/ISDEEMEDPOSITIVE
-      // convention, just expressed as tally-api's own isDebit-flag +
-      // unsigned-amount pairs (see vouchers-sync, which stores `amount` as
-      // an unsigned magnitude the same way).
-      final double partyLedgerAmount =
-          totalVatAmount +
-          totalItemAmount +
-          totalLedgerAmount; // adding vat total, items total, ledgers total
-
-      final List<Map<String, dynamic>> ledgerEntriesPayload = [
-        {
-          'ledgerMasterId': partyLedgerMasterId,
-          'amount': partyLedgerAmount,
-          'isDebit': true,
-          'isPartyLedger': true,
-        },
-        {
-          'ledgerMasterId': salesLedgerMasterId,
-          'amount': totalItemAmount,
-          'isDebit': false,
-          'isPartyLedger': false,
-        },
-      ];
-
-      bool missingLedger = false;
-      for (final entry in ledgerEntries) {
-        final int? ledgerMasterId = _ledgerMasterIdByName[entry.ledgerName];
-        if (ledgerMasterId == null) {
-          missingLedger = true;
-          break;
-        }
-        ledgerEntriesPayload.add({
-          'ledgerMasterId': ledgerMasterId,
-          'amount': entry.ledgerAmount,
-          'isDebit': false,
-          'isPartyLedger': false,
-        });
-      }
-      if (missingLedger) {
-        showAppMessage(context, 'Could not resolve one of the added ledgers');
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      // Add VAT ledger data if applicable
-      if (_selectedvatledger != 'Not Applicable') {
-        final int? vatLedgerMasterId = _ledgerMasterIdByName[_selectedvatledger];
-        if (vatLedgerMasterId == null) {
-          showAppMessage(context, 'Could not resolve the VAT ledger');
-          setState(() => _isLoading = false);
-          return;
-        }
-        ledgerEntriesPayload.add({
-          'ledgerMasterId': vatLedgerMasterId,
-          'amount': roundedtotalVatAmount,
-          'isDebit': false,
-          'isPartyLedger': false,
-        });
-      }
-
-      final Map<String, dynamic> body = {
-        'voucherTypeMasterId': voucherTypeMasterId,
-        'date': DateFormat('yyyy-MM-dd').format(saledate),
-        'currencyMasterId': currencyMasterId,
-        'narration': narrationValue,
-        'reference': refnoValue,
-        if (vchnoValue.isNotEmpty) 'voucherNumber': vchnoValue,
-        'ledgerEntries': ledgerEntriesPayload,
-        'inventoryEntries': inventoryEntries,
-      };
-
-      try {
-        await VoucherEntryRepository.instance.create(body);
-        showSalesOrderDialog(context);
-      } on ApiException catch (e) {
-        showAppMessage(context, e.message);
-      } catch (e) {
-        showAppMessage(context, 'Could not reach the server. Please try again.');
-        print(e);
-      }
+      return;
     }
-    setState(() {
-      _isLoading = false;
-    });
+
+    final String narrationValue = controller_narration.text.trim();
+    final String vchnoValue = _vchnoController.text.trim();
+    final String refnoValue = controller_orderno.text.trim();
+
+    final error = await _notifier.saveEntry(
+      narration: narrationValue,
+      vchno: vchnoValue,
+      refno: refnoValue,
+    );
+
+    if (error != null) {
+      showAppMessage(context, error);
+      return;
+    }
+    showSalesOrderDialog(context);
   }
 
   void showSalesOrderDialog(BuildContext context) {
@@ -2770,174 +2208,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                           // FocusNode instead fully severs that link.
                           FocusScope.of(context).requestFocus(FocusNode());
                           Navigator.pop(context);
-                          setState(() {
-                            controller_narration.clear();
-                            controller_orderno.clear();
-
-                            _textFieldFocusNodeNarration
-                                .unfocus(); // Unfocus the TextField
-
-                            saledate = DateTime.now();
-                            saledatestring = _dateFormat.format(saledate);
-                            saledatetxt = formatlastsaledate(saledatestring);
-                            _dateController.text = saledatetxt;
-
-                            _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
-                            fetchvchnos(_selectedvchtypename);
-                            _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
-
-                            _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
-
-                            _selectedledger = ledgerdata.isNotEmpty
-                                ? ledgerdata[0]['name']
-                                : null;
-
-                            _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
-
-                            _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
-                            _itemController.text = _selecteditem;
-                            if (locationsdata.isNotEmpty) {
-                              selectedLocation = locationsdata[0];
-                              isVisibleLocation = true;
-                            } else {
-                              isVisibleLocation = false;
-                            }
-                            _updateUnitDropdown(_selecteditem);
-
-                            saleItems.clear();
-                            ledgerEntries.clear();
-
-                            totalPriceOfItems = saleItems.fold(0.0, (
-                              double previousAmount,
-                              SaleItem item,
-                            ) {
-                              return previousAmount +
-                                  (item.itemPrice *
-                                      double.parse(item.itemQuantity));
-                            });
-
-                            totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-                              double previousAmount,
-                              LedgerEntry entry,
-                            ) {
-                              return previousAmount + entry.ledgerAmount;
-                            });
-
-                            if (_selectedvatledger != 'Not Applicable') {
-                              double vat_perc = vatperc / 100;
-                              itemsVatAmount = double.parse(
-                                (totalPriceOfItems * vat_perc)
-                                    .toStringAsFixed(decimal!),
-                              );
-
-                              totalVatAmount =
-                                  itemsVatAmount + ledgerVatAmount;
-
-                              roundedtotalVatAmount = double.parse(
-                                totalVatAmount.toStringAsFixed(decimal!),
-                              );
-                              NumberFormat formatter = NumberFormat(
-                                '#,##0.${'0' * decimal!}',
-                                'en_US',
-                              );
-                              String formattedVat = formatter.format(
-                                roundedtotalVatAmount,
-                              );
-                              controller_vatamt.text = formattedVat
-                                  .toString();
-                            } else {
-                              totalVatAmount = 0;
-
-                              roundedtotalVatAmount = double.parse(
-                                totalVatAmount.toStringAsFixed(decimal!),
-                              );
-                              NumberFormat formatter = NumberFormat(
-                                '#,##0.${'0' * decimal!}',
-                                'en_US',
-                              );
-                              String formattedVat = formatter.format(
-                                roundedtotalVatAmount,
-                              );
-                              controller_vatamt.text = formattedVat
-                                  .toString();
-                            }
-                            if (saleItems.isEmpty) {
-                              isVisibleItemHeading = false;
-                            } else {
-                              isVisibleItemHeading = true;
-                            }
-                            totalAmountForVatAppEntries = ledgerEntries
-                                .where((entry) => entry.vatApp)
-                                .fold(0.0, (
-                                  double previousAmount,
-                                  LedgerEntry entry,
-                                ) {
-                                  return previousAmount + entry.ledgerAmount;
-                                });
-
-                            if (_selectedvatledger != 'Not Applicable') {
-                              double vat_perc = vatperc / 100;
-                              ledgerVatAmount =
-                                  totalAmountForVatAppEntries * vat_perc;
-                              totalVatAmount =
-                                  itemsVatAmount + ledgerVatAmount;
-                              roundedtotalVatAmount = double.parse(
-                                totalVatAmount.toStringAsFixed(decimal!),
-                              );
-                              NumberFormat formatter = NumberFormat(
-                                '#,##0.${'0' * decimal!}',
-                                'en_US',
-                              );
-                              String formattedVat = formatter.format(
-                                roundedtotalVatAmount,
-                              );
-                              controller_vatamt.text = formattedVat
-                                  .toString();
-                            } else {
-                              totalVatAmount = 0;
-                              roundedtotalVatAmount = double.parse(
-                                totalVatAmount.toStringAsFixed(decimal!),
-                              );
-                              NumberFormat formatter = NumberFormat(
-                                '#,##0.${'0' * decimal!}',
-                                'en_US',
-                              );
-                              String formattedVat = formatter.format(
-                                roundedtotalVatAmount,
-                              );
-                              controller_vatamt.text = formattedVat
-                                  .toString();
-                            }
-                            if (ledgerEntries.isEmpty) {
-                              isVisibleLedgerHeading = false;
-                            } else {
-                              isVisibleLedgerHeading = true;
-                            }
-                            totalAmount =
-                                totalPriceOfItems +
-                                totalAmountOfLedgers +
-                                totalVatAmount;
-                            roundedtotalAmount = double.parse(
-                              totalAmount.toStringAsFixed(decimal!),
-                            );
-                            NumberFormat formatter = NumberFormat(
-                              '#,##0.${'0' * decimal!}',
-                              'en_US',
-                            );
-                            String formattedtotal = formatter.format(
-                              roundedtotalAmount,
-                            );
-                            controller_totalamt.text = formattedtotal
-                                .toString();
-                            _isFocused_vchno = false;
-                            _isFocused_item = false;
-                            _isFocused_unit = false;
-                            _isFocused_ledger = false;
-                            _isFocused_narration = false;
-                            _isFocused_totalamt = false;
-                            _isFocused_vatamt = false;
-                            _isFocused_orderno = false;
-                          });
+                          _resetAfterSave();
                         },
                         icon: const Icon(
                           Icons.close_rounded,
@@ -3188,286 +2459,48 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     );
   }
 
-  // --- tally-api migration: master-list fetch helpers ----------------------
-  // No single tally-api endpoint returns this screen's whole "sales order
-  // entry form" bundle the way legacy's `getSalesData` did, so loadData()
-  // below assembles the same bundle from several tally-api list endpoints.
-  // These four don't have a dedicated `lib/api/` repository yet (unlike
-  // ledgers/stock-items) - see the migration report for the suggested
-  // additions (GodownRepository/VoucherTypeRepository/CurrencyRepository/
-  // an "all ledgers, unfiltered" method on LedgerRepository). Implemented
-  // inline here for now, using the same `TallyApiClient`/`fetchAllPages`
-  // plumbing those repositories use internally.
-  Future<List<Map<String, dynamic>>> _fetchAllLedgersUnfiltered() =>
-      fetchAllPages(
-        (page) => _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
-      );
-
-  /// masterIds of every group with tally-api's `'SALES'` GroupReservedName
-  /// enum label (screaming-snake-case, its 2026-08-21 schema-hardening
-  /// migration - not Tally's own mixed-case `'Sales Accounts'` string) -
-  /// used to classify "sales ledgers" the same way tally-api's own reports
-  /// classify sales activity (see CLAUDE.md's reports section).
-  Future<Set<int>> _fetchSalesAccountGroupIds() async {
-    final groups = await fetchAllPages(
-      (page) => _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
-    );
-    return groups
-        .where((g) => g['reservedName'] == 'SALES')
-        .map((g) => g['masterId'] as int)
-        .toSet();
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchGodowns() => fetchAllPages(
-        (page) => _tallyApiClient.getForCompany('/godowns?page=$page&limit=100'),
-      );
-
-  Future<List<Map<String, dynamic>>> _fetchVoucherTypes() => fetchAllPages(
-        (page) =>
-            _tallyApiClient.getForCompany('/voucher-types?page=$page&limit=100'),
-      );
-
-  /// Resolves the company's own currency masterId to match [isoCode]
-  /// (`currencycode`, e.g. `'AED'`) against tally-api's `isoCurrencyCode`
-  /// field; falls back to the first currency the company has synced if
-  /// nothing matches (a company should always have at least its home
-  /// currency), and to `null` only when the company has none at all.
-  Future<int?> _fetchCurrencyMasterId(String isoCode) async {
-    final currencies = await fetchAllPages(
-      (page) =>
-          _tallyApiClient.getForCompany('/currencies?page=$page&limit=100'),
-    );
-    if (currencies.isEmpty) return null;
-    final match = currencies.firstWhere(
-      (c) =>
-          (c['isoCurrencyCode'] as String?)?.toUpperCase() ==
-          isoCode.toUpperCase(),
-      orElse: () => currencies.first,
-    );
-    return match['masterId'] as int?;
-  }
-
   Future<void> loadData() async {
-    vchtypenamedata.clear();
-    itemdata.clear();
-    salesledger_data.clear();
-    partyledgerdata.clear();
-    vatledgerdata.clear();
-    ledgerdata.clear();
-    locationsdata.clear();
-    _ledgerMasterIdByName.clear();
-    _godownMasterIdByName.clear();
-    _voucherTypeMasterIdByName.clear();
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final results = await Future.wait([
-        StockRepository.instance.listStockItems(),
-        _fetchAllLedgersUnfiltered(),
-        LedgerRepository.instance.listLedgers(),
-        _fetchSalesAccountGroupIds(),
-        _fetchGodowns(),
-        _fetchVoucherTypes(),
-        _fetchCurrencyMasterId(currencycode),
-      ]);
-
-      final stockItems = results[0] as List<Map<String, dynamic>>;
-      final allLedgers = results[1] as List<Map<String, dynamic>>;
-      final partyLedgers = results[2] as List<Map<String, dynamic>>;
-      final salesAccountGroupIds = results[3] as Set<int>;
-      final godowns = results[4] as List<Map<String, dynamic>>;
-      final voucherTypes = results[5] as List<Map<String, dynamic>>;
-      _currencyMasterId = results[6] as int?;
-
-      for (final l in allLedgers) {
-        _ledgerMasterIdByName[l['name'] as String] = l['masterId'] as int;
-      }
-      for (final g in godowns) {
-        _godownMasterIdByName[g['name'] as String] = g['masterId'] as int;
-      }
-      // Only "Sales Order" (Tally's own reservedName, stable regardless of
-      // any custom voucher-type naming) - matches legacy's
-      // `{'type': 'sales order'}` request filter.
-      final salesOrderTypes = voucherTypes
-          .where((v) => v['reservedName'] == 'SALES_ORDER')
-          .toList();
-      for (final v in salesOrderTypes) {
-        _voucherTypeMasterIdByName[v['name'] as String] = v['masterId'] as int;
-      }
-
-      setState(() {
-        vchtypenamedata = salesOrderTypes
-            .map((v) => v['name'] as String)
-            .toList();
-        _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
-        fetchvchnos(_selectedvchtypename);
-
-        partyledgerdata = partyLedgers.map((l) => l['name'] as String).toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-        _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
-        _partyLedgerController.text = _selectedpartyledger;
-
-        // "Sales ledgers" - every ledger under a 'Sales Accounts' group.
-        salesledger_data = allLedgers
-            .where((l) => salesAccountGroupIds.contains(l['groupMasterId']))
-            .map((l) => l['name'] as String)
-            .toList();
-        _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
-
-        // "Other ledgers" (the free-pick "Add Ledger" dropdown, e.g.
-        // freight/discount allocations) - best-effort equivalent of
-        // legacy's `otherLedgers`: every ledger not already offered via the
-        // Party or Sales Ledger dropdowns above.
-        final partyNames = partyledgerdata.toSet();
-        final salesNames = salesledger_data.toSet();
-        ledgerdata = allLedgers
-            .where(
-              (l) =>
-                  !partyNames.contains(l['name']) &&
-                  !salesNames.contains(l['name']),
-            )
-            .toList();
-        _selectedledger = ledgerdata.isNotEmpty
-            ? ledgerdata[0]['name']
-            : null;
-
-        // VAT ledgers - tally-api exposes a direct `vatApplicable` flag per
-        // ledger (more accurate than legacy's name/group-based guess).
-        vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll(
-          allLedgers
-              .where((l) => l['vatApplicable'] == true)
-              .map((l) => l['name'] as String),
-        );
-        _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
-
-        // Reshapes tally-api's stock-item row into the `name`/`saleprice`/
-        // `standardprice`/`unit` shape `_updateUnitDropdown`/`addItem`/
-        // `_addSelectedItemsInBulk` already expect (unchanged below) - see
-        // those methods' own comments for the "saleprice"/"standardprice"/
-        // unit-multiplier meaning. tally-api tracks at most a base + one
-        // additional unit per item (no arbitrary compound-unit list like
-        // legacy's `unit` array could carry) - `multiplier` for the
-        // additional unit is `denominator` ("1 additional unit = denominator
-        // base units", same relationship Items.dart's display already
-        // relies on for this pair of fields).
-        itemdata = stockItems.map((item) {
-          final List<Map<String, dynamic>> units = [];
-          final baseUnitMasterId = item['baseUnitMasterId'] as int?;
-          if (baseUnitMasterId != null) {
-            units.add({
-              'name': item['baseUnitSymbol'] ?? '',
-              'multiplier': 1.0,
-              'masterId': baseUnitMasterId,
-            });
-          }
-          final additionalUnitMasterId = item['additionalUnitMasterId'] as int?;
-          if (additionalUnitMasterId != null) {
-            final denominator = parseMoneyField(item['denominator']);
-            units.add({
-              'name': item['additionalUnitSymbol'] ?? '',
-              'multiplier': denominator == 0 ? 1.0 : denominator,
-              'masterId': additionalUnitMasterId,
-            });
-          }
-          return {
-            'masterId': item['masterId'],
-            'name': item['name'],
-            'saleprice': item['lastSalePrice'],
-            'standardprice': item['stardardPrice'],
-            'unit': units,
-          };
-        }).toList();
-
-        _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
-        _itemController.text = _selecteditem;
-        locationsdata = godowns.map((g) => g['name'] as String).toList();
-        if (locationsdata.isNotEmpty) {
-          selectedLocation = locationsdata[0];
-          isVisibleLocation = true;
-        } else {
-          isVisibleLocation = false;
-        }
-        _updateUnitDropdown(_selecteditem);
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      print(e);
+    final error = await _notifier.loadData();
+    if (error != null) {
+      showAppMessage(context, error);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
+    final vm = _s;
+    _partyLedgerController.text = '${vm.selectedPartyLedger ?? ''}';
+    _selectedledger = vm.ledgerData.isNotEmpty ? vm.ledgerData[0]['name'] : null;
+    _selecteditem = '${(vm.itemData.isNotEmpty ? vm.itemData[0]['name'] : '')}';
+    _itemController.text = _selecteditem;
+    if (vm.locationsData.isNotEmpty) {
+      selectedLocation = vm.locationsData[0];
+      isVisibleLocation = true;
+    } else {
+      isVisibleLocation = false;
+    }
+    _updateUnitDropdown(_selecteditem);
   }
 
-  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
-  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
-  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
-  /// `Voucher.number`s for this vchtype/this year's date window, replacing
-  /// the earlier client-side-only approach (`listAll()` + filter) that only
-  /// ever saw this app's own drafts. The field stays user-editable via the
-  /// existing lock/edit toggle (isVchEditable).
+  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` -
+  /// thin wrapper around the notifier's `fetchVchNos`, which sets
+  /// `_vchnoController.text` itself from the result (see that method's own
+  /// doc-comment).
   Future<void> fetchvchnos(String vchname) async {
-    vchnos.clear();
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
-
-      if (voucherTypeMasterId != null) {
-        final String fromParam = DateFormat('yyyy-MM-dd').format(yearStartDate);
-        final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
-
-        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
-          voucherTypeMasterId: voucherTypeMasterId,
-          from: fromParam,
-          to: toParam,
-        );
-      }
-
-      setState(() {
-        // SORT first
-        vchnos.sort((a, b) {
-          RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
-          int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
-          int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
-          return numA.compareTo(numB);
-        });
-
-        // GENERATE NEXT
-        String nextVch = generateNextVchNo(vchnos);
-
-        _vchnoController.text = nextVch;
-      });
-    } on ApiException catch (e) {
-      vchnos.clear();
-      showAppMessage(context, e.message);
-    } catch (e) {
-      vchnos.clear();
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      print(e);
+    final result = await _notifier.fetchVchNos(vchname);
+    if (result.error != null) {
+      showAppMessage(context, result.error!);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
+    _vchnoController.text = result.nextVchNo;
   }
+
 
   void _updateUnitDropdown(dynamic _selectedItem) {
+    final vm = _s;
+    final decimal = vm.decimal;
     setState(() {
       selectedMultiplier = 0.0;
       isVisibleUnit = true;
 
       itemQuantityController.text = 1.toString();
 
-      dynamic selectedItemInfo = itemdata.firstWhere(
+      dynamic selectedItemInfo = vm.itemData.firstWhere(
         (item) => item["name"] == _selectedItem,
         orElse: () => null,
       );
@@ -3529,6 +2562,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   void updateRateAndAmount() {
+    final decimal = _s.decimal;
     String qtyValue = itemQuantityController.text;
 
     if (qtyValue.isEmpty) {
@@ -3599,6 +2633,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   void updateAmount() {
+    final decimal = _s.decimal;
     String qtyValue = itemQuantityController.text;
 
     if (qtyValue.isEmpty) {
@@ -3669,7 +2704,7 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     });
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: saledate,
+      initialDate: _s.saledate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2101),
       builder: (BuildContext context, Widget? child) {
@@ -3683,1275 +2718,15 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
         );
       },
     );
-    if (picked != null && picked != saledate)
-      setState(() {
-        saledate = picked;
-        saledatestring = _dateFormat.format(saledate);
-        saledatetxt = formatlastsaledate(saledatestring);
-        _dateController.text = saledatetxt;
-      });
+    if (picked != null && picked != _s.saledate) {
+      _notifier.setSaleDate(picked);
+      _dateController.text = _s.saledatetxt;
+    }
   }
-
-  /*
-  Future<void> _showItemDetailsPopup(BuildContext context) async {
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return StatefulBuilder(
-            builder: (context, setStateDialog) {
-              return AlertDialog(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [Colors.teal, Colors.greenAccent],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: const Icon(Icons.add_shopping_cart, color: Colors.white, size: 28),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                "Add Item",
-                style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Form(
-              key: _itemFormkey,
-              child: Column(
-                children: [
-
-                  // 🔍 Item Search
-                  TypeAheadField<Map<String, dynamic>>(
-                    // 🔹 Latest API requires this controller instead of inside TextFieldConfiguration
-                    controller: _itemController,
-
-                    // 🔹 Suggestion logic
-                    suggestionsCallback: (pattern) async {
-                      return itemdata
-                          .where((item) {
-                        final name = item['name']?.toString().toLowerCase() ?? '';
-                        final part = item['part']?.toString().toLowerCase() ?? '';
-                        return name.contains(pattern.toLowerCase()) ||
-                            part.contains(pattern.toLowerCase());
-                      })
-                          .cast<Map<String, dynamic>>() // 👈 important fix
-                          .toList();
-                    },
-
-                    // 🔹 How each suggestion looks
-                    itemBuilder: (context, suggestion) {
-                      return ListTile(
-                        title: Text(
-                          suggestion['name'] ?? '',
-                          style: GoogleFonts.poppins(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
-                        ),
-                        subtitle: Text(
-                          suggestion['part'] ?? '',
-                          style: GoogleFonts.poppins(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        ),
-                      );
-                    },
-
-                    // 🔹 Required in new API (replaces onSuggestionSelected)
-
-                    onSelected: (suggestion) {
-                      setStateDialog(() {
-                        _selecteditem = suggestion['name'] ?? '';
-                        _itemController.text = _selecteditem;
-
-                        if (locationsdata.isNotEmpty) {
-                          selectedLocation = locationsdata[0];
-                          isVisibleLocation = true;
-                        } else {
-                          isVisibleLocation = false;
-                        }
-
-                        _updateUnitDropdown(_selecteditem);
-                        isVisibleUnit = true;
-                      });
-                    },
-
-
-
-                    // 🔹 Main TextField builder (replaces old textFieldConfiguration)
-                    builder: (context, controller, focusNode) {
-                      return TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        decoration: InputDecoration(
-                          labelText: "Item",
-                          hintText: "Search item",
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.blue, Colors.lightBlueAccent],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(8)),
-                            ),
-                            child: const Icon(Icons.inventory_outlined, color: Colors.white),
-                          ),
-
-                          // 👉 Close + Dropdown icons
-                          suffixIcon: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_itemController.text.isNotEmpty)
-                                IconButton(
-                                  icon: Icon(Icons.close, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 20),
-                                  onPressed: () {
-                                    _itemController.clear();
-                                    setState(() {
-                                      _selecteditem = "";
-                                      isVisibleLocation = false;
-                                      isVisibleUnit = false;
-                                    });
-                                  },
-                                ),
-                              Icon(Icons.arrow_drop_down, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                              const SizedBox(width: 6),
-                            ],
-                          ),
-
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                          contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                        ),
-                      );
-                    },
-
-                    // 🔹 Optional — shows if no match found
-                    emptyBuilder: (context) => const SizedBox.shrink(),
-                  ),
-
-
-
-                  const SizedBox(height: 14),
-
-                  // 📍 Location
-                  Visibility(
-                    visible: isVisibleLocation,
-                    child: DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      value: selectedLocation,
-                      items: locationsdata.map((value) {
-                        return DropdownMenuItem(
-                          value: value,
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: Text(
-                              value,
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (val) => setState(() => selectedLocation = val!),
-                      decoration: InputDecoration(
-                        labelText: "Location",
-                        prefixIcon: Container(
-                          margin: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Colors.orange, Colors.redAccent],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.all(Radius.circular(8)),
-                          ),
-                          child: const Icon(Icons.location_on, color: Colors.white),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: app_color, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 📦 Unit
-                  Visibility(
-                    visible: isVisibleUnit,
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedunit,
-                      items: unitdata.map((u) {
-                        return DropdownMenuItem(value: u.name, child: Text(u.name));
-                      }).toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedunit = val!;
-                          itemQuantityController.text = "1";
-                          selectedMultiplier = unitdata.firstWhere((u) => u.name == _selectedunit).multiplier;
-                          updateRateAndAmount();
-                        });
-                      },
-                      decoration: InputDecoration(
-                        labelText: "Unit",
-                        prefixIcon: Container(
-                          margin: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Colors.purple, Colors.deepPurpleAccent],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.all(Radius.circular(8)),
-                          ),
-                          child: const Icon(Icons.straighten, color: Colors.white),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: app_color, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 🔢 Quantity
-                  TextFormField(
-                    controller: itemQuantityController,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => updateRateAndAmount(),
-                    decoration: InputDecoration(
-                      labelText: "Quantity",
-                      prefixIcon: Container(
-                        margin: const EdgeInsets.all(8),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.green, Colors.lightGreen],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: const Icon(Icons.confirmation_num, color: Colors.white),
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: app_color, width: 1.5),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 💲 Rate
-                  TextFormField(
-                    controller: itemRateController,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => updateAmount(),
-                    decoration: InputDecoration(
-                      labelText: "Rate",
-                      prefix: Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.blue, Colors.blue], // ✅ distinct from Ledger
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: currencySymbolWidget(
-                          currencycode,
-                          getCurrencySymbol(currencycode),
-                          GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: app_color, width: 1.5),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // 💰 Amount (Disabled with Gradient Currency Symbol)
-                  TextFormField(
-                    controller: itemAmountController,
-                    enabled: false,
-                    decoration: InputDecoration(
-                      labelText: "Amount",
-                      prefix: Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.green, Colors.teal], // ✅ distinct from Ledger
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: currencySymbolWidget(
-                          currencycode,
-                          getCurrencySymbol(currencycode),
-                          GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: app_color, width: 1.5),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text("Cancel", style: GoogleFonts.poppins(color: app_color)),
-            ),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: app_color,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ),
-              icon: const Icon(Icons.check, color: Colors.white),
-              label: Text("Add Item",
-                  style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
-              onPressed: () {
-                if (_itemFormkey.currentState!.validate()) {
-                  addItem();
-                }
-              },
-            ),
-          ],
-        );
-      },);}
-    );
-  }
-*/
-
-  Future<void> _showItemDetailsPopup(BuildContext context) async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    showModalBottomSheet(
-      useSafeArea: true,
-      requestFocus: false,
-      barrierColor: Colors.black.withValues(alpha: 0.45),
-      context: context,
-      isScrollControlled: true,
-      enableDrag: false,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            final mediaQuery = MediaQuery.of(context);
-            final screenHeight = mediaQuery.size.height;
-            final isKeyboardOpen = mediaQuery.viewInsets.bottom > 0;
-
-            final bool hasExtraFields = isVisibleLocation || isVisibleUnit;
-
-            double sheetHeight;
-
-            if (isKeyboardOpen) {
-              if (screenHeight < 700) {
-                sheetHeight = 0.95;
-              } else if (screenHeight < 850) {
-                sheetHeight = 0.88;
-              } else {
-                sheetHeight = 0.78;
-              }
-            } else {
-              if (hasExtraFields) {
-                if (screenHeight < 700) {
-                  sheetHeight = 0.92;
-                } else if (screenHeight < 850) {
-                  sheetHeight = 0.78;
-                } else {
-                  sheetHeight = 0.68;
-                }
-              } else {
-                if (screenHeight < 700) {
-                  sheetHeight = 0.72;
-                } else if (screenHeight < 850) {
-                  sheetHeight = 0.60;
-                } else {
-                  sheetHeight = 0.50;
-                }
-              }
-            }
-
-            return AnimatedPadding(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-              padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
-              child: FractionallySizedBox(
-                heightFactor: sheetHeight,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(24),
-                    ),
-                    border: Border.all(
-                      color: Theme.of(
-                        context,
-                      ).dividerColor.withValues(alpha: 0.45),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 24,
-                        offset: const Offset(0, -8),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 10),
-
-                      Container(
-                        width: 45,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).dividerColor,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      if (!isKeyboardOpen) ...[
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [Colors.teal, Colors.greenAccent],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.add_shopping_cart,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      Text(
-                        "Add Item",
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Expanded(
-                        child: SingleChildScrollView(
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.manual,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-                          child: Form(
-                            key: _itemFormkey,
-                            child: Column(
-                              children: [
-                                TypeAheadField<Map<String, dynamic>>(
-                                  controller: _itemController,
-
-                                  suggestionsCallback: (pattern) async {
-                                    return itemdata
-                                        .where((item) {
-                                          final name =
-                                              item['name']
-                                                  ?.toString()
-                                                  .toLowerCase() ??
-                                              '';
-                                          final part =
-                                              item['part']
-                                                  ?.toString()
-                                                  .toLowerCase() ??
-                                              '';
-
-                                          return name.contains(
-                                                pattern.toLowerCase(),
-                                              ) ||
-                                              part.contains(
-                                                pattern.toLowerCase(),
-                                              );
-                                        })
-                                        .cast<Map<String, dynamic>>()
-                                        .toList();
-                                  },
-
-                                  itemBuilder: (context, suggestion) {
-                                    return ListTile(
-                                      title: Text(
-                                        suggestion['name'] ?? '',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 14,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        suggestion['part'] ?? '',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 12,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
-                                        ),
-                                      ),
-                                    );
-                                  },
-
-                                  onSelected: (suggestion) {
-                                    FocusScope.of(context).unfocus();
-
-                                    setStateDialog(() {
-                                      _selecteditem = suggestion['name'] ?? '';
-                                      _itemController.text = _selecteditem;
-
-                                      if (locationsdata.isNotEmpty) {
-                                        selectedLocation = locationsdata[0];
-                                        isVisibleLocation = true;
-                                      } else {
-                                        isVisibleLocation = false;
-                                      }
-
-                                      _updateUnitDropdown(_selecteditem);
-                                      isVisibleUnit = true;
-                                    });
-                                  },
-
-                                  builder: (context, controller, focusNode) {
-                                    return TextField(
-                                      controller: controller,
-                                      focusNode: focusNode,
-                                      decoration: InputDecoration(
-                                        labelText: "Item",
-                                        hintText: "Search item",
-                                        prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
-                                          decoration: const BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Colors.blue,
-                                                Colors.lightBlueAccent,
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: BorderRadius.all(
-                                              Radius.circular(8),
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.inventory_outlined,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        suffixIcon: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (_itemController.text.isNotEmpty)
-                                              IconButton(
-                                                icon: Icon(
-                                                  Icons.close,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                  size: 20,
-                                                ),
-                                                onPressed: () {
-                                                  _itemController.clear();
-
-                                                  setStateDialog(() {
-                                                    _selecteditem = "";
-                                                    isVisibleLocation = false;
-                                                    isVisibleUnit = false;
-                                                  });
-                                                },
-                                              ),
-                                            Icon(
-                                              Icons.arrow_drop_down,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                            const SizedBox(width: 6),
-                                          ],
-                                        ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: Theme.of(
-                                              context,
-                                            ).dividerColor,
-                                            width: 1,
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: app_color,
-                                            width: 1.5,
-                                          ),
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 14,
-                                              vertical: 14,
-                                            ),
-                                      ),
-                                    );
-                                  },
-
-                                  decorationBuilder: (context, child) {
-                                    return Material(
-                                      elevation: 6,
-                                      borderRadius: BorderRadius.circular(16),
-                                      color: Theme.of(context).cardColor,
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-
-                                  emptyBuilder: (context) =>
-                                      const SizedBox.shrink(),
-                                ),
-
-                                const SizedBox(height: 14),
-
-                                AnimatedSize(
-                                  duration: const Duration(milliseconds: 250),
-                                  child: Visibility(
-                                    visible: isVisibleLocation,
-                                    child: DropdownButtonFormField<String>(
-                                      isExpanded: true,
-                                      value: selectedLocation,
-                                      items: locationsdata.map((value) {
-                                        return DropdownMenuItem(
-                                          value: value,
-                                          child: SizedBox(
-                                            width: double.infinity,
-                                            child: Text(
-                                              value,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1,
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                      onChanged: (val) => setStateDialog(
-                                        () => selectedLocation = val!,
-                                      ),
-                                      decoration: InputDecoration(
-                                        labelText: "Location",
-                                        prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
-                                          decoration: const BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Colors.orange,
-                                                Colors.redAccent,
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: BorderRadius.all(
-                                              Radius.circular(8),
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.location_on,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: Theme.of(
-                                              context,
-                                            ).dividerColor,
-                                            width: 1,
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: app_color,
-                                            width: 1.5,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                const SizedBox(height: 14),
-
-                                AnimatedSize(
-                                  duration: const Duration(milliseconds: 250),
-                                  child: Visibility(
-                                    visible: isVisibleUnit,
-                                    child: DropdownButtonFormField<String>(
-                                      value: _selectedunit,
-                                      isExpanded: true,
-                                      items: unitdata.map((u) {
-                                        return DropdownMenuItem(
-                                          value: u.name,
-                                          child: Text(
-                                            u.name,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        );
-                                      }).toList(),
-                                      onChanged: (val) {
-                                        setStateDialog(() {
-                                          _selectedunit = val!;
-                                          itemQuantityController.text = "1";
-                                          selectedMultiplier = unitdata
-                                              .firstWhere(
-                                                (u) => u.name == _selectedunit,
-                                              )
-                                              .multiplier;
-                                          updateRateAndAmount();
-                                        });
-                                      },
-                                      decoration: InputDecoration(
-                                        labelText: "Unit",
-                                        prefixIcon: Container(
-                                          margin: const EdgeInsets.all(8),
-                                          decoration: const BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Colors.purple,
-                                                Colors.deepPurpleAccent,
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: BorderRadius.all(
-                                              Radius.circular(8),
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.straighten,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: Theme.of(
-                                              context,
-                                            ).dividerColor,
-                                            width: 1,
-                                          ),
-                                        ),
-                                        focusedBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: app_color,
-                                            width: 1.5,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                const SizedBox(height: 14),
-
-                                TextFormField(
-                                  controller: itemQuantityController,
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => updateRateAndAmount(),
-                                  decoration: InputDecoration(
-                                    labelText: "Quantity",
-                                    prefixIcon: Container(
-                                      margin: const EdgeInsets.all(8),
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            Colors.green,
-                                            Colors.lightGreen,
-                                          ],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        ),
-                                        borderRadius: BorderRadius.all(
-                                          Radius.circular(8),
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.confirmation_num,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                        color: Theme.of(context).dividerColor,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                        color: app_color,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                const SizedBox(height: 14),
-
-                                TextFormField(
-                                  controller: itemRateController,
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => updateAmount(),
-                                  decoration: InputDecoration(
-                                    labelText: "Rate",
-                                    prefix: Container(
-                                      margin: const EdgeInsets.only(right: 8),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [Colors.blue, Colors.blue],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        ),
-                                        borderRadius: BorderRadius.all(
-                                          Radius.circular(8),
-                                        ),
-                                      ),
-                                      child: currencySymbolWidget(
-                                        currencycode,
-                                        getCurrencySymbol(currencycode),
-                                        GoogleFonts.poppins(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                        color: Theme.of(context).dividerColor,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                        color: app_color,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                const SizedBox(height: 14),
-
-                                TextFormField(
-                                  controller: itemAmountController,
-                                  enabled: false,
-                                  decoration: InputDecoration(
-                                    labelText: "Amount",
-                                    filled: true,
-                                    fillColor:
-                                        Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Theme.of(
-                                            context,
-                                          ).colorScheme.surfaceContainerHighest
-                                        : (Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? Theme.of(context)
-                                                    .colorScheme
-                                                    .surfaceContainerHighest
-                                              : Colors.grey.shade100),
-                                    prefix: Container(
-                                      margin: const EdgeInsets.only(right: 8),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [Colors.green, Colors.teal],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        ),
-                                        borderRadius: BorderRadius.all(
-                                          Radius.circular(8),
-                                        ),
-                                      ),
-                                      child: currencySymbolWidget(
-                                        currencycode,
-                                        getCurrencySymbol(currencycode),
-                                        GoogleFonts.poppins(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                        color: Theme.of(context).dividerColor,
-                                        width: 1,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      SafeArea(
-                        top: false,
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
-                                blurRadius: 10,
-                                offset: const Offset(0, -2),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                  onPressed: () => Navigator.of(context).pop(),
-                                  child: Text(
-                                    "Cancel",
-                                    style: GoogleFonts.poppins(
-                                      color: app_color,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                              const SizedBox(width: 12),
-
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: app_color,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.check,
-                                    color: Colors.white,
-                                  ),
-                                  label: Text(
-                                    "Add Item",
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    if (_itemFormkey.currentState!.validate()) {
-                                      addItem();
-                                    }
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /*
-  void _showLedgerDetailsPopup(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-
-            // 🔝 Title with gradient icon
-            title: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [Colors.deepPurple, Colors.purpleAccent],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: const Icon(Icons.account_balance, color: Colors.white, size: 28),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  "Add Ledger",
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ],
-            ),
-
-            content: SingleChildScrollView(
-              child: Form(
-                key: _ledgerFormkey,
-                child: Column(
-                  children: [
-
-                    // 🔻 Ledger Dropdown
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                      child: SearchableSelectorField<String>(
-                        value: _selectedledger as String?,
-                        hintText: "Select Ledger",
-                        label: "Ledger Name",
-                        icon: Icons.account_balance_wallet,
-                        iconGradient: const [Colors.blue, Colors.lightBlueAccent],
-                        items: ledgerdata
-                            .map<String>((ledger) => ledger['name'] as String)
-                            .toList(),
-                        itemLabel: (v) => v,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedledger = value!;
-                          });
-                        },
-                      ),
-                    ),
-
-                    //const SizedBox(height: 6),
-
-                    // 💰 Ledger Amount
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                      child: TextFormField(
-                        controller: ledgerAmountController,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*')),
-                        ],
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter amount';
-                          } else if (double.tryParse(value) == 0.0) {
-                            return 'Amount cannot be 0';
-                          }
-                          return null;
-                        },
-                        decoration: InputDecoration(
-                          labelText: "Amount",
-                          hintText: "Enter Amount",
-                          prefix: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.orange, Colors.redAccent], // ✅ distinct from Ledger
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(8)),
-                            ),
-                            child: currencySymbolWidget(
-                              currencycode,
-                              getCurrencySymbol(currencycode),
-                              GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Actions
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-                  ledgerAmountController.clear();
-                },
-                child: Text("Cancel", style: GoogleFonts.poppins(color: app_color)),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: app_color,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-                icon: const Icon(Icons.check, color: Colors.white),
-                label: Text("Add Ledger",
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    )),
-                onPressed: () {
-                  if (_ledgerFormkey.currentState!.validate()) {
-                    _ledgerFormkey.currentState!.save();
-                    addLedger();
-                  }
-                },
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-*/
 
   void _showLedgerDetailsPopup(BuildContext context) {
+    final ledgerdata = _s.ledgerData;
+    final currencycode = _s.currencyCode;
     FocusManager.instance.primaryFocus?.unfocus();
     final TextEditingController _ledgerController = TextEditingController();
 
@@ -5469,59 +3244,6 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     return null;
   }
 
-  // Price-level rate for one item, reusing the same API the single-item
-  // flow already uses. Returns null if the party has no price level, or
-  // the API has no rate for this item under that price level.
-  // Mirrors the totals recalculation addItem() does, kept separate so
-  // this experimental flow can't regress the existing single-item logic.
-  void _recalcTotalsAfterBulkAdd() {
-    setState(() {
-      isVisibleItemHeading = saleItems.isNotEmpty;
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      double vat_perc = vatperc / 100;
-      if (_selectedvatledger != 'Not Applicable') {
-        double totalAmountForVatAppEntries = ledgerEntries
-            .where((entry) => entry.vatApp)
-            .fold(0.0, (double previousAmount, LedgerEntry entry) {
-              return previousAmount + entry.ledgerAmount;
-            });
-        double ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-      } else {
-        totalVatAmount = 0;
-      }
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-      final vatFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = vatFormatter.format(roundedtotalVatAmount);
-
-      double totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      final totalFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_totalamt.text = totalFormatter.format(roundedtotalAmount);
-    });
-  }
-
   // Small colored badge used to permanently show where a rate came from
   // (Price Level / Item Rate / Manual) — a normal user-facing indicator.
   Widget _rateSourceBadge(String source) {
@@ -5629,6 +3351,11 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
   }
 
   Future<void> _showMultiItemSelectPopup(BuildContext context) async {
+    final vmForPopup = _s;
+    final itemdata = vmForPopup.itemData;
+    final decimal = vmForPopup.decimal;
+    final currencycode = vmForPopup.currencyCode;
+    final locationsdata = vmForPopup.locationsData;
     final Set<String> selectedItemNames = {};
     // Shows exactly where each item's rate came from — Price Level,
     // Item Rate, or Manual (empty, needs entry).
@@ -6678,6 +4405,10 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     );
   }
 
+  /// Resolves each selected item's editable controllers into a
+  /// [SoBulkAddEntry] and hands the whole batch to the notifier's
+  /// `addSelectedItemsInBulk` (which does the merge-or-append + totals
+  /// recompute this method used to do directly).
   Future<void> _addSelectedItemsInBulk(
     Set<String> selectedItemNames,
     Map<String, TextEditingController> rateEditControllers,
@@ -6687,6 +4418,10 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
     Map<String, String> selectedUnitPerItem,
     Map<String, String> selectedLocationPerItem,
   ) async {
+    final vm = _s;
+    final itemdata = vm.itemData;
+    final entries = <SoBulkAddEntry>[];
+
     for (final name in selectedItemNames) {
       final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
         (i) => i['name'] == name,
@@ -6710,12 +4445,6 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
           double.tryParse(rateEditControllers[name]?.text.trim() ?? '') ?? 0.0;
       final int parsedQty =
           int.tryParse(qtyEditControllers[name]?.text.trim() ?? '') ?? 1;
-      final String qty = (parsedQty < 1 ? 1 : parsedQty).toString();
-      // Matches updateRateAndAmount()/addItem(): amount is rounded to the
-      // configured decimal places before being stored, not left raw.
-      final double amount = double.parse(
-        (resolvedRate * double.parse(qty)).toStringAsFixed(decimal!),
-      );
       final String meterFrom = isUniGasSerial
           ? (startReadingControllers[name]?.text.trim() ?? '')
           : '';
@@ -6723,398 +4452,74 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
           ? (endReadingControllers[name]?.text.trim() ?? '')
           : '';
 
-      final int existingIndex = saleItems.indexWhere(
-        (i) =>
-            i.itemName == name &&
-            double.parse(i.itemPrice.toStringAsFixed(decimal!)) ==
-                double.parse(resolvedRate.toStringAsFixed(decimal!)) &&
-            i.itemUnit == unitName,
+      entries.add(
+        SoBulkAddEntry(
+          name: name,
+          quantity: parsedQty,
+          rate: resolvedRate,
+          unit: unitName,
+          location: itemLocationName,
+          meterFrom: meterFrom,
+          meterTo: meterTo,
+        ),
       );
-
-      if (existingIndex != -1) {
-        final existing = saleItems[existingIndex];
-        // BigInt, not int - a manually-typed quantity can run past int64
-        // range and int.parse() throws FormatException on that instead of
-        // silently erroring, crashing the add-item flow outright.
-        final String newQty =
-            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
-                .toString();
-        saleItems[existingIndex] = existing
-            .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
-      } else {
-        saleItems.add(
-          SaleItem(
-            itemName: name,
-            itemQuantity: qty,
-            itemPrice: resolvedRate,
-            itemAmount: amount,
-            itemLocation: itemLocationName,
-            itemUnit: unitName,
-            accountingAllocationList: {},
-            batchAllocationList: {
-              'GODOWNNAME': itemLocationName,
-              'AMOUNT': amount,
-              'ACTUALQTY': '$qty $unitName',
-              'BILLEDQTY': '$qty $unitName',
-            },
-            meterFrom: meterFrom,
-            meterTo: meterTo,
-          ),
-        );
-      }
     }
 
-    _recalcTotalsAfterBulkAdd();
+    _notifier.addSelectedItemsInBulk(entries);
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
   }
 
-  void addItem() {
-    final itemName = _selecteditem;
-    final itemQuantity = itemQuantityController.text;
-    final itemPrice = itemRateController.text;
-    final itemAmount = itemAmountController.text;
-    final itemLocation = selectedLocation;
-    final itemUnit = _selectedunit;
-
-    final qty = double.tryParse(itemQuantity.replaceAll(',', '').trim()) ?? 0;
-
-    if (itemQuantity.trim().isEmpty || qty <= 0) {
-      showAppMessage(context, "Quantity must be greater than 0");
-      return;
-    }
-
-    if (itemName.isNotEmpty && itemPrice.isNotEmpty) {
-      Navigator.of(context).pop();
-
-      double parsedAmount = double.parse(itemAmount.replaceAll(',', ''));
-      double parsedPrice = double.parse(itemPrice.replaceAll(',', ''));
-      String parsedQuantity = itemQuantity.replaceAll(',', '');
-
-      final qty_unit = '$parsedQuantity $itemUnit';
-
-      Map<String, dynamic> batchAllocation = {
-        'GODOWNNAME': itemLocation,
-        'AMOUNT': parsedAmount,
-        'ACTUALQTY': qty_unit,
-        'BILLEDQTY': qty_unit,
-      };
-
-      // Check if the item already exists in the list with the same name and price
-      int existingIndex = saleItems.indexWhere(
-        (item) =>
-            item.itemName == itemName &&
-            item.itemPrice == parsedPrice &&
-            item.itemUnit == itemUnit,
-      );
-      if (existingIndex != -1) {
-        // Item already exists with the same name, price, and unit, update its quantity and amount
-        SaleItem existingItem = saleItems[existingIndex];
-        // BigInt, not int - a manually-typed quantity can run past int64
-        // range and int.parse() throws FormatException on that instead of
-        // silently erroring, crashing the add-item flow outright.
-        String newQuantity =
-            (BigInt.parse(existingItem.itemQuantity) +
-                    BigInt.parse(parsedQuantity))
-                .toString();
-        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
-        saleItems[existingIndex] = existingItem
-            .updateQuantity(newQuantity)
-            .updateItemAmount(newAmount);
-      } else {
-        // Item doesn't exist, create a new SaleItem object and add it to the list
-        final newItem = SaleItem(
-          itemName: itemName,
-          itemQuantity: parsedQuantity,
-          itemPrice: parsedPrice,
-          itemAmount: parsedAmount,
-          itemLocation: itemLocation,
-          itemUnit: itemUnit,
-          accountingAllocationList: {},
-          batchAllocationList: batchAllocation,
-        );
-
-        setState(() {
-          saleItems.add(newItem);
-          // Rest of your code...
-        });
-      }
-
-      setState(() {
-        if (saleItems.isEmpty) {
-          isVisibleItemHeading = false;
-        } else {
-          isVisibleItemHeading = true;
-        }
-
-        totalPriceOfItems = saleItems.fold(0.0, (
-          double previousAmount,
-          SaleItem item,
-        ) {
-          return previousAmount +
-              (item.itemPrice * double.parse(item.itemQuantity));
-        });
-
-        if (_selectedvatledger != 'Not Applicable') {
-          // Calculate the total price of items
-
-          double vat_perc = vatperc / 100;
-
-          totalAmountForVatAppEntries = ledgerEntries
-              .where((entry) => entry.vatApp)
-              .fold(0.0, (double previousAmount, LedgerEntry entry) {
-                return previousAmount + entry.ledgerAmount;
-              });
-
-          ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-
-          itemsVatAmount = double.parse(
-            (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-          );
-
-          totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(roundedtotalVatAmount);
-          controller_vatamt.text = formattedVat.toString();
-        } else {
-          totalVatAmount = 0;
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(0);
-          controller_vatamt.text = formattedVat.toString();
-        }
-
-        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-          double previousAmount,
-          LedgerEntry entry,
-        ) {
-          return previousAmount + entry.ledgerAmount;
-        });
-
-        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-        roundedtotalAmount = double.parse(
-          totalAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalAmount);
-        controller_totalamt.text = formattedtotal.toString();
-
-        _selecteditem = '${(itemdata.isNotEmpty ? itemdata[0]['name'] : '')}';
-        _itemController.text = _selecteditem;
-        if (locationsdata.isNotEmpty) {
-          selectedLocation = locationsdata[0];
-          setState(() {
-            isVisibleLocation = true;
-          });
-        } else {
-          setState(() {
-            isVisibleLocation = false;
-          });
-        }
-        _updateUnitDropdown(_selecteditem);
-        itemQuantityController.text = 1.toString();
-        itemAmountController.clear();
-        itemRateController.clear();
-      });
-    }
-  }
-
+  /// Thin wrapper: resolves `_selectedledger`/`ledgerAmountController` (both
+  /// dialog-local) then hands off to the notifier's `addLedger`, which does
+  /// the merge-or-append + totals recompute this method used to do
+  /// directly.
   void addLedger() {
+    final ledgerdata = _s.ledgerData;
     Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
       (ledger) => ledger['name'] == _selectedledger,
     );
 
-    final ledgerName = specificLedger['name'];
-    final ledgerAmount = ledgerAmountController.text;
+    final ledgerName = specificLedger['name'] as String;
+    final ledgerAmountText = ledgerAmountController.text;
 
-    // tally-api's ledger row carries `vatApplicable` as a real bool
-    // (legacy's own shape used a 0/1 int under a lowercase key).
-    final vatApp = specificLedger['vatApplicable'] == true;
-
-    if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      // Create a new SaleItem object and add it to the list
+    if (ledgerName.isNotEmpty && ledgerAmountText.isNotEmpty) {
       Navigator.of(context).pop();
-      int existingIndex = ledgerEntries.indexWhere(
-        (entry) => entry.ledgerName == ledgerName,
-      );
-      double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
+      double parsedAmount = double.parse(ledgerAmountText.replaceAll(',', ''));
 
-      if (existingIndex != -1) {
-        // Ledger already exists, update its amount
-        LedgerEntry existingLedger = ledgerEntries[existingIndex];
-        double newAmount = existingLedger.ledgerAmount + parsedAmount;
+      _notifier.addLedger(ledgerName, parsedAmount);
 
-        // Update vatApp if necessary
-        bool newVatApp =
-            existingLedger.vatApp; // Initialize with the existing value
-        newVatApp = vatApp;
-
-        ledgerEntries[existingIndex] = existingLedger.updateAmount(
-          newAmount,
-          newVatApp,
-        );
-      } else {
-        // Ledger doesn't exist, create a new LedgerEntry object and add it to the list
-        final newItem = LedgerEntry(
-          ledgerName: ledgerName,
-          ledgerAmount: parsedAmount,
-          vatApp: vatApp,
-        );
-        setState(() {
-          ledgerEntries.add(newItem);
-        });
-      }
+      final vm = _s;
+      controller_vatamt.text = vm.formattedVatAmount;
+      controller_totalamt.text = vm.formattedTotalAmount;
       setState(() {
-        if (ledgerEntries.isEmpty) {
-          isVisibleLedgerHeading = false;
-        } else {
-          isVisibleLedgerHeading = true;
-        }
-
-        totalPriceOfItems = saleItems.fold(0.0, (
-          double previousAmount,
-          SaleItem item,
-        ) {
-          return previousAmount +
-              (item.itemPrice * double.parse(item.itemQuantity));
-        });
-
-        if (_selectedvatledger != 'Not Applicable') {
-          // Calculate the total ledger amount for entries with vatApp set to true
-          totalAmountForVatAppEntries = ledgerEntries
-              .where((entry) => entry.vatApp)
-              .fold(0.0, (double previousAmount, LedgerEntry entry) {
-                return previousAmount + entry.ledgerAmount;
-              });
-
-          double vat_perc = vatperc / 100;
-
-          itemsVatAmount = double.parse(
-            (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-          );
-
-          ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-
-          /*print('Total Ledger Amount for VAT-Applicable Entries: $totalAmountForVatAppEntries');
-          print('5% VAT Amount: $ledgerVatAmount');*/
-
-          totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(roundedtotalVatAmount);
-          controller_vatamt.text = formattedVat.toString();
-        } else {
-          totalVatAmount = 0;
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(0);
-          controller_vatamt.text = formattedVat.toString();
-        }
-        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-          double previousAmount,
-          LedgerEntry entry,
-        ) {
-          return previousAmount + entry.ledgerAmount;
-        });
-
-        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-        roundedtotalAmount = double.parse(
-          totalAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalAmount);
-        controller_totalamt.text = formattedtotal.toString();
-        _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-        ledgerAmountController.clear();
+        _selectedledger = vm.ledgerData.isNotEmpty ? vm.ledgerData[0]['name'] : null;
       });
+      ledgerAmountController.clear();
     }
   }
 
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
 
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
-      currencycode = prefs.getString('currencycode') ?? 'AED';
+  /// Mirrors `sales_registration_notifier.dart`'s widget: the notifier is
+  /// constructed (kicking off its own `_init()` - prefs load + `loadData()`)
+  /// the first time it's read, here. `build()`'s own
+  /// `!_s.isInitialDataLoaded` skeleton gate (unchanged from the original)
+  /// handles showing/hiding the loading state as the notifier's state
+  /// changes; this only sets the item-quantity/VAT/total controllers to
+  /// their fixed defaults and syncs the date controller once via
+  /// `_syncDateControllers`, registered as a one-time-per-change listener
+  /// in `initState`.
+  void _initSharedPreferences() {
+    itemQuantityController.text = 1.toString();
+    controller_vatamt.text = 0.toString();
+    controller_totalamt.text = 0.toString();
+    // Trigger provider creation (and its _init()) eagerly, matching the
+    // original's initState-time kickoff rather than waiting for build().
+    _notifier;
+  }
 
-      vatperc = prefs.getDouble('vatperc') ?? 5.0;
-
-      decimal = prefs.getInt('decimalplace') ?? 2;
-
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      // tally-api migration: the legacy getSalesData/nos/create URLs this
-      // screen used to build here are gone - loadData()/fetchvchnos()/
-      // saveEntry() now talk to tally-api via StockRepository/
-      // LedgerRepository/VoucherEntryRepository (+ the local TallyApiClient
-      // helpers above) instead, which resolve the active company/session
-      // from TokenStore rather than these SharedPreferences fields.
-
-      itemQuantityController.text = 1.toString();
-      controller_vatamt.text = 0.toString();
-
-      controller_totalamt.text = 0.toString();
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    await loadData();
-    if (mounted) {
-      setState(() {
-        _isInitialDataLoaded = true;
-      });
-    }
+  void _syncDateControllers(SalesOrderRegistrationState state) {
+    _dateController.text = state.saledatetxt;
   }
 
   @override
@@ -7130,6 +4535,39 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _initSharedPreferences();
+    ref.listenManual<SalesOrderRegistrationState>(
+      salesOrderRegistrationNotifierProvider,
+      (previous, next) => _syncDateControllers(next),
+      fireImmediately: true,
+    );
+    // Once the initial `loadData()` resolves, seed this screen's own
+    // dialog-composition fields (party-ledger/item/ledger typeahead text,
+    // default godown) from the freshly-loaded data - the original did this
+    // inline inside `loadData()`'s own `setState`.
+    ref.listenManual<SalesOrderRegistrationState>(
+      salesOrderRegistrationNotifierProvider,
+      (previous, next) {
+        if (next.isInitialDataLoaded &&
+            previous?.isInitialDataLoaded != true) {
+          _partyLedgerController.text = '${next.selectedPartyLedger ?? ''}';
+          setState(() {
+            _selectedledger = next.ledgerData.isNotEmpty
+                ? next.ledgerData[0]['name']
+                : null;
+            _selecteditem =
+                '${(next.itemData.isNotEmpty ? next.itemData[0]['name'] : '')}';
+            _itemController.text = _selecteditem;
+            if (next.locationsData.isNotEmpty) {
+              selectedLocation = next.locationsData[0];
+              isVisibleLocation = true;
+            } else {
+              isVisibleLocation = false;
+            }
+          });
+          _updateUnitDropdown(_selecteditem);
+        }
+      },
+    );
   }
 
   @override
@@ -7138,75 +4576,6 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
         .dispose(); // Dispose of the focus node when it's no longer needed.
     _animationController.dispose();
     super.dispose();
-  }
-
-  bool isValidEmail(String email) {
-    // Simple email validation pattern
-    final RegExp emailRegex = RegExp(
-      r'^[\w-]+(\.[\w-]+)*@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*(\.[a-zA-Z]{2,})$',
-    );
-    return emailRegex.hasMatch(email);
-  }
-
-  void _recalculateTotals() {
-    // Agar items empty hain to heading chhupao
-    isVisibleItemHeading = saleItems.isNotEmpty;
-
-    // Total items ka price
-    totalPriceOfItems = saleItems.fold(0.0, (
-      double previousAmount,
-      SaleItem item,
-    ) {
-      return previousAmount +
-          (item.itemPrice * double.parse(item.itemQuantity));
-    });
-
-    // VAT calculation
-    if (_selectedvatledger != 'Not Applicable') {
-      double vatPerc = vatperc / 100;
-
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double prev, LedgerEntry entry) {
-            return prev + entry.ledgerAmount;
-          });
-
-      ledgerVatAmount = totalAmountForVatAppEntries * vatPerc;
-      itemsVatAmount = double.parse(
-        (totalPriceOfItems * vatPerc).toStringAsFixed(decimal!),
-      );
-
-      totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = formatter
-          .format(roundedtotalVatAmount)
-          .toString();
-    } else {
-      totalVatAmount = 0;
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = formatter.format(0).toString();
-    }
-
-    // Ledger totals
-    totalAmountOfLedgers = ledgerEntries.fold(
-      0.0,
-      (double prev, entry) => prev + entry.ledgerAmount,
-    );
-
-    // Final total
-    totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-    roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-    controller_totalamt.text = formatter.format(roundedtotalAmount).toString();
   }
 
   // Skeleton stand-in for the entry form while the initial dropdown/lookup
@@ -7235,6 +4604,25 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(salesOrderRegistrationNotifierProvider);
+    final vm = _s;
+    final _isLoading = vm.isLoading;
+    final _isInitialDataLoaded = vm.isInitialDataLoaded;
+    final decimal = vm.decimal;
+    final currencycode = vm.currencyCode;
+    final vchtypenamedata = vm.vchTypeNameData;
+    final partyledgerdata = vm.partyLedgerData;
+    final salesledger_data = vm.salesLedgerData;
+    final vatledgerdata = vm.vatLedgerData;
+    final saleItems = vm.saleItems;
+    final ledgerEntries = vm.ledgerEntries;
+    final errorMessageVchNo = vm.errorMessageVchNo;
+    final yearStartDate = vm.yearStartDate;
+    final yearEndDate = vm.yearEndDate;
+    final _selectedvchtypename = vm.selectedVchTypeName;
+    final _selectedsalesledger = vm.selectedSalesLedger;
+    final _selectedvatledger = vm.selectedVatLedger;
+
     if (!_isInitialDataLoaded) {
       return Scaffold(
         bottomNavigationBar: const AppBottomNav(
@@ -7678,10 +5066,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                   );
                                 }).toList(),
                                 onChanged: (value) async {
-                                  setState(() {
-                                    _selectedvchtypename = value!;
-                                    fetchvchnos(_selectedvchtypename);
-                                  });
+                                  _notifier.setSelectedVchType(value!);
+                                  fetchvchnos(value);
                                 },
                                 onTap: () {
                                   setState(() {
@@ -7792,10 +5178,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                                   size: 20,
                                                 ),
                                                 onPressed: () {
-                                                  setState(() {
-                                                    controller.clear();
-                                                    _selectedpartyledger = "";
-                                                  });
+                                                  controller.clear();
+                                                  _notifier.setSelectedPartyLedger("");
                                                 },
                                               ),
                                             Icon(
@@ -7860,10 +5244,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                     );
                                   },
                                   onSelected: (suggestion) {
-                                    setState(() {
-                                      _selectedpartyledger = suggestion;
-                                      _partyLedgerController.text = suggestion;
-                                    });
+                                    _partyLedgerController.text = suggestion;
+                                    _notifier.setSelectedPartyLedger(suggestion);
                                   },
                                   emptyBuilder: (context) => Padding(
                                     padding: const EdgeInsets.all(12.0),
@@ -8015,8 +5397,8 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                 items: salesledger_data,
                                 itemLabel: (item) => item.toString(),
                                 onChanged: (value) {
+                                  _notifier.setSelectedSalesLedger(value!);
                                   setState(() {
-                                    _selectedsalesledger = value!;
                                     _isFocused_vchno = false;
                                     _isFocused_narration = false;
                                     _isFocused_totalamt = false;
@@ -8116,31 +5498,14 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                         ),
                                       ),
                                       onIncrement: () {
-                                        int currentQty =
-                                            int.tryParse(item.itemQuantity) ??
-                                            0;
-                                        setState(() {
-                                          item.itemQuantity = (currentQty + 1)
-                                              .toString();
-                                          _recalculateTotals();
-                                        });
+                                        _notifier.incrementItemQuantity(index);
+                                        controller_vatamt.text = _s.formattedVatAmount;
+                                        controller_totalamt.text = _s.formattedTotalAmount;
                                       },
                                       onDecrement: () {
-                                        int currentQty =
-                                            int.tryParse(item.itemQuantity) ??
-                                            0;
-                                        if (currentQty > 1) {
-                                          setState(() {
-                                            item.itemQuantity = (currentQty - 1)
-                                                .toString();
-                                            _recalculateTotals();
-                                          });
-                                        } else {
-                                          setState(() {
-                                            saleItems.removeAt(index);
-                                            _recalculateTotals();
-                                          });
-                                        }
+                                        _notifier.decrementItemQuantity(index);
+                                        controller_vatamt.text = _s.formattedVatAmount;
+                                        controller_totalamt.text = _s.formattedTotalAmount;
                                       },
                                       onDelete: () {
                                         _deleteSaleItem(index);
@@ -8243,107 +5608,9 @@ class _SalesOrderRegistrationPageState extends State<SalesOrderRegistration>
                                       items: vatledgerdata,
                                       itemLabel: (item) => item,
                                       onChanged: (value) {
-                                        setState(() {
-                                          _selectedvatledger = value!;
-
-                                          // 👇 VAT calculation logic intact
-                                          totalPriceOfItems = saleItems.fold(
-                                            0.0,
-                                            (double prev, SaleItem item) =>
-                                                prev +
-                                                (item.itemPrice *
-                                                    double.parse(
-                                                      item.itemQuantity,
-                                                    )),
-                                          );
-
-                                          totalAmountOfLedgers = ledgerEntries
-                                              .fold(
-                                                0.0,
-                                                (
-                                                  double prev,
-                                                  LedgerEntry entry,
-                                                ) => prev + entry.ledgerAmount,
-                                              );
-
-                                          if (_selectedvatledger ==
-                                              'Not Applicable') {
-                                            totalVatAmount = 0;
-                                            roundedtotalVatAmount =
-                                                double.parse(
-                                                  totalVatAmount
-                                                      .toStringAsFixed(
-                                                        decimal!,
-                                                      ),
-                                                );
-                                            NumberFormat formatter =
-                                                NumberFormat(
-                                                  '#,##0.${'0' * decimal!}',
-                                                  'en_US',
-                                                );
-                                            controller_vatamt.text = formatter
-                                                .format(0);
-                                          } else {
-                                            double
-                                            totalAmountForLedgerVatAppEntries =
-                                                ledgerEntries
-                                                    .where(
-                                                      (entry) => entry.vatApp,
-                                                    )
-                                                    .fold(
-                                                      0.0,
-                                                      (
-                                                        double prev,
-                                                        LedgerEntry entry,
-                                                      ) =>
-                                                          prev +
-                                                          entry.ledgerAmount,
-                                                    );
-
-                                            double vat_perc = vatperc / 100;
-                                            itemsVatAmount = double.parse(
-                                              (totalPriceOfItems * vat_perc)
-                                                  .toStringAsFixed(decimal!),
-                                            );
-                                            ledgerVatAmount =
-                                                totalAmountForLedgerVatAppEntries *
-                                                vat_perc;
-                                            totalVatAmount =
-                                                itemsVatAmount +
-                                                ledgerVatAmount;
-
-                                            roundedtotalVatAmount =
-                                                double.parse(
-                                                  totalVatAmount
-                                                      .toStringAsFixed(
-                                                        decimal!,
-                                                      ),
-                                                );
-                                            NumberFormat formatter =
-                                                NumberFormat(
-                                                  '#,##0.${'0' * decimal!}',
-                                                  'en_US',
-                                                );
-                                            controller_vatamt.text = formatter
-                                                .format(roundedtotalVatAmount);
-                                          }
-
-                                          totalAmount =
-                                              totalPriceOfItems +
-                                              totalAmountOfLedgers +
-                                              totalVatAmount;
-                                          roundedtotalAmount = double.parse(
-                                            totalAmount.toStringAsFixed(
-                                              decimal!,
-                                            ),
-                                          );
-                                          NumberFormat formatter = NumberFormat(
-                                            '#,##0.${'0' * decimal!}',
-                                            'en_US',
-                                          );
-                                          controller_totalamt.text = formatter
-                                              .format(roundedtotalAmount);
-                                        });
+                                        _notifier.setSelectedVatLedgerAndRecalculate(value!);
+                                        controller_vatamt.text = _s.formattedVatAmount;
+                                        controller_totalamt.text = _s.formattedTotalAmount;
                                       },
                                     ),
                                   ),
