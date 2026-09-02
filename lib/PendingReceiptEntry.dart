@@ -1,18 +1,15 @@
-import 'dart:convert';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/ReceiptRegistration.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'widgets/entry_widgets.dart';
 import 'ModifyReceiptEntry.dart';
-import 'api/api_exception.dart';
-import 'api/voucher_entry_repository.dart';
-import 'api/voucher_type_repository.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'providers/pending_receipt_entry_notifier.dart';
 
 /// A row from tally-api's `VoucherEntry` family (see
 /// `voucher_entry_repository.dart`), reshaped to the same
@@ -45,83 +42,25 @@ class ReceiptModel {
   });
 }
 
-class PendingReceiptEntry extends StatefulWidget {
+class PendingReceiptEntry extends ConsumerStatefulWidget {
   const PendingReceiptEntry({Key? key}) : super(key: key);
   @override
-  _PendingReceiptEntryPageState createState() =>
+  ConsumerState<PendingReceiptEntry> createState() =>
       _PendingReceiptEntryPageState();
 }
 
-class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
+class _PendingReceiptEntryPageState
+    extends ConsumerState<PendingReceiptEntry>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = false,
-      isVisibleNoReceiptEntryFound = false;
+  PendingReceiptEntryNotifier get _notifier =>
+      ref.read(pendingReceiptEntryNotifierProvider.notifier);
+  PendingReceiptEntryState get _s => ref.read(pendingReceiptEntryNotifierProvider);
 
   final Set<String> expandedCards = {};
 
-  String rolename_fetched = "";
-
-  final List<ReceiptModel> receiptentries = [];
-  DateTime? selectedSingleDate;
-  DateTimeRange? selectedDateRange;
-
-  String name = "", email = "";
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  late SharedPreferences prefs;
-
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
   TextEditingController _searchController = TextEditingController();
-
-  List<ReceiptModel> filteredReceiptEntries = [];
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-
-      print("serial_no: $serial_no");
-      print("isVanSalesSerial: $isVanSalesSerial");
-      print("vanSalesSerialNo: $vanSalesSerialNo");
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    fetchReceiptEntries();
-  }
 
   Future<void> _showConfirmationDialogAndNavigate(
     BuildContext context,
@@ -247,159 +186,14 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
     );
   }
 
+
   Future<void> entrydelete(String id) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await VoucherEntryRepository.instance.remove(id);
-      await fetchReceiptEntries();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    final error = await _notifier.entrydelete(id);
+    if (error != null) showAppMessage(context, error);
   }
 
-  /// tally-api has no per-voucher-type "getEntries" query - it returns
-  /// every `VoucherEntry` for the active company (see
-  /// [VoucherEntryRepository.listAll]), so the receipt-only filtering the
-  /// legacy `?type=receipt` query param did server-side is reproduced here
-  /// client-side: only entries whose `voucherTypeMasterId` matches one of
-  /// Tally's own `'Receipt'`-reservedName voucher types are kept. The
-  /// optional `spectra_allocations.receipt_voucher_type` preference
-  /// (legacy's `&vchName=` param) narrows that further to a single named
-  /// voucher type, same as before.
-  Future<void> fetchReceiptEntries() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    final prefs = await SharedPreferences.getInstance();
-
-    String? voucherTypeName;
-
-    final String? spectraAllocationsString = prefs.getString(
-      'spectra_allocations',
-    );
-
-    if (spectraAllocationsString != null &&
-        spectraAllocationsString.isNotEmpty) {
-      final List<dynamic> spectraAllocations = jsonDecode(
-        spectraAllocationsString,
-      );
-
-      if (spectraAllocations.isNotEmpty) {
-        voucherTypeName = spectraAllocations.first['receipt_voucher_type'];
-      }
-    }
-
-    print('receipt voucher type -> $voucherTypeName');
-
-    try {
-      final receiptVoucherTypes = await VoucherTypeRepository.instance
-          .byReservedName('RECEIPT');
-
-      Set<int> allowedVoucherTypeMasterIds = receiptVoucherTypes
-          .map((v) => v['masterId'] as int)
-          .toSet();
-
-      if (voucherTypeName != null && voucherTypeName.trim().isNotEmpty) {
-        final named = receiptVoucherTypes
-            .where((v) => v['name'] == voucherTypeName)
-            .map((v) => v['masterId'] as int)
-            .toSet();
-        if (named.isNotEmpty) {
-          allowedVoucherTypeMasterIds = named;
-        }
-      }
-
-      final allEntries = await VoucherEntryRepository.instance.listAll();
-
-      final receiptEntries = allEntries.where((e) {
-        final masterId = e['voucherTypeMasterId'];
-        return masterId is int && allowedVoucherTypeMasterIds.contains(masterId);
-      }).toList();
-
-      receiptentries.clear();
-      filteredReceiptEntries.clear();
-
-      isVisibleNoReceiptEntryFound = false;
-
-      receiptentries.addAll(
-        receiptEntries.map(
-          (e) => ReceiptModel(
-            id: e['id'].toString(),
-            data: e,
-            type: (e['voucherTypeName'] ?? 'Receipt').toString(),
-            // tally-api's VoucherEntry has no outbound-push-to-Tally job
-            // yet, so every entry is still pending/unsynced.
-            isSynced: 0,
-            message: null,
-          ),
-        ),
-      );
-
-      receiptentries.sort((a, b) {
-        DateTime dateA = DateTime.parse(a.data['date']);
-        DateTime dateB = DateTime.parse(b.data['date']);
-        if (dateA != dateB) return dateB.compareTo(dateA);
-        final vchA =
-            int.tryParse((a.data['voucherNumber'] ?? '').toString()) ?? 0;
-        final vchB =
-            int.tryParse((b.data['voucherNumber'] ?? '').toString()) ?? 0;
-        return vchB.compareTo(vchA);
-      });
-      filteredReceiptEntries = List.from(receiptentries);
-
-      setState(() {
-        FocusManager.instance.primaryFocus?.unfocus();
-        _searchController.clear();
-        selectedSingleDate = null;
-        selectedDateRange = null;
-      });
-
-      setState(() {
-        if (filteredReceiptEntries.isEmpty) {
-          isVisibleNoReceiptEntryFound = true;
-        }
-        _isLoading = false;
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      print(e);
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isLoading = false;
-      });
-    }
-
-    setState(() {
-      if (filteredReceiptEntries.isEmpty) {
-        isVisibleNoReceiptEntryFound = true;
-      }
-      _isLoading = false;
-    });
-  }
-
-  void searchReceipt(String query) {
-    _applyFilters();
-  }
-
-  /// The party ledger entry among a voucher entry's `ledgerEntries` -
-  /// tally-api's `isPartyLedger` flag identifies it directly, replacing
-  /// legacy's implicit "first `ALLLEDGERENTRIES.LIST` row" convention.
+  /// The party ledger entry among a voucher entry's `ledgerEntries` - kept
+  /// widget-local too (pure function, also called directly by `build()`).
   Map<String, dynamic>? _partyLedgerEntry(Map<String, dynamic> data) {
     final List<dynamic> ledgerEntries =
         (data['ledgerEntries'] as List<dynamic>?) ?? const [];
@@ -413,37 +207,17 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
         : null;
   }
 
-  void _applyFilters() {
-    final query = _searchController.text.trim().toLowerCase();
+  /// Widget-side wrapper - the fetch/filter/sort logic moved verbatim into
+  /// `PendingReceiptEntryNotifier.fetchReceiptEntries`.
+  Future<void> fetchReceiptEntries() async {
+    final error = await _notifier.fetchReceiptEntries();
+    if (error != null) showAppMessage(context, error);
+    FocusManager.instance.primaryFocus?.unfocus();
+    _searchController.clear();
+  }
 
-    setState(() {
-      filteredReceiptEntries = receiptentries.where((entry) {
-        final data = entry.data;
-        final partyEntry = _partyLedgerEntry(data);
-
-        final party = (partyEntry?['ledgerName'] ?? '')
-            .toString()
-            .toLowerCase();
-        final vchno = (data['voucherNumber'] ?? '').toString().toLowerCase();
-        final vchtype = (data['voucherTypeName'] ?? '')
-            .toString()
-            .toLowerCase();
-        final amount = (partyEntry?['amount'] ?? '').toString().toLowerCase();
-
-        final bool matchesSearch =
-            query.isEmpty ||
-            party.contains(query) ||
-            vchno.contains(query) ||
-            vchtype.contains(query) ||
-            amount.contains(query);
-
-        final bool matchesDate = _matchesDateFilter(entry);
-
-        return matchesSearch && matchesDate;
-      }).toList();
-
-      isVisibleNoReceiptEntryFound = filteredReceiptEntries.isEmpty;
-    });
+  void searchReceipt(String query) {
+    _notifier.searchReceipt(query);
   }
 
   Future<void> _pickSingleDate() async {
@@ -451,7 +225,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
 
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: selectedSingleDate ?? DateTime.now(),
+      initialDate: _s.selectedSingleDate ?? DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
       builder: (context, child) {
@@ -480,12 +254,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
     );
 
     if (pickedDate != null) {
-      setState(() {
-        selectedSingleDate = pickedDate;
-        selectedDateRange = null;
-      });
-
-      _applyFilters();
+      _notifier.setSingleDateFilter(pickedDate);
     }
   }
 
@@ -496,7 +265,7 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
       context: context,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
-      initialDateRange: selectedDateRange,
+      initialDateRange: _s.selectedDateRange,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -565,85 +334,33 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
     );
 
     if (pickedRange != null) {
-      setState(() {
-        selectedDateRange = pickedRange;
-        selectedSingleDate = null;
-      });
-
-      _applyFilters();
+      _notifier.setDateRangeFilter(pickedRange);
     }
   }
 
   void _clearDateFilter() {
-    setState(() {
-      selectedSingleDate = null;
-      selectedDateRange = null;
-    });
-
-    _applyFilters();
+    _notifier.clearDateFilter();
   }
 
   String _getDateFilterText() {
+    final selectedSingleDate = _s.selectedSingleDate;
+    final selectedDateRange = _s.selectedDateRange;
     if (selectedSingleDate != null) {
-      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate!);
+      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate);
     }
 
     if (selectedDateRange != null) {
-      final start = DateFormat("dd-MMM").format(selectedDateRange!.start);
-      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange!.end);
+      final start = DateFormat("dd-MMM").format(selectedDateRange.start);
+      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange.end);
       return "$start to $end";
     }
 
     return "All Dates";
   }
 
-  bool _matchesDateFilter(ReceiptModel entry) {
-    final dateValue = entry.data['date'];
-
-    if (dateValue == null) return false;
-
-    final entryDate = DateTime.tryParse(dateValue.toString());
-
-    if (entryDate == null) return false;
-
-    final onlyEntryDate = DateTime(
-      entryDate.year,
-      entryDate.month,
-      entryDate.day,
-    );
-
-    if (selectedSingleDate != null) {
-      final selected = DateTime(
-        selectedSingleDate!.year,
-        selectedSingleDate!.month,
-        selectedSingleDate!.day,
-      );
-
-      return onlyEntryDate == selected;
-    }
-
-    if (selectedDateRange != null) {
-      final start = DateTime(
-        selectedDateRange!.start.year,
-        selectedDateRange!.start.month,
-        selectedDateRange!.start.day,
-      );
-
-      final end = DateTime(
-        selectedDateRange!.end.year,
-        selectedDateRange!.end.month,
-        selectedDateRange!.end.day,
-      );
-
-      return onlyEntryDate.isAtSameMomentAs(start) ||
-          onlyEntryDate.isAtSameMomentAs(end) ||
-          (onlyEntryDate.isAfter(start) && onlyEntryDate.isBefore(end));
-    }
-
-    return true;
-  }
-
   Widget _buildDateFilterSection() {
+    final selectedSingleDate = _s.selectedSingleDate;
+    final selectedDateRange = _s.selectedDateRange;
     final bool hasDateFilter =
         selectedSingleDate != null || selectedDateRange != null;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -796,17 +513,9 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
   @override
   void initState() {
     super.initState();
-    _initSharedPreferences();
-  }
-
-  bool get isVanSalesSerial {
-    final currentSerial = serial_no?.trim().toLowerCase();
-
-    if (currentSerial == null || currentSerial.isEmpty) {
-      return false;
-    }
-
-    return vanSalesSerialNo.any((s) => s.trim().toLowerCase() == currentSerial);
+    // Trigger provider creation (and its _init()) eagerly, matching the
+    // original's initState-time kickoff.
+    _notifier;
   }
 
   Future<void> _refresh() async {
@@ -817,6 +526,13 @@ class _PendingReceiptEntryPageState extends State<PendingReceiptEntry>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(pendingReceiptEntryNotifierProvider);
+    final vm = _s;
+    final receiptentries = vm.receiptEntries;
+    final filteredReceiptEntries = vm.filteredReceiptEntries;
+    final isVisibleNoReceiptEntryFound = vm.isVisibleNoReceiptEntryFound;
+    final _isLoading = vm.isLoading;
+    final serial_no = vm.serialNo;
     return WillPopScope(
       onWillPop: () async {
         Navigator.pushReplacement(
