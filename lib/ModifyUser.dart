@@ -1,14 +1,13 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'UserView.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
-import 'api/api_exception.dart';
-import 'api/base_api_client.dart';
-import 'api/identity_repository.dart';
+import 'providers/modify_user_notifier.dart';
 
 /// tally-oauth's `CompanyUserUpdateDto` only supports `{roleId?, isActive?}`
 /// - there is no endpoint for a company-user to change another
@@ -16,7 +15,7 @@ import 'api/identity_repository.dart';
 /// editable by the `User` themselves via `PATCH /user`, or by an EMPLOYEE).
 /// So unlike the legacy screen, this no longer edits name/password - just
 /// role and active status.
-class ModifyUser extends StatefulWidget {
+class ModifyUser extends ConsumerStatefulWidget {
   final String companyUserId;
   final String userName;
   final String currentRoleId;
@@ -29,80 +28,49 @@ class ModifyUser extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _ModifyUserPageState createState() => _ModifyUserPageState();
+  ConsumerState<ModifyUser> createState() => _ModifyUserPageState();
 }
 
-class _ModifyUserPageState extends State<ModifyUser> {
-  List<Map<String, dynamic>> roles = [];
-  Map<String, dynamic>? selectedRole;
-  bool isActive = true;
-
-  bool isLoading = true;
-  bool isSaving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => isLoading = true);
-    try {
-      final results = await Future.wait([
-        IdentityRepository.instance.listRoles(limit: 100),
-        IdentityRepository.instance.getCompanyUser(widget.companyUserId),
-      ]);
-
-      final roleItems = ((results[0] as ApiResult).data as List)
-          .cast<Map<String, dynamic>>();
-      final companyUser = results[1] as Map<String, dynamic>;
-
-      roles = roleItems;
-      selectedRole = roles.firstWhere(
-        (r) => r['id'] == widget.currentRoleId,
-        orElse: () => roles.isNotEmpty ? roles.first : <String, dynamic>{},
-      );
-      isActive = companyUser['isActive'] as bool? ?? true;
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    }
-    setState(() => isLoading = false);
-  }
+class _ModifyUserPageState extends ConsumerState<ModifyUser> {
+  late final _args = ModifyUserArgs(
+    companyUserId: widget.companyUserId,
+    currentRoleId: widget.currentRoleId,
+  );
 
   Future<void> _save() async {
-    if (selectedRole == null || selectedRole!['id'] == null) {
-      showAppMessage(context, 'Please choose a role');
-      return;
+    final result =
+        await ref.read(modifyUserNotifierProvider(_args).notifier).save();
+    if (!mounted) return;
+    if (result.message != null) {
+      showAppMessage(context, result.message!, isError: !result.success);
     }
-
-    setState(() => isSaving = true);
-    try {
-      await IdentityRepository.instance.updateCompanyUser(
-        widget.companyUserId,
-        roleId: selectedRole!['id'] as String,
-        isActive: isActive,
+    if (result.success) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const UserView()),
       );
-      showAppMessage(context, 'User updated successfully', isError: false);
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const UserView()),
-        );
-      }
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    } finally {
-      if (mounted) setState(() => isSaving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = modifyUserNotifierProvider(_args);
+    final vm = ref.watch(provider);
+    final notifier = ref.read(provider.notifier);
+
+    ref.listen<ModifyUserState>(provider, (previous, next) {
+      if (next.loadError != null) {
+        showAppMessage(context, next.loadError!);
+        notifier.clearLoadError();
+      }
+    });
+
+    final isLoading = vm.isLoading;
+    final isSaving = vm.isSaving;
+    final roles = vm.roles;
+    final selectedRole = vm.selectedRole;
+    final isActive = vm.isActive;
+
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -174,7 +142,7 @@ class _ModifyUserPageState extends State<ModifyUser> {
                         itemLabel: (item) => (item['name'] ?? '').toString(),
                         hintText: 'Choose a role',
                         onChanged: (value) =>
-                            setState(() => selectedRole = value),
+                            notifier.selectRole(value as Map<String, dynamic>),
                       ),
                       const SizedBox(height: 8),
                       SwitchListTile(
@@ -185,7 +153,7 @@ class _ModifyUserPageState extends State<ModifyUser> {
                         ),
                         value: isActive,
                         activeColor: app_color,
-                        onChanged: (value) => setState(() => isActive = value),
+                        onChanged: (value) => notifier.setActive(value),
                       ),
                       const SizedBox(height: 20),
                       ElevatedButton(

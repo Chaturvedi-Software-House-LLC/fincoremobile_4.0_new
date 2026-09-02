@@ -1,16 +1,15 @@
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:FincoreGo/ModifyUser.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'CreateUser.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/identity_repository.dart';
+import 'providers/user_view_notifier.dart';
 
 /// A tally-oauth CompanyUser - `id` is the CompanyUser record's own id
 /// (needed for update/delete), `roleId` its currently assigned role
@@ -43,85 +42,22 @@ class UserModel {
   }
 }
 
-class UserView extends StatefulWidget {
+class UserView extends ConsumerStatefulWidget {
   const UserView({Key? key}) : super(key: key);
   @override
-  _UserViewPageState createState() => _UserViewPageState();
+  ConsumerState<UserView> createState() => _UserViewPageState();
 }
 
-class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = false,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = false,
-      isVisibleNoUserFound = false;
-
+class _UserViewPageState extends ConsumerState<UserView>
+    with TickerProviderStateMixin {
   final TextEditingController searchController = TextEditingController();
-
-  List<UserModel> filteredUsers = [];
 
   String userIdToDelete = "";
 
-  final List<UserModel> users = [];
-
-  String name = "", email = "";
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  late SharedPreferences prefs;
-
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
   void filterUsers(String query) {
-    setState(() {
-      if (query.trim().isEmpty) {
-        filteredUsers = List.from(users);
-      } else {
-        filteredUsers = users.where((user) {
-          return user.name.toLowerCase().contains(query.toLowerCase()) ||
-              user.email.toLowerCase().contains(query.toLowerCase()) ||
-              user.roleName.toLowerCase().contains(query.toLowerCase());
-        }).toList();
-      }
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    fetchUsers();
+    ref.read(userViewNotifierProvider.notifier).filterUsers(query);
   }
 
   Future<void> _showConfirmationDialogAndNavigate(BuildContext context) async {
@@ -261,25 +197,10 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
   }
 
   Future<void> userdelete(String companyUserId) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await IdentityRepository.instance.deleteCompanyUser(companyUserId);
-      showAppMessage(context, 'User deleted', isError: false);
-      await fetchUsers();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    final result =
+        await ref.read(userViewNotifierProvider.notifier).deleteUser(companyUserId);
+    if (!mounted) return;
+    showAppMessage(context, result.message, isError: !result.success);
   }
 
   Widget _buildSkeletonList() {
@@ -353,53 +274,25 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
   /// Company scoping now comes from the company-user session's token (see
   /// company-user.controller.ts's `findAll`), not a `serialno` in the
   /// request body - no param needed here anymore.
-  Future<void> fetchUsers() async {
-    setState(() {
-      _isLoading = true;
-    });
+  Future<void> fetchUsers() =>
+      ref.read(userViewNotifierProvider.notifier).fetchUsers();
 
-    try {
-      final result = await IdentityRepository.instance.listCompanyUsers(limit: 100);
-      final items = (result.data as List).cast<Map<String, dynamic>>();
-
-      users.clear();
-      users.addAll(items.map(UserModel.fromJson));
-      filteredUsers = List.from(users);
-
-      users.sort(compareDataObjects);
-      filteredUsers.sort(compareDataObjects);
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    }
-
-    setState(() {
-      if (users.isEmpty) {
-        isVisibleNoUserFound = true;
-      }
-      _isLoading = false;
-    });
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _initSharedPreferences();
-  }
-
-  Future<void> _refresh() async {
-    setState(() {
-      fetchUsers();
-    });
-  }
-
-  int compareDataObjects(UserModel a, UserModel b) {
-    return a.name.compareTo(b.name);
-  }
+  Future<void> _refresh() => fetchUsers();
 
   @override
   Widget build(BuildContext context) {
+    final vm = ref.watch(userViewNotifierProvider);
+    ref.listen<UserViewState>(userViewNotifierProvider, (previous, next) {
+      if (next.errorMessage != null) {
+        showAppMessage(context, next.errorMessage!);
+        ref.read(userViewNotifierProvider.notifier).clearError();
+      }
+    });
+    final isVisibleNoUserFound = vm.isVisibleNoUserFound;
+    final isLoading = vm.isLoading;
+    final filteredUsers = vm.filteredUsers;
+    final company = vm.company;
+
     return WillPopScope(
       onWillPop: () async {
         Navigator.pushReplacement(
@@ -437,7 +330,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                 children: [
                   Flexible(
                     child: Text(
-                      company ?? '',
+                      company,
                       style: GoogleFonts.poppins(
                         color: Colors.white,
                         fontSize: 20,
@@ -766,7 +659,7 @@ class _UserViewPageState extends State<UserView> with TickerProviderStateMixin {
                 ],
               ),
 
-              if (_isLoading)
+              if (isLoading)
                 Positioned.fill(
                   child: Container(
                     color: Theme.of(context).scaffoldBackgroundColor,

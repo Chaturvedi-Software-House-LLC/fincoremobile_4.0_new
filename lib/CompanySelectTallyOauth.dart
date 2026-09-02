@@ -1,16 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Dashboard.dart';
 import 'Login.dart';
 import 'constants.dart';
-import 'api/api_exception.dart';
-import 'api/auth_repository.dart';
-import 'legacy_permission_flags.dart';
+import 'providers/company_select_notifier.dart';
 
 /// Company-switch entry points (Dashboard's app-bar company name,
 /// `app_bottom_nav.dart`'s "Companies" quick action). Used to switch between
@@ -67,53 +64,23 @@ Future<void> navigateToCompanySwitch(BuildContext context) async {
 /// (`AuthRepository.currentCompanyUserPermissions`), via
 /// `legacy_permission_flags.dart`'s mapping table - no longer the old
 /// hardcoded "everything True" interim default.
-class CompanySelectTallyOauth extends StatefulWidget {
+class CompanySelectTallyOauth extends ConsumerStatefulWidget {
   const CompanySelectTallyOauth({super.key});
 
   @override
-  State<CompanySelectTallyOauth> createState() =>
+  ConsumerState<CompanySelectTallyOauth> createState() =>
       _CompanySelectTallyOauthState();
 }
 
-class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
+class _CompanySelectTallyOauthState
+    extends ConsumerState<CompanySelectTallyOauth>
     with TickerProviderStateMixin {
-  bool _isLoading = true;
-  bool _isSelecting = false;
-  String? _errorMessage;
-  // Cause-specific heading for _errorMessage ("License Expired" vs.
-  // "License Suspended" etc.) - null falls back to a generic title.
-  String? _errorTitle;
-
-  // Becomes true the first time the serial/company list UI is actually
-  // rendered - before that, a single-license+single-company account never
-  // sees any list at all, matching legacy's silent auto-navigate.
-  bool _listShown = false;
-
-  List<Map<String, dynamic>> _allCompanies = [];
-  // "Valid" = usable for login (active, not suspended, not expired) -
-  // mirrors legacy's license-expiry/suspension check, which blocked a
-  // serial from being used rather than just hiding it silently.
-  List<Map<String, dynamic>> _validLicenses = [];
-
-  // null = still on the "pick a serial number" step (only reached when
-  // there's more than one valid license). Set once a license is chosen,
-  // or auto-chosen when there's exactly one.
-  Map<String, dynamic>? _selectedLicense;
-
-  String _adminEmail = '';
-
   final _serialSearchController = TextEditingController();
   final _companySearchController = TextEditingController();
-  String _serialSearchQuery = '';
-  String _companySearchQuery = '';
-  bool _showAllSerials = false;
-  bool _showAllCompanies = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadData();
-  }
+  CompanySelectNotifier get _notifier =>
+      ref.read(companySelectNotifierProvider.notifier);
+  CompanySelectState get _s => ref.read(companySelectNotifierProvider);
 
   @override
   void dispose() {
@@ -122,254 +89,31 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
     super.dispose();
   }
 
-  List<Map<String, dynamic>> _companiesFor(String licenseId) =>
-      _allCompanies.where((c) => c['licenseId'] == licenseId).toList();
-
-  /// Same checks legacy's license-expiry dialog made before letting a
-  /// serial number be used: active, not suspended, not past its
-  /// `validUntil` date. tally-oauth also enforces this server-side at
-  /// company-user login, but checking here too means an expired/suspended
-  /// license shows a clear reason up front instead of a generic "sign-in
-  /// failed" after the user has already picked a company under it. Now a
-  /// thin wrapper over [AuthRepository.isLicenseUsable] - kept as one
-  /// source of truth shared with [Login]'s own pre-flight check.
-  bool _isLicenseValid(Map<String, dynamic> license) =>
-      AuthRepository.instance.isLicenseUsable(license);
-
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-      _errorTitle = null;
-      _selectedLicense = null;
-    });
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _adminEmail = prefs.getString('username') ?? '';
-
-      final results = await Future.wait([
-        AuthRepository.instance.listLicenses(),
-        AuthRepository.instance.listCompanies(),
-      ]);
-      final licenses = results[0];
-      final companies = results[1];
-
-      final valid = licenses.where(_isLicenseValid).toList();
-      final invalid = licenses.where((l) => !_isLicenseValid(l)).toList();
-
-      if (!mounted) return;
-      setState(() {
-        _allCompanies = companies;
-        _validLicenses = valid;
-        _isLoading = false;
-      });
-
-      if (valid.isEmpty) {
-        setState(() {
-          if (invalid.isNotEmpty) {
-            final reason = invalid.length == 1
-                ? AuthRepository.instance.licenseUnavailableReason(
-                    invalid.first,
-                  )
-                : null;
-            _errorTitle = reason?.$1 ?? 'Licenses Unavailable';
-            _errorMessage = reason?.$2 ??
-                'None of your licenses are currently active. Please contact your administrator.';
-          } else {
-            _errorTitle = 'No License Found';
-            _errorMessage = 'No license was found for this account.';
-          }
-        });
-        return;
-      }
-
-      // Single serial + single company -> straight to Dashboard, no UI
-      // shown at all (matches legacy's auto-navigate behavior exactly).
-      if (valid.length == 1) {
-        await _proceedWithLicense(valid.first);
-      } else {
-        setState(() => _listShown = true);
-      }
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = e.message;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Could not load your companies. Please try again.';
-      });
-    }
+    await _notifier.loadData();
   }
 
   Future<void> _proceedWithLicense(Map<String, dynamic> license) async {
-    final companies = _companiesFor(license['id'] as String);
-    if (!mounted) return;
-    setState(() {
-      _selectedLicense = license;
-      _errorMessage = null;
-      _errorTitle = null;
-      _showAllCompanies = false;
-      _companySearchController.clear();
-      _companySearchQuery = '';
-    });
-
-    if (companies.isEmpty) {
-      setState(() {
-        _errorMessage = 'No companies found for this serial number.';
-        _listShown = true;
-      });
-    } else if (companies.length == 1) {
-      // Single company under this serial -> straight to Dashboard.
-      await _selectCompany(companies.first);
-    } else {
-      setState(() => _listShown = true);
-    }
+    _companySearchController.clear();
+    final result = await _notifier.proceedWithLicense(license);
+    if (result.success && mounted) _goToDashboard();
   }
 
-  void _backToSerialList() {
-    setState(() {
-      _selectedLicense = null;
-      _errorMessage = null;
-      _errorTitle = null;
-    });
-  }
-
-  String _normalizeCompanyName(String value) {
-    var trimmed = value.trim();
-    if (trimmed.endsWith('.')) {
-      trimmed = trimmed.substring(0, trimmed.length - 1);
-    }
-    return trimmed;
-  }
-
-  String _licenseLabel(Map<String, dynamic> license) {
-    final serial = license['tallySerialNumber'] as String?;
-    if (serial != null && serial.isNotEmpty) return serial;
-    // Falls back to the license name when no Tally serial number has been
-    // bound yet (see AuthRepository.listLicenses's doc comment) - still
-    // lets the account be selected rather than showing a blank row.
-    return license['name']?.toString() ?? 'Unnamed license';
-  }
+  void _backToSerialList() => _notifier.backToSerialList();
 
   Future<void> _selectCompany(Map<String, dynamic> company) async {
-    setState(() {
-      _isSelecting = true;
-      _errorMessage = null;
-      _errorTitle = null;
-    });
+    final result = await _notifier.selectCompany(company);
+    if (result.success && mounted) _goToDashboard();
+  }
 
-    try {
-      final companyId = company['id'] as String;
-      final companyName = company['name'] as String;
-      // tally-oauth's `startFrom` is a full ISO datetime string
-      // ("2026-04-01T00:00:00.000Z"), but every screen that reads the
-      // 'startfrom' prefs key (SalesRegistration/ReceiptRegistration/
-      // DeliveryNoteRegistration's fetchvchnos, Dashboard, PartyClicked,
-      // Transactions, ItemsClicked, DashboardClicked) expects legacy's
-      // compact `yyyyMMdd` via parseCompactDate/DateFormat('yyyyMMdd') -
-      // storing the raw ISO string crashed fetchvchnos's date-range parse
-      // with an uncaught FormatException (confirmed live: voucher-number
-      // auto-fill silently never completed). Converted here, once, at the
-      // source, rather than fixing every consumer's parse call.
-      final rawStartFrom = company['startFrom']?.toString();
-      final parsedStartFrom = rawStartFrom == null
-          ? null
-          : DateTime.tryParse(rawStartFrom);
-      final startFrom = parsedStartFrom == null
-          ? ''
-          : DateFormat('yyyyMMdd').format(parsedStartFrom);
-      // tally-oauth's `GET /company` response nests the owning license's
-      // real `validUntil` here (CompanyResponseSchema). Dashboard.dart
-      // treats a missing/unparseable `license_expiry` as *already expired*
-      // (a safe-by-default fallback for the legacy flow, where a missing
-      // value genuinely meant "never checked") and force-navigates to the
-      // legacy SerialSelect screen via a non-dismissible dialog - so this
-      // must be populated with the real value, not left blank, even though
-      // tally-oauth already enforces validity server-side at login too.
-      final licenseExpiry =
-          (company['license'] as Map<String, dynamic>?)?['validUntil']
-              as String?;
-
-      // The real Tally serial number (`$$LicenseInfo:SerialNumber`) this
-      // license was bound to by a tally-connector, once it's synced one -
-      // this is the SAME `serial_no` value every existing
-      // `vanSalesSerialNo.contains(serial_no)` check across the app
-      // (Van Allocation, Delivery Note visibility, price-level lookup,
-      // Receipt's outstanding-bills card) already keys off, so once
-      // tally-admin-api exposes it here (see docs/requests/2026-09-01-
-      // expose-tally-serial-on-company-response.md in that repo - not
-      // shipped yet at the time this was written), a Spectra company that
-      // only ever existed on the new backend is recognized correctly with
-      // no further changes needed anywhere else. Falls back to '' (today's
-      // hardcoded value) when the field is absent/null, so this is a no-op
-      // until that backend field ships.
-      final tallySerialNumber =
-          (company['license'] as Map<String, dynamic>?)?['tallySerialNumber']
-              as String? ??
-          '';
-
-      // The only auth tally-api gets for this session - awaited and
-      // error-handled, not best-effort, unlike SerialSelect's
-      // fire-and-forget equivalent.
-      await AuthRepository.instance.selectCompanyById(companyId);
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('company_name', _normalizeCompanyName(companyName));
-      // Only written when parsing actually succeeded - every consumer's own
-      // `prefs.getString('startfrom') ?? <yearStart fallback>` only kicks in
-      // for a genuinely absent key, not an empty string, so leaving the key
-      // unset here (rather than writing '') is what makes that fallback
-      // actually take effect if `startFrom` was ever missing/unparseable.
-      if (startFrom.isNotEmpty) {
-        await prefs.setString('startfrom', startFrom);
-      }
-      if (licenseExpiry != null) {
-        await prefs.setString('license_expiry', licenseExpiry);
-      }
-      await prefs.setString('serial_no', tallySerialNumber);
-      await prefs.setString('base_currency', '');
-      await prefs.setString('company_trn', '');
-      await prefs.setString('company_address', '');
-      await prefs.setString('company_emirate', '');
-      await prefs.setString('company_country', '');
-
-      // Real per-permission screen-visibility flags, replacing the old
-      // hardcoded "everything True" interim default - see
-      // legacy_permission_flags.dart for the full legacy-key <-> new
-      // permission-string mapping and the fail-closed default it applies
-      // when the permissions claim can't be read at all.
-      final permissions =
-          await AuthRepository.instance.currentCompanyUserPermissions();
-      await applyPermissionFlags(prefs, permissions);
-
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => Dashboard()),
-      );
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isSelecting = false;
-        _errorMessage = e.message;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isSelecting = false;
-        _errorMessage = 'Could not sign in to this company. Please try again.';
-      });
-    }
+  void _goToDashboard() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => Dashboard()),
+    );
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await AuthRepository.instance.logout();
-    await prefs.clear();
+    await _notifier.logout();
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
@@ -526,7 +270,9 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
 
   @override
   Widget build(BuildContext context) {
-    final showFullScreenLoader = (_isLoading || _isSelecting) && !_listShown;
+    ref.watch(companySelectNotifierProvider);
+    final showFullScreenLoader =
+        (_s.isLoading || _s.isSelecting) && !_s.listShown;
     if (showFullScreenLoader) {
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -608,42 +354,42 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
                             children: [
                               _buildInfoHeader(),
                               const SizedBox(height: 18),
-                              if (_errorMessage != null &&
-                                  _selectedLicense == null) ...[
+                              if (_s.errorMessage != null &&
+                                  _s.selectedLicense == null) ...[
                                 _buildErrorBanner(
-                                  _errorTitle ?? 'License Unavailable',
-                                  _errorMessage!,
+                                  _s.errorTitle ?? 'License Unavailable',
+                                  _s.errorMessage!,
                                   _loadData,
                                 ),
                                 const SizedBox(height: 18),
                               ],
-                              if (_validLicenses.length > 1) ...[
+                              if (_s.validLicenses.length > 1) ...[
                                 _buildSectionHeader(
                                   title: "Serial Numbers",
-                                  count: _validLicenses.length,
+                                  count: _s.validLicenses.length,
                                   icon: Icons.confirmation_number_outlined,
                                 ),
                                 const SizedBox(height: 10),
                                 _buildSerialList(),
                                 const SizedBox(height: 22),
                               ],
-                              if (_selectedLicense != null) ...[
+                              if (_s.selectedLicense != null) ...[
                                 _buildSectionHeader(
                                   title: "Companies",
-                                  count: _companiesFor(
-                                    _selectedLicense!['id'] as String,
+                                  count: _s.companiesFor(
+                                    _s.selectedLicense!['id'] as String,
                                   ).length,
                                   icon: Icons.business_rounded,
                                 ),
                                 const SizedBox(height: 10),
-                                if (_errorMessage != null)
+                                if (_s.errorMessage != null)
                                   _buildErrorBanner(
-                                    _errorTitle ?? 'License Unavailable',
-                                    _errorMessage!,
-                                    _validLicenses.length > 1
+                                    _s.errorTitle ?? 'License Unavailable',
+                                    _s.errorMessage!,
+                                    _s.validLicenses.length > 1
                                         ? _backToSerialList
                                         : _loadData,
-                                    retryLabel: _validLicenses.length > 1
+                                    retryLabel: _s.validLicenses.length > 1
                                         ? 'Back to serial numbers'
                                         : 'Retry',
                                   )
@@ -747,7 +493,7 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
   }
 
   Widget _buildProgressOverlay() {
-    if (!_isLoading && !_isSelecting) return const SizedBox.shrink();
+    if (!_s.isLoading && !_s.isSelecting) return const SizedBox.shrink();
 
     return Positioned.fill(
       child: AbsorbPointer(
@@ -795,9 +541,9 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
     // license is picked (legacy fetched it per-serial via `getadmindata`) -
     // shows the max-users-per-company cap once a license is selected, or
     // the count of active serial numbers while still choosing one.
-    final subtitle = _selectedLicense != null
-        ? "Max Users: ${_selectedLicense!['maxUsersPerCompany'] ?? '-'}"
-        : "Active Serial Numbers: ${_validLicenses.length}";
+    final subtitle = _s.selectedLicense != null
+        ? "Max Users: ${_s.selectedLicense!['maxUsersPerCompany'] ?? '-'}"
+        : "Active Serial Numbers: ${_s.validLicenses.length}";
 
     return Container(
       width: double.infinity,
@@ -824,7 +570,7 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _adminEmail.isEmpty ? "Account" : _adminEmail,
+                  _s.adminEmail.isEmpty ? "Account" : _s.adminEmail,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
@@ -951,24 +697,25 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
   }
 
   Widget _buildSerialList() {
-    final searchedSerials = _serialSearchQuery.isEmpty
-        ? _validLicenses
-        : _validLicenses.where((item) {
-            return _licenseLabel(item).toLowerCase().contains(_serialSearchQuery);
+    final searchedSerials = _s.serialSearchQuery.isEmpty
+        ? _s.validLicenses
+        : _s.validLicenses.where((item) {
+            return _notifier
+                .licenseLabel(item)
+                .toLowerCase()
+                .contains(_s.serialSearchQuery);
           }).toList();
 
     final visibleSerials =
-        _showAllSerials ? searchedSerials : searchedSerials.take(3).toList();
+        _s.showAllSerials ? searchedSerials : searchedSerials.take(3).toList();
 
     return Column(
       children: [
-        if (_validLicenses.length > 6)
+        if (_s.validLicenses.length > 6)
           _buildSearchField(
             controller: _serialSearchController,
             hintText: 'Search serial numbers...',
-            onChanged: (value) {
-              setState(() => _serialSearchQuery = value.trim().toLowerCase());
-            },
+            onChanged: _notifier.setSerialSearchQuery,
           ),
         if (searchedSerials.isEmpty)
           Padding(
@@ -982,8 +729,8 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
             ),
           ),
         ...visibleSerials.map((item) {
-          final bool isSelected = item == _selectedLicense;
-          final serialText = _licenseLabel(item);
+          final bool isSelected = item == _s.selectedLicense;
+          final serialText = _notifier.licenseLabel(item);
           final bool isDark = Theme.of(context).brightness == Brightness.dark;
           final Color unselectedBorder = isDark
               ? Theme.of(context).dividerColor.withOpacity(0.55)
@@ -1051,24 +798,26 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
         }),
         if (searchedSerials.length > 3)
           _buildViewMoreButton(
-            expanded: _showAllSerials,
-            onTap: () => setState(() => _showAllSerials = !_showAllSerials),
+            expanded: _s.showAllSerials,
+            onTap: _notifier.toggleShowAllSerials,
           ),
       ],
     );
   }
 
   Widget _buildCompanyList() {
-    final allForLicense = _companiesFor(_selectedLicense!['id'] as String);
-    final searchedCompanies = _companySearchQuery.isEmpty
+    final allForLicense =
+        _s.companiesFor(_s.selectedLicense!['id'] as String);
+    final searchedCompanies = _s.companySearchQuery.isEmpty
         ? allForLicense
         : allForLicense.where((item) {
             final companyName = (item['name']?.toString() ?? '').toLowerCase();
-            return companyName.contains(_companySearchQuery);
+            return companyName.contains(_s.companySearchQuery);
           }).toList();
 
-    final visibleCompanies =
-        _showAllCompanies ? searchedCompanies : searchedCompanies.take(3).toList();
+    final visibleCompanies = _s.showAllCompanies
+        ? searchedCompanies
+        : searchedCompanies.take(3).toList();
 
     return Column(
       children: [
@@ -1079,9 +828,7 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
           _buildSearchField(
             controller: _companySearchController,
             hintText: 'Search companies...',
-            onChanged: (value) {
-              setState(() => _companySearchQuery = value.trim().toLowerCase());
-            },
+            onChanged: _notifier.setCompanySearchQuery,
           ),
         if (searchedCompanies.isEmpty)
           Padding(
@@ -1159,8 +906,8 @@ class _CompanySelectTallyOauthState extends State<CompanySelectTallyOauth>
         }),
         if (searchedCompanies.length > 3)
           _buildViewMoreButton(
-            expanded: _showAllCompanies,
-            onTap: () => setState(() => _showAllCompanies = !_showAllCompanies),
+            expanded: _s.showAllCompanies,
+            onTap: _notifier.toggleShowAllCompanies,
           ),
       ],
     );

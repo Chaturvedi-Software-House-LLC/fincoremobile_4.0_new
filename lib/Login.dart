@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
@@ -22,22 +23,22 @@ import 'widgets/entry_widgets.dart';
 import 'services/biometric_auth_service.dart';
 import 'api/api_exception.dart';
 import 'api/auth_repository.dart';
+import 'providers/login_notifier.dart';
 // import 'package:firebase_messaging/firebase_messaging.dart';
 
-class Login extends StatefulWidget {
+class Login extends ConsumerStatefulWidget {
   final String username, password;
   const Login({required this.username, required this.password});
   @override
-  _LoginPageState createState() =>
+  ConsumerState<Login> createState() =>
       _LoginPageState(usernamee: username, passwordd: password);
 }
 
-class _LoginPageState extends State<Login> with TickerProviderStateMixin {
+class _LoginPageState extends ConsumerState<Login>
+    with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _resetformKey = GlobalKey<FormState>();
   final _otpformKey = GlobalKey<FormState>();
-
-  bool _isOtpVerifyingProgress = false;
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   Color _buttonColor = app_color;
@@ -47,14 +48,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   String responseMessage = ''; // To store the server response.
 
-  bool isVisibleTimer = false;
-
   bool isOTPVerified = false, isAnotherDevice = false;
 
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
-
-  bool _isLoading = false, _isLoadingResetPass = false;
 
   final String SHARED_PREFERENCES_NAME = "login_prefs";
 
@@ -64,20 +61,11 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   String? deviceIdentifier = '';
 
-  String generatedotp = '';
-
-  bool isVisibleLoginForm = true,
-      isVisibleResetPassForm = false,
-      isVisibleOTPForm = false,
-      isVisibleResetOtpForm = false;
-
   // tally-oauth's password-reset flow (see AuthRepository.requestPasswordResetOtp/
   // changePassword) - "Forgot Password?" used to only call the legacy
   // backend, which doesn't exist for a tally-oauth-only account. Reuses
   // the same OTP-then-new-password flow already built for
   // ChangePassword.dart's tally-oauth path.
-  String? _passwordResetToken;
-  bool _isConfirmingPasswordReset = false;
   final resetOtpController = TextEditingController();
   final newPasswordController = TextEditingController();
   final confirmNewPasswordController = TextEditingController();
@@ -97,41 +85,29 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   DateTime? lastBackPressedTime;
 
-  bool _isVerifyingOtp = false;
   bool _deviceIdentifierLoaded = false;
 
   late String passwordd = '';
 
-  bool _biometricAvailable = false;
-  bool _biometricEnabled = false;
-  bool _biometricPromptShown = false;
-  String _biometricLabel = 'Biometric';
-  bool _isBiometricAuthenticating = false;
-
-  // Fallback for devices with no fingerprint/Face ID hardware at all: a
-  // plain on/off "Remember Me" switch that, when enabled, silently signs
-  // the user back in on next launch using the last-saved credentials -
-  // no OS biometric prompt involved. Only ever shown when biometrics are
-  // not available on the device (see _biometricAvailable gating below).
-  bool _rememberMeEnabled = true;
-  bool _isRememberMeAutoLoggingIn = false;
   final _usernameFocusNode = FocusNode();
   final _passwordFocusNode = FocusNode();
   final _resetemailFocusNode = FocusNode();
   late TickerProvider tickerProvider;
   static final RegExp _emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
 
+  LoginNotifier get _login_ => ref.read(loginNotifierProvider.notifier);
+  LoginState get _s => ref.read(loginNotifierProvider);
+
   _LoginPageState({required this.usernamee, required this.passwordd});
 
   Future<void> _verifyOtpAndProceed(String enteredOTP) async {
-    if (_isVerifyingOtp || _isOtpVerifyingProgress) return;
+    if (_s.isVerifyingOtp || _s.isOtpVerifyingProgress) return;
 
     if (enteredOTP.length == 4) {
-      if (enteredOTP == generatedotp) {
-        setState(() {
-          _isVerifyingOtp = true;
-          _isOtpVerifyingProgress = true;
-        });
+      if (enteredOTP == _s.generatedOtp) {
+        _login_.update(
+          (s) => s.copyWith(isVerifyingOtp: true, isOtpVerifyingProgress: true),
+        );
 
         FocusManager.instance.primaryFocus?.unfocus();
 
@@ -141,9 +117,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         _directlogin();
 
         if (mounted) {
-          setState(() {
-            _isOtpVerifyingProgress = false;
-          });
+          _login_.update((s) => s.copyWith(isOtpVerifyingProgress: false));
         }
       } else {
         isOTPVerified = false;
@@ -154,10 +128,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         otpController.clear();
         currentText = '';
 
-        setState(() {
-          _isVerifyingOtp = false;
-          _isOtpVerifyingProgress = false;
-        });
+        _login_.update(
+          (s) =>
+              s.copyWith(isVerifyingOtp: false, isOtpVerifyingProgress: false),
+        );
       }
     } else {
       showAppMessage(context, 'Please enter a 4-digit OTP');
@@ -259,28 +233,31 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   Timer? _timer;
   int _start = 60; // 60 seconds countdown
-  bool _isButtonEnabled = false; // Button enable state
-  String _formattedTime = "01:00"; // Timer display
-
   void _startTimer() {
     _timer?.cancel();
     _start = 60; // Reset countdown to 60 seconds
-    _formattedTime = _formatDuration(_start); // Reset the formatted time
-    _isButtonEnabled = false; // Disable button initially
-    isVisibleTimer = true;
+    _login_.update(
+      (s) => s.copyWith(
+        formattedTimerTime: _formatDuration(_start),
+        isResendButtonEnabled: false,
+        isVisibleTimer: true,
+      ),
+    );
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_start > 0) {
-        setState(() {
-          _start--;
-          _formattedTime = _formatDuration(_start);
-        });
+        _start--;
+        _login_.update(
+          (s) => s.copyWith(formattedTimerTime: _formatDuration(_start)),
+        );
       } else {
         _stopTimer(); // Stop the timer when it reaches zero
-        setState(() {
-          _isButtonEnabled = true; // Enable the button
-          isVisibleTimer = false;
-        });
+        _login_.update(
+          (s) => s.copyWith(
+            isResendButtonEnabled: true,
+            isVisibleTimer: false,
+          ),
+        );
       }
     });
   }
@@ -359,16 +336,18 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     final rememberMeEnabled = prefs.getBool('remember_me_login_enabled') ?? true;
 
     if (!mounted) return;
-    setState(() {
-      _biometricAvailable = available;
-      _biometricEnabled = enabled;
-      _biometricLabel = label;
-      _rememberMeEnabled = rememberMeEnabled;
-    });
+    _login_.update(
+      (s) => s.copyWith(
+        biometricAvailable: available,
+        biometricEnabled: enabled,
+        biometricLabel: label,
+        rememberMeEnabled: rememberMeEnabled,
+      ),
+    );
   }
 
   Future<void> _onRememberMeChanged(bool value) async {
-    setState(() => _rememberMeEnabled = value);
+    _login_.update((s) => s.copyWith(rememberMeEnabled: value));
 
     final prefs = prefs_login;
     await prefs.setBool('remember_me_login_enabled', value);
@@ -388,7 +367,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   }
 
   Future<void> _rememberMeAutoLogin() async {
-    if (_isRememberMeAutoLoggingIn) return;
+    if (_s.isRememberMeAutoLoggingIn) return;
 
     final storedUsername = prefs_login.getString('remember_me_username');
     final storedPassword = prefs_login.getString('remember_me_password');
@@ -400,7 +379,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       return;
     }
 
-    setState(() => _isRememberMeAutoLoggingIn = true);
+    _login_.update((s) => s.copyWith(isRememberMeAutoLoggingIn: true));
     try {
       usernamee = storedUsername;
       passwordd = storedPassword;
@@ -411,17 +390,19 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
       _login();
     } finally {
-      if (mounted) setState(() => _isRememberMeAutoLoggingIn = false);
+      if (mounted) {
+        _login_.update((s) => s.copyWith(isRememberMeAutoLoggingIn: false));
+      }
     }
   }
 
   Future<void> _biometricLogin() async {
-    if (_isBiometricAuthenticating) return;
-    setState(() => _isBiometricAuthenticating = true);
+    if (_s.isBiometricAuthenticating) return;
+    _login_.update((s) => s.copyWith(isBiometricAuthenticating: true));
 
     try {
       final ok = await BiometricAuthService.instance.authenticate(
-        reason: 'Authenticate with $_biometricLabel to sign in',
+        reason: 'Authenticate with ${_s.biometricLabel} to sign in',
       );
       if (!ok) {
         // authenticate() may have discovered biometrics aren't actually
@@ -430,10 +411,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         // instead of waiting for the next app launch.
         final stillEnabled = await BiometricAuthService.instance.isEnabled();
         if (mounted && !stillEnabled) {
-          setState(() {
-            _biometricEnabled = false;
-            _rememberMeEnabled = true;
-          });
+          _login_.update(
+            (s) => s.copyWith(
+              biometricEnabled: false,
+              rememberMeEnabled: true,
+            ),
+          );
           await prefs_login.setBool('remember_me_login_enabled', true);
         }
         return;
@@ -448,7 +431,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         if (mounted) {
           showAppMessage(
             context,
-            'No saved credentials found. Please log in manually once to enable $_biometricLabel login.',
+            'No saved credentials found. Please log in manually once to enable ${_s.biometricLabel} login.',
           );
         }
         return;
@@ -463,20 +446,22 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
       _login();
     } finally {
-      if (mounted) setState(() => _isBiometricAuthenticating = false);
+      if (mounted) {
+        _login_.update((s) => s.copyWith(isBiometricAuthenticating: false));
+      }
     }
   }
 
   Future<void> _maybeOfferBiometricEnable() async {
-    if (_biometricPromptShown ||
-        _biometricEnabled ||
-        !_biometricAvailable ||
+    if (_s.biometricPromptShown ||
+        _s.biometricEnabled ||
+        !_s.biometricAvailable ||
         !mounted) {
       return;
     }
-    _biometricPromptShown = true;
+    _login_.update((s) => s.copyWith(biometricPromptShown: true));
 
-    final IconData biometricIcon = _biometricLabel == 'Face ID'
+    final IconData biometricIcon = _s.biometricLabel == 'Face ID'
         ? Icons.face_retouching_natural
         : Icons.fingerprint;
 
@@ -528,7 +513,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 18),
                       Text(
-                        'Enable $_biometricLabel login?',
+                        'Enable ${_s.biometricLabel} login?',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           fontSize: 18,
@@ -537,7 +522,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Use $_biometricLabel to sign in faster next time instead of typing your password.',
+                        'Use ${_s.biometricLabel} to sign in faster next time instead of typing your password.',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           fontSize: 13.5,
@@ -612,13 +597,15 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
     if (enable == true) {
       final confirmed = await BiometricAuthService.instance.authenticate(
-        reason: 'Confirm $_biometricLabel to enable it for sign in',
+        reason: 'Confirm ${_s.biometricLabel} to enable it for sign in',
       );
       if (confirmed) {
         await BiometricAuthService.instance.setEnabled(true);
         await prefs_login.setString('biometric_username', usernamee);
         await prefs_login.setString('biometric_password', passwordd);
-        if (mounted) setState(() => _biometricEnabled = true);
+        if (mounted) {
+          _login_.update((s) => s.copyWith(biometricEnabled: true));
+        }
       }
     }
   }
@@ -652,7 +639,9 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           .isEnabled();
 
       if (biometricEnabled) {
-        if (mounted) setState(() => _biometricEnabled = true);
+        if (mounted) {
+          _login_.update((s) => s.copyWith(biometricEnabled: true));
+        }
         await _biometricLogin();
       } else {
         // Either there's no fingerprint/Face ID hardware at all, or the
@@ -663,7 +652,9 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         final rememberMeEnabled =
             prefs_login.getBool('remember_me_login_enabled') ?? true;
         if (rememberMeEnabled) {
-          if (mounted) setState(() => _rememberMeEnabled = true);
+          if (mounted) {
+            _login_.update((s) => s.copyWith(rememberMeEnabled: true));
+          }
           await _rememberMeAutoLogin();
         }
       }
@@ -678,7 +669,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   /// already uses): this step just requests the OTP; [_confirmPasswordReset]
   /// (triggered from [_buildResetOtpForm]) completes it.
   Future<void> _resetpass() async {
-    setState(() => _isLoadingResetPass = true);
+    _login_.update((s) => s.copyWith(isLoadingResetPass: true));
     _showProcessingDialog();
 
     final enteredemail = resetemailController.text;
@@ -687,21 +678,23 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         username: enteredemail,
       );
       if (!mounted) return;
-      setState(() {
-        _passwordResetToken = token;
-        isVisibleResetPassForm = false;
-        isVisibleResetOtpForm = true;
-        resetOtpController.clear();
-        newPasswordController.clear();
-        confirmNewPasswordController.clear();
-      });
+      _login_.update(
+        (s) => s.copyWith(
+          passwordResetToken: token,
+          isVisibleResetPassForm: false,
+          isVisibleResetOtpForm: true,
+        ),
+      );
+      resetOtpController.clear();
+      newPasswordController.clear();
+      confirmNewPasswordController.clear();
     } on ApiException catch (e) {
       showAppMessage(context, e.message);
     } catch (e) {
       showAppMessage(context, 'Could not reach the server. Please try again.');
     } finally {
       if (mounted) {
-        setState(() => _isLoadingResetPass = false);
+        _login_.update((s) => s.copyWith(isLoadingResetPass: false));
         if (Navigator.canPop(context)) {
           Navigator.pop(context);
         }
@@ -712,7 +705,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   /// Step 2 of the tally-oauth reset flow - the OTP + new password form's
   /// submit handler.
   Future<void> _confirmPasswordReset() async {
-    final resetToken = _passwordResetToken;
+    final resetToken = _s.passwordResetToken;
     if (resetToken == null) return;
 
     if (resetOtpController.text.trim().length != 4) {
@@ -728,7 +721,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
       return;
     }
 
-    setState(() => _isConfirmingPasswordReset = true);
+    _login_.update((s) => s.copyWith(isConfirmingPasswordReset: true));
     try {
       await AuthRepository.instance.changePassword(
         resetToken: resetToken,
@@ -741,22 +734,24 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         'Password changed successfully. Please sign in.',
         isError: false,
       );
-      setState(() {
-        _passwordResetToken = null;
-        _isConfirmingPasswordReset = false;
-        isVisibleResetOtpForm = false;
-        isVisibleLoginForm = true;
-        usernameController.text = resetemailController.text;
-        resetemailController.clear();
-        resetOtpController.clear();
-        newPasswordController.clear();
-        confirmNewPasswordController.clear();
-      });
+      _login_.update(
+        (s) => s.copyWith(
+          clearPasswordResetToken: true,
+          isConfirmingPasswordReset: false,
+          isVisibleResetOtpForm: false,
+          isVisibleLoginForm: true,
+        ),
+      );
+      usernameController.text = resetemailController.text;
+      resetemailController.clear();
+      resetOtpController.clear();
+      newPasswordController.clear();
+      confirmNewPasswordController.clear();
     } on ApiException catch (e) {
-      setState(() => _isConfirmingPasswordReset = false);
+      _login_.update((s) => s.copyWith(isConfirmingPasswordReset: false));
       showAppMessage(context, e.message);
     } catch (e) {
-      setState(() => _isConfirmingPasswordReset = false);
+      _login_.update((s) => s.copyWith(isConfirmingPasswordReset: false));
       showAppMessage(context, 'Network error. Please try again.');
     }
   }
@@ -870,7 +865,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   /// for accounts that log in this way. That's an accepted, deliberate
   /// trade-off (see the migration plan's "Phase 6"), not a bug.
   void _proceedToCompanySelection() {
-    if (mounted) setState(() => _isLoading = false);
+    if (mounted) _login_.update((s) => s.copyWith(isLoading: false));
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const CompanySelectTallyOauth()),
     );
@@ -887,7 +882,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     try {
       final result = await AuthRepository.instance.checkAnyLicenseUsable();
       if (result == null) return true;
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) _login_.update((s) => s.copyWith(isLoading: false));
       await _showLicenseBlockedDialog(result.$1, result.$2);
       return false;
     } catch (e) {
@@ -969,14 +964,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   }
 
   Future<void> _directlogin() async {
-    setState(() {
-      _isLoading = true;
-      isDirectLogin = true;
-      isOTPLogin = false;
-    });
+    _login_.update((s) => s.copyWith(isLoading: true));
+    isDirectLogin = true;
+    isOTPLogin = false;
 
     if (!await _loginToTallyOauth()) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) _login_.update((s) => s.copyWith(isLoading: false));
       return;
     }
 
@@ -989,14 +982,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   }
 
   Future<void> _otplogin(String email) async {
-    setState(() {
-      _isLoading = true;
-      isDirectLogin = false;
-      isOTPLogin = true;
-    });
+    _login_.update((s) => s.copyWith(isLoading: true));
+    isDirectLogin = false;
+    isOTPLogin = true;
 
     if (!await _loginToTallyOauth()) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) _login_.update((s) => s.copyWith(isLoading: false));
       return;
     }
 
@@ -1014,19 +1005,21 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
     // proceeds to CompanySelectTallyOauth - unchanged.
     sendOTP(email);
     if (!mounted) return;
-    setState(() {
-      _isLoading = false;
-      isVisibleLoginForm = false;
-      isVisibleResetPassForm = false;
-      _isButtonEnabled = false;
-      isVisibleTimer = true;
-      _isOtpVerifyingProgress = false;
-      _isVerifyingOtp = false;
-      otpController.clear();
-      currentText = '';
-      isVisibleOTPForm = true;
-      maskedEmail = email;
-    });
+    _login_.update(
+      (s) => s.copyWith(
+        isLoading: false,
+        isVisibleLoginForm: false,
+        isVisibleResetPassForm: false,
+        isResendButtonEnabled: false,
+        isVisibleTimer: true,
+        isOtpVerifyingProgress: false,
+        isVerifyingOtp: false,
+        isVisibleOTPForm: true,
+        maskedEmail: email,
+      ),
+    );
+    otpController.clear();
+    currentText = '';
     _startTimer();
   }
 
@@ -1067,10 +1060,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   void sendOTP(String email) async {
     final random = Random();
-    generatedotp =
-        '${random.nextInt(10)}${random.nextInt(10)}${random.nextInt(10)}${random.nextInt(10)}'; // Generates a 4-digit random OTP
+    // Generates a 4-digit random OTP
+    final otp =
+        '${random.nextInt(10)}${random.nextInt(10)}${random.nextInt(10)}${random.nextInt(10)}';
+    _login_.update((s) => s.copyWith(generatedOtp: otp));
 
-    print(generatedotp);
+    print(otp);
 
     final smtpServer = SmtpServer(
       'smtp.hostinger.com',
@@ -1099,7 +1094,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 <br>
                 <div style="text-align: center;">
                 
-                <p style="display: inline-block; background-color: #30D5C8; color: #fff; font-size: 16px; font-family: Arial, sans-serif; text-decoration: none; padding: 10px 20px; border-radius: 5px;">$generatedotp</p>
+                <p style="display: inline-block; background-color: #30D5C8; color: #fff; font-size: 16px; font-family: Arial, sans-serif; text-decoration: none; padding: 10px 20px; border-radius: 5px;">$otp</p>
                 </div >
                 <br>
                 <div style="text-align: start;"><p style="font-size: 12px; font-family: Arial, sans-serif; color: #333;">If you did not attempt this, please contact <a href="mailto:saadan@ca-eim.com">saadan@ca-eim.com</a></p></div>
@@ -1185,7 +1180,6 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
   }
 
   final TextEditingController otpController = TextEditingController();
-  dynamic maskedEmail = '';
   String currentText = "";
 
   @override
@@ -1212,6 +1206,10 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    // Subscribes this widget to LoginNotifier so it rebuilds on state
+    // changes - the helper methods below read the current value via the
+    // `_s` (ref.read) getter, which is safe within the same build pass.
+    ref.watch(loginNotifierProvider);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final pageBackground = theme.scaffoldBackgroundColor;
@@ -1368,11 +1366,11 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           ),
         );
       },
-      child: isVisibleLoginForm
+      child: _s.isVisibleLoginForm
           ? _buildLoginForm(context)
-          : isVisibleResetPassForm
+          : _s.isVisibleResetPassForm
           ? _buildResetForm(context)
-          : isVisibleResetOtpForm
+          : _s.isVisibleResetOtpForm
           ? _buildResetOtpForm(context)
           : _buildOtpForm(context),
     );
@@ -1475,17 +1473,19 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         ),
       ),
       onPressed: () {
-        setState(() {
-          isVisibleLoginForm = false;
-          resetemailController.text = usernameController.text;
-          passwordController.clear();
-          isVisibleResetPassForm = true;
-        });
+        resetemailController.text = usernameController.text;
+        passwordController.clear();
+        _login_.update(
+          (s) => s.copyWith(
+            isVisibleLoginForm: false,
+            isVisibleResetPassForm: true,
+          ),
+        );
       },
       child: const Text('Forgot Password?'),
     );
 
-    if (_biometricEnabled) {
+    if (_s.biometricEnabled) {
       // No Remember Me switch to share the row with - always fits, always
       // right-aligned, same as before.
       return Row(
@@ -1500,14 +1500,14 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
         Transform.scale(
           scale: 0.9,
           child: Switch(
-            value: _rememberMeEnabled,
+            value: _s.rememberMeEnabled,
             activeColor: app_color,
             activeTrackColor: app_color.withValues(alpha: 0.4),
             inactiveThumbColor: const Color(0xFF9E9E9E),
             inactiveTrackColor: const Color(0xFFD8DCE1),
             trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            onChanged: _isRememberMeAutoLoggingIn
+            onChanged: _s.isRememberMeAutoLoggingIn
                 ? null
                 : (value) => _onRememberMeChanged(value),
           ),
@@ -1739,7 +1739,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             const SizedBox(height: 8),
             _buildRememberMeAndForgotPasswordRow(),
             const SizedBox(height: 14),
-            _isLoading
+            _s.isLoading
                 ? SizedBox(
                     height: 52,
                     child: Center(
@@ -1760,7 +1760,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                     icon: const Icon(Icons.login_rounded),
                     label: const Text('Login'),
                   ),
-            if (_biometricAvailable && _biometricEnabled) ...[
+            if (_s.biometricAvailable && _s.biometricEnabled) ...[
               const SizedBox(height: 14),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
@@ -1771,13 +1771,14 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                onPressed: _isBiometricAuthenticating ? null : _biometricLogin,
+                onPressed:
+                    _s.isBiometricAuthenticating ? null : _biometricLogin,
                 icon: Icon(
-                  _biometricLabel == 'Face ID'
+                  _s.biometricLabel == 'Face ID'
                       ? Icons.face_retouching_natural
                       : Icons.fingerprint,
                 ),
-                label: Text('Sign in with $_biometricLabel'),
+                label: Text('Sign in with ${_s.biometricLabel}'),
               ),
             ],
           ],
@@ -1819,7 +1820,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
               },
             ),
             const SizedBox(height: 24),
-            _isLoadingResetPass
+            _s.isLoadingResetPass
                 ? SizedBox(
                     height: 52,
                     child: Center(
@@ -1850,12 +1851,14 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             ElevatedButton.icon(
               style: _secondaryButtonStyle(),
               onPressed: () {
-                setState(() {
-                  usernameController.text = resetemailController.text;
-                  resetemailController.clear();
-                  isVisibleResetPassForm = false;
-                  isVisibleLoginForm = true;
-                });
+                usernameController.text = resetemailController.text;
+                resetemailController.clear();
+                _login_.update(
+                  (s) => s.copyWith(
+                    isVisibleResetPassForm: false,
+                    isVisibleLoginForm: true,
+                  ),
+                );
               },
               icon: const Icon(Icons.arrow_back_rounded),
               label: const Text('Back to login'),
@@ -1938,7 +1941,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(height: 24),
-          _isConfirmingPasswordReset
+          _s.isConfirmingPasswordReset
               ? SizedBox(
                   height: 52,
                   child: Center(
@@ -1955,16 +1958,18 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
           ElevatedButton.icon(
             style: _secondaryButtonStyle(),
             onPressed: () {
-              setState(() {
-                _passwordResetToken = null;
-                isVisibleResetOtpForm = false;
-                isVisibleLoginForm = true;
-                usernameController.text = resetemailController.text;
-                resetemailController.clear();
-                resetOtpController.clear();
-                newPasswordController.clear();
-                confirmNewPasswordController.clear();
-              });
+              _login_.update(
+                (s) => s.copyWith(
+                  clearPasswordResetToken: true,
+                  isVisibleResetOtpForm: false,
+                  isVisibleLoginForm: true,
+                ),
+              );
+              usernameController.text = resetemailController.text;
+              resetemailController.clear();
+              resetOtpController.clear();
+              newPasswordController.clear();
+              confirmNewPasswordController.clear();
             },
             icon: const Icon(Icons.arrow_back_rounded),
             label: const Text('Back to login'),
@@ -1998,7 +2003,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 border: Border.all(color: Theme.of(context).dividerColor),
               ),
               child: Text(
-                maskedEmail,
+                _s.maskedEmail,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
                   color: Theme.of(context).colorScheme.onSurface,
@@ -2012,7 +2017,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
               appContext: context,
               controller: otpController,
               length: 4,
-              enabled: !_isOtpVerifyingProgress,
+              enabled: !_s.isOtpVerifyingProgress,
               animationType: AnimationType.fade,
               onChanged: (value) {
                 currentText = value;
@@ -2048,7 +2053,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             const SizedBox(height: 22),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
-              child: isVisibleTimer
+              child: _s.isVisibleTimer
                   ? Container(
                       key: const ValueKey('timer'),
                       width: double.infinity,
@@ -2061,7 +2066,7 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Text(
-                        "Resend OTP in $_formattedTime",
+                        "Resend OTP in ${_s.formattedTimerTime}",
                         textAlign: TextAlign.center,
                         style: GoogleFonts.poppins(
                           fontSize: 13.5,
@@ -2072,18 +2077,20 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                     )
                   : const SizedBox.shrink(key: ValueKey('noTimer')),
             ),
-            if (_isButtonEnabled) ...[
+            if (_s.isResendButtonEnabled) ...[
               const SizedBox(height: 12),
               ElevatedButton.icon(
                 style: _secondaryButtonStyle(),
                 icon: const Icon(Icons.refresh_rounded),
                 onPressed: () {
                   sendOTP(usernamee);
-                  setState(() {
-                    _isButtonEnabled = false;
-                    isVisibleTimer = true;
-                    _startTimer();
-                  });
+                  _login_.update(
+                    (s) => s.copyWith(
+                      isResendButtonEnabled: false,
+                      isVisibleTimer: true,
+                    ),
+                  );
+                  _startTimer();
                 },
                 label: const Text('Resend OTP'),
               ),
@@ -2092,12 +2099,12 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
             ElevatedButton.icon(
               style: _primaryButtonStyle().copyWith(
                 backgroundColor: MaterialStateProperty.resolveWith<Color>(
-                  (states) => _isOtpVerifyingProgress
+                  (states) => _s.isOtpVerifyingProgress
                       ? const Color(0xFF98A2AD)
                       : app_color,
                 ),
               ),
-              icon: _isOtpVerifyingProgress
+              icon: _s.isOtpVerifyingProgress
                   ? Theme.of(context).platform == TargetPlatform.iOS
                         ? const CupertinoActivityIndicator(
                             radius: 9,
@@ -2115,12 +2122,14 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                             ),
                           )
                   : const Icon(Icons.verified_rounded),
-              onPressed: _isOtpVerifyingProgress
+              onPressed: _s.isOtpVerifyingProgress
                   ? null
                   : () {
                       _verifyOtpAndProceed(currentText);
                     },
-              label: Text(_isOtpVerifyingProgress ? 'Verifying...' : 'Verify'),
+              label: Text(
+                _s.isOtpVerifyingProgress ? 'Verifying...' : 'Verify',
+              ),
             ),
             const SizedBox(height: 12),
             TextButton.icon(
@@ -2132,12 +2141,14 @@ class _LoginPageState extends State<Login> with TickerProviderStateMixin {
                 ),
               ),
               onPressed: () {
-                setState(() {
-                  otpController.clear();
-                  isVisibleOTPForm = false;
-                  isVisibleLoginForm = true;
-                  isVisibleTimer = false;
-                });
+                otpController.clear();
+                _login_.update(
+                  (s) => s.copyWith(
+                    isVisibleOTPForm: false,
+                    isVisibleLoginForm: true,
+                    isVisibleTimer: false,
+                  ),
+                );
               },
               icon: const Icon(Icons.arrow_back_rounded),
               label: const Text("Back to login"),

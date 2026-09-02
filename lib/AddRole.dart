@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'RolesView.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/identity_repository.dart';
+import 'providers/add_role_notifier.dart';
 
 /// One entry from tally-oauth's `/company-permission` catalog - a role
 /// grants a set of these by id. The catalog is meta-administration only
@@ -31,25 +31,14 @@ class PermissionOption {
       );
 }
 
-class AddRole extends StatefulWidget {
+class AddRole extends ConsumerStatefulWidget {
   const AddRole({Key? key}) : super(key: key);
   @override
-  _AddRolePageState createState() => _AddRolePageState();
+  ConsumerState<AddRole> createState() => _AddRolePageState();
 }
 
-class _AddRolePageState extends State<AddRole> {
+class _AddRolePageState extends ConsumerState<AddRole> {
   final nameController = TextEditingController();
-  final Set<String> selectedPermissionIds = {};
-
-  List<PermissionOption> permissions = [];
-  bool isLoadingPermissions = true;
-  bool isSaving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPermissions();
-  }
 
   @override
   void dispose() {
@@ -57,59 +46,38 @@ class _AddRolePageState extends State<AddRole> {
     super.dispose();
   }
 
-  Future<void> _loadPermissions() async {
-    setState(() => isLoadingPermissions = true);
-    try {
-      final result = await IdentityRepository.instance.listPermissions();
-      final items = (result.data as List).cast<Map<String, dynamic>>();
-      permissions = items.map(PermissionOption.fromJson).toList();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    }
-    setState(() => isLoadingPermissions = false);
-  }
-
   Future<void> _createRole() async {
     final name = nameController.text.trim();
-    if (name.isEmpty) {
-      showAppMessage(context, 'Please enter a role name');
-      return;
+    final result =
+        await ref.read(addRoleNotifierProvider.notifier).createRole(name);
+    if (!mounted) return;
+    if (result.message != null) {
+      showAppMessage(context, result.message!, isError: !result.success);
     }
-
-    setState(() => isSaving = true);
-    try {
-      await IdentityRepository.instance.createRole(
-        name: name,
-        permissionIds: selectedPermissionIds.toList(),
+    if (result.success) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const RolesView()),
       );
-      showAppMessage(context, 'Role created successfully', isError: false);
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const RolesView()),
-        );
-      }
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    } finally {
-      if (mounted) setState(() => isSaving = false);
     }
-  }
-
-  Map<String, List<PermissionOption>> get _groupedPermissions {
-    final grouped = <String, List<PermissionOption>>{};
-    for (final permission in permissions) {
-      grouped.putIfAbsent(permission.group, () => []).add(permission);
-    }
-    return grouped;
   }
 
   @override
   Widget build(BuildContext context) {
+    final vm = ref.watch(addRoleNotifierProvider);
+    final notifier = ref.read(addRoleNotifierProvider.notifier);
+
+    ref.listen<AddRoleState>(addRoleNotifierProvider, (previous, next) {
+      if (next.loadError != null) {
+        showAppMessage(context, next.loadError!);
+        notifier.clearLoadError();
+      }
+    });
+
+    final isLoadingPermissions = vm.isLoadingPermissions;
+    final isSaving = vm.isSaving;
+    final selectedPermissionIds = vm.selectedPermissionIds;
+
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -165,7 +133,7 @@ class _AddRolePageState extends State<AddRole> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (final entry in _groupedPermissions.entries) ...[
+                for (final entry in vm.groupedPermissions.entries) ...[
                   Padding(
                     padding: const EdgeInsets.only(top: 12, bottom: 4),
                     child: Text(
@@ -188,13 +156,10 @@ class _AddRolePageState extends State<AddRole> {
                             (permission) => CheckboxListTile(
                               value: selectedPermissionIds.contains(permission.id),
                               onChanged: (checked) {
-                                setState(() {
-                                  if (checked ?? false) {
-                                    selectedPermissionIds.add(permission.id);
-                                  } else {
-                                    selectedPermissionIds.remove(permission.id);
-                                  }
-                                });
+                                notifier.togglePermission(
+                                  permission.id,
+                                  checked ?? false,
+                                );
                               },
                               title: Text(
                                 permission.displayName,

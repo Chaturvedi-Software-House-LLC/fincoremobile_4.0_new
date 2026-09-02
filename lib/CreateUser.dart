@@ -1,39 +1,26 @@
 import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'UserView.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
-import 'api/api_exception.dart';
-import 'api/identity_repository.dart';
+import 'providers/create_user_notifier.dart';
 
-class CreateUser extends StatefulWidget {
+class CreateUser extends ConsumerStatefulWidget {
   const CreateUser({Key? key}) : super(key: key);
   @override
-  _CreateUserPageState createState() => _CreateUserPageState();
+  ConsumerState<CreateUser> createState() => _CreateUserPageState();
 }
 
-class _CreateUserPageState extends State<CreateUser>
+class _CreateUserPageState extends ConsumerState<CreateUser>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = false,
-      isVisibleNoUserFound = false,
-      _isFocused_email = false,
-      _isFocus_name = false;
-
-  List<Map<String, dynamic>> myData_roles = [];
-
-  Map<String, dynamic>? _selectedrole;
+  bool _isFocused_email = false, _isFocus_name = false;
 
   late final TextEditingController controller_username =
       TextEditingController();
@@ -44,56 +31,10 @@ class _CreateUserPageState extends State<CreateUser>
   bool _isFocused_password = false;
   bool _obscureText = true;
 
-  String name = "", usernameOrEmail = "";
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-
-  late SharedPreferences prefs;
-
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
 
   bool isEmail(String value) {
     return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim());
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      hostname = prefs.getString('hostname');
-
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        usernameOrEmail = email_nav;
-      }
-
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    fetchRoles();
   }
 
   void sendUserCredentialsEmailSMTP({
@@ -213,70 +154,29 @@ class _CreateUserPageState extends State<CreateUser>
     required String roleId,
     required String name,
   }) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    final nameParts = name.trim().split(RegExp(r'\s+'));
-    final firstName = nameParts.first;
-    final lastName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : firstName;
     final isEmailLogin = isEmail(userNameOrEmail);
+    final result = await ref.read(createUserNotifierProvider.notifier).userRegistration(
+      userNameOrEmail: userNameOrEmail,
+      password: password,
+      roleId: roleId,
+      name: name,
+      isEmailLogin: isEmailLogin,
+    );
 
-    try {
-      await IdentityRepository.instance.createCompanyUser(
-        userName: userNameOrEmail,
-        firstName: firstName,
-        lastName: lastName,
-        password: password,
-        roleId: roleId,
-        email: isEmailLogin ? userNameOrEmail : null,
-      );
-
-      showAppMessage(context, "User created successfully", isError: false);
-
-      if (isEmailLogin) {
+    if (result.success) {
+      if (result.emailToNotify != null) {
         sendUserCredentialsEmailSMTP(
-          email: userNameOrEmail,
+          email: result.emailToNotify!,
           name: name,
-          password: password,
+          password: result.password!,
         );
       }
 
       controller_username.clear();
       controller_name.clear();
       controller_password.clear();
-      FocusScope.of(context).unfocus();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) FocusScope.of(context).unfocus();
     }
-  }
-
-  /// Company scoping now comes from the company-user session's token, not
-  /// a `serialno` in the request body - no param needed here anymore.
-  Future<void> fetchRoles() async {
-    try {
-      final result = await IdentityRepository.instance.listRoles(limit: 100);
-      final items = (result.data as List).cast<Map<String, dynamic>>();
-      setState(() {
-        myData_roles = items;
-        _selectedrole = items.isNotEmpty ? items.first : null;
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
   }
 
   bool isValidEmail(String email) {
@@ -289,6 +189,22 @@ class _CreateUserPageState extends State<CreateUser>
 
   @override
   Widget build(BuildContext context) {
+    final vm = ref.watch(createUserNotifierProvider);
+    final notifier = ref.read(createUserNotifierProvider.notifier);
+    ref.listen<CreateUserState>(createUserNotifierProvider, (previous, next) {
+      if (next.errorMessage != null) {
+        showAppMessage(context, next.errorMessage!);
+        notifier.clearError();
+      }
+      if (next.successMessage != null) {
+        showAppMessage(context, next.successMessage!, isError: false);
+        notifier.clearSuccess();
+      }
+    });
+    final myData_roles = vm.roles;
+    final selectedrole = vm.selectedRole;
+    final isLoading = vm.isLoading;
+
     final bool isUsernameLogin =
         controller_username.text.isNotEmpty &&
         !isEmail(controller_username.text);
@@ -455,13 +371,13 @@ class _CreateUserPageState extends State<CreateUser>
                             ),
                             const SizedBox(height: 8),
                             SearchableSelectorField<dynamic>(
-                              value: _selectedrole,
+                              value: selectedrole,
                               items: myData_roles,
                               itemLabel: (item) =>
                                   (item['name'] ?? '').toString(),
                               hintText: 'Choose a role',
-                              onChanged: (value) =>
-                                  setState(() => _selectedrole = value),
+                              onChanged: (value) => notifier
+                                  .selectRole(value as Map<String, dynamic>?),
                             ),
                             SizedBox(height: 24),
                             ElevatedButton(
@@ -476,8 +392,8 @@ class _CreateUserPageState extends State<CreateUser>
                                 ),
                                 elevation: 4,
                               ),
-                              onPressed: _isLoading ? null : _submitForm,
-                              child: _isLoading
+                              onPressed: isLoading ? null : _submitForm,
+                              child: isLoading
                                   ? Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
@@ -651,7 +567,8 @@ class _CreateUserPageState extends State<CreateUser>
   void _submitForm() {
     final name = controller_name.text.trim();
     final username = controller_username.text.trim();
-    final roleId = _selectedrole?["id"] as String?;
+    final roleId =
+        ref.read(createUserNotifierProvider).selectedRole?["id"] as String?;
 
     if (name.isEmpty || username.isEmpty || roleId == null) {
       showAppMessage(context, "Please fill all required fields.");
@@ -693,7 +610,7 @@ class _CreateUserPageState extends State<CreateUser>
     final name = controller_name.text;
     final email = controller_username.text;
     final password = controller_password.text;
-    final role = _selectedrole?["role_name"];
+    final role = selectedrole?["role_name"];
 
     if (name.isEmpty || email.isEmpty || role == null) {
       showAppMessage(context, "Please fill all required fields.");

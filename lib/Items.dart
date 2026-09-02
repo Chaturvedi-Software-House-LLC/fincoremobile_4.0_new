@@ -3,12 +3,12 @@ import 'package:FincoreGo/currencyFormat.dart';
 import 'package:FincoreGo/utils/currency_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'ItemsClicked.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -18,8 +18,7 @@ import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'widgets/searchable_selector.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/stock_repository.dart';
+import 'providers/items_notifier.dart';
 
 class items {
   final int masterId;
@@ -157,86 +156,23 @@ String formatRate_Report(String value) {
   return value;
 }
 
-class Items extends StatefulWidget {
+class Items extends ConsumerStatefulWidget {
   @override
-  _ItemsPageState createState() => _ItemsPageState();
+  ConsumerState<Items> createState() => _ItemsPageState();
 }
 
-class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
+class _ItemsPageState extends ConsumerState<Items>
+    with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scrollFabController = ScrollController();
 
-  bool isClicked_allitems = true,
-      isClicked_fastmoving = false,
-      isClicked_inactiveitems = false,
-      isClicked_slowmoving = false;
+  // Never toggled via setState in this screen (the IconButton that would
+  // flip it is commented out below) - kept as a plain widget-local
+  // constant rather than moved into ItemsState.
+  final bool _isSearchViewVisible = true;
 
-  int counter = 0;
-
-  List<items> filteredItems_inactive_items =
-      []; // Initialize an empty list to hold the filtered items
-  List<items> filteredItems_all_items =
-      []; // Initialize an empty list to hold the filtered items
-  List<items> filteredItems_active_items =
-      []; // Initialize an empty list to hold the filtered items
-
-  // Fast vs Slow Moving Summary
-  bool isClicked_movingsummary = false;
-  List<items> fastMovingSummaryList = [];
-  List<items> slowMovingSummaryList = [];
-  // null = showing the two summary cards, 'fast'/'slow' = drilled into that list
-  String? _movingSummaryDrilldown;
-  List<items> _movingSummaryFilteredDrilldown = [];
-
-  // Stock Valuation Report
-  bool isClicked_stockvaluation = false;
-  List<items> stockValuationList = [];
-  List<items> _stockValuationFiltered = [];
-
-  // Item Ageing Report
-  bool isClicked_itemageing = false;
-  List<ItemAgeingBucket> itemAgeingBuckets = [];
-  ItemAgeingBucket? _selectedItemAgeingBucket;
-  List<items> _itemAgeingFilteredDrilldown = [];
-
-  String item_count = "0";
-
-  String fastmovingdays = '',
-      fastmovingqty = '',
-      fastmovingvalue = '',
-      inactivedays = '',
-      slowmovingdays = '',
-      slowmovingqty = '',
-      slowmovingvalue = '';
-
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = true,
-      _isAllList = false,
-      _isInactiveList = false,
-      _isActiveList = false;
-
-  bool allitems_visibility = false,
-      fastmovingitems_visibility = false,
-      inactiveitems_visibility = false,
-      rate_visibility = false,
-      amount_visibility = false;
-  bool isVisibleNoAccess = false, isVisibleParent = false;
-  String email = "";
-  String name = "";
-
-  bool isVisibleListLayout = false;
-
-  String? _selectedFilter = 'qty';
-
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
-
-  late int? decimal;
+  ItemsState get _s => ref.read(itemsNotifierProvider);
+  ItemsNotifier get _notifier => ref.read(itemsNotifierProvider.notifier);
 
   // Renders without the leading symbol, for use with _currencyValueWidget
   // (which renders the symbol itself so it can swap in the Dirham glyph
@@ -247,7 +183,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     }
 
     double amount = double.tryParse(value) ?? 0;
-    String formatted = formatAmountinDecimals(amount.abs(), decimal!);
+    String formatted = formatAmountinDecimals(amount.abs(), _s.decimal!);
     return amount < 0 ? "$formatted DR" : "$formatted CR";
   }
 
@@ -257,55 +193,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
   TextEditingController searchController = TextEditingController();
 
-  bool isVisibleNoDataFound = false;
-
   String allitems = 'All Items';
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-
-  String fastmovingdate = '';
-
-  String? hostname = "",
-      company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "";
-  bool _isLoading = false;
-
-
-  dynamic _selecteditem = "";
-  List<String> spinner_list = [];
-  final Map<String, int> _groupMasterIdByName = {};
-
-  List<items> all_items_list = [];
-  List<items> inactive_items_list = [];
-  List<items> active_items_list = [];
-
-  // --- Incremental (infinite-scroll) paging state for the "All Items" tab
-  // only - Fast/Slow Moving, Inactive Items, Moving Summary, Stock
-  // Valuation, and Item Ageing all classify/sort/bucket their whole result
-  // set (movement classification, ageing buckets, valuation ranking), which
-  // needs the full list up front - those keep using the existing
-  // fetch-every-page-up-front repository calls, documented per call site.
-  static const int _itemsPageLimit = 30;
-  int _itemsPage = 1;
-  int _itemsTotalPages = 1;
-  bool _isLoadingMoreItems = false;
-
-  // Bumped every time `fetchall_items` (re)starts (e.g. switching parent
-  // group while a previous group's page-walk is still in flight) - every
-  // page-load result below is stamped with the generation active when it
-  // *started* and discarded on arrival if a newer one has since begun,
-  // same rationale/pattern as Transactions.dart's `_txRequestGen` (see that
-  // field's doc comment) - otherwise an older, slower group's pages could
-  // still land in `all_items_list` after a newer group selection already
-  // cleared and repopulated it.
-  int _itemsRequestGen = 0;
-
-  late NumberFormat currencyFormat;
-
-  bool isVisibleFilterby = false;
 
   Future<void> generateAndShareCSV_AllItems(List<items> items) async {
     final List<List<dynamic>> csvData = [];
@@ -337,7 +227,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing All Items Report of $company',
+        text: 'Sharing All Items Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -354,7 +244,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       'Amount',
     ]);
 
-    for (final item in filteredItems_active_items) {
+    for (final item in _s.filteredItems_active_items) {
       csvData.add([
         item.itemname,
         item.c_qty,
@@ -373,7 +263,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Fast/Slow Moving Items Report of $company',
+        text: 'Sharing Fast/Slow Moving Items Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -382,9 +272,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   Future<void> generateAndShareCSV_ItemAgeing() async {
     final List<List<dynamic>> csvData = [];
 
-    if (_selectedItemAgeingBucket != null) {
+    if (_s.selectedItemAgeingBucket != null) {
       csvData.add(['Item Name', 'Qty', 'Last Sale', 'Last Purchase', 'Amount']);
-      for (final item in _selectedItemAgeingBucket!.itemsList) {
+      for (final item in _s.selectedItemAgeingBucket!.itemsList) {
         csvData.add([
           item.itemname,
           removeUnit(item.c_qty),
@@ -395,7 +285,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       }
     } else {
       csvData.add(['Ageing Bucket', 'No. of Items', 'Value']);
-      for (final bucket in itemAgeingBuckets) {
+      for (final bucket in _s.itemAgeingBuckets) {
         csvData.add([
           bucket.label,
           bucket.count,
@@ -406,8 +296,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     final csvString = const ListToCsvConverter().convert(csvData);
     final tempDir = await Directory.systemTemp.createTemp();
-    final fileName = _selectedItemAgeingBucket != null
-        ? 'ItemAgeing_${_selectedItemAgeingBucket!.label}.csv'
+    final fileName = _s.selectedItemAgeingBucket != null
+        ? 'ItemAgeing_${_s.selectedItemAgeingBucket!.label}.csv'
         : 'ItemAgeing_Summary.csv';
     final tempFilePath = '${tempDir.path}/$fileName';
     final file = File(tempFilePath);
@@ -416,7 +306,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     await SharePlus.instance.share(
       ShareParams(
         text:
-            'Sharing Item Ageing Report${_selectedItemAgeingBucket != null ? ' (${_selectedItemAgeingBucket!.label})' : ''} of $company',
+            'Sharing Item Ageing Report${_s.selectedItemAgeingBucket != null ? ' (${_s.selectedItemAgeingBucket!.label})' : ''} of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -427,8 +317,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
-    final companyName = company!;
-    final bucket = _selectedItemAgeingBucket;
+    final companyName = _s.company;
+    final bucket = _s.selectedItemAgeingBucket;
 
     final headersRow = bucket != null
         ? ['Item Name', 'Qty', 'Last Sale', 'Last Purchase', 'Amount']
@@ -446,7 +336,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 ],
               )
               .toList()
-        : itemAgeingBuckets
+        : _s.itemAgeingBuckets
               .map(
                 (b) => [
                   b.label,
@@ -524,7 +414,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     await SharePlus.instance.share(
       ShareParams(
         text:
-            'Sharing Item Ageing Report${bucket != null ? ' (${bucket.label})' : ''} of $company',
+            'Sharing Item Ageing Report${bucket != null ? ' (${bucket.label})' : ''} of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -534,8 +424,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     final List<List<dynamic>> csvData = [];
     csvData.add(['Rank', 'Item Name', 'Qty', 'Rate', 'Amount']);
 
-    for (var i = 0; i < stockValuationList.length; i++) {
-      final item = stockValuationList[i];
+    for (var i = 0; i < _s.stockValuationList.length; i++) {
+      final item = _s.stockValuationList[i];
       csvData.add([
         i + 1,
         item.itemname,
@@ -553,7 +443,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Stock Valuation Report of $company',
+        text: 'Sharing Stock Valuation Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -564,21 +454,21 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
-    final companyName = company!;
+    final companyName = _s.company;
     final headersRow = ['Rank', 'Item Name', 'Qty', 'Rate', 'Amount'];
 
     final itemsPerPage = 8;
-    final pageCount = (stockValuationList.length / itemsPerPage)
+    final pageCount = (_s.stockValuationList.length / itemsPerPage)
         .ceil()
         .clamp(1, 1 << 30);
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = stockValuationList.sublist(
+      final itemsSubset = _s.stockValuationList.sublist(
         startIndex,
-        endIndex > stockValuationList.length
-            ? stockValuationList.length
+        endIndex > _s.stockValuationList.length
+            ? _s.stockValuationList.length
             : endIndex,
       );
 
@@ -644,7 +534,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Stock Valuation Report of $company',
+        text: 'Sharing Stock Valuation Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -653,10 +543,10 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   Future<void> generateAndShareCSV_MovingSummary() async {
     final List<List<dynamic>> csvData = [];
 
-    if (_movingSummaryDrilldown != null) {
-      final list = _movingSummaryDrilldown == 'fast'
-          ? fastMovingSummaryList
-          : slowMovingSummaryList;
+    if (_s.movingSummaryDrilldown != null) {
+      final list = _s.movingSummaryDrilldown == 'fast'
+          ? _s.fastMovingSummaryList
+          : _s.slowMovingSummaryList;
       csvData.add([
         'Item Name',
         'Qty',
@@ -679,20 +569,20 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       csvData.add(['Category', 'Item Count', 'Total Value']);
       csvData.add([
         'Fast Moving',
-        fastMovingSummaryList.length,
-        formatAmount(_movingListTotalValue(fastMovingSummaryList).toString()),
+        _s.fastMovingSummaryList.length,
+        formatAmount(_movingListTotalValue(_s.fastMovingSummaryList).toString()),
       ]);
       csvData.add([
         'Slow Moving',
-        slowMovingSummaryList.length,
-        formatAmount(_movingListTotalValue(slowMovingSummaryList).toString()),
+        _s.slowMovingSummaryList.length,
+        formatAmount(_movingListTotalValue(_s.slowMovingSummaryList).toString()),
       ]);
     }
 
     final csvString = const ListToCsvConverter().convert(csvData);
     final tempDir = await Directory.systemTemp.createTemp();
-    final fileName = _movingSummaryDrilldown != null
-        ? '${_movingSummaryDrilldown == 'fast' ? 'FastMoving' : 'SlowMoving'}Items.csv'
+    final fileName = _s.movingSummaryDrilldown != null
+        ? '${_s.movingSummaryDrilldown == 'fast' ? 'FastMoving' : 'SlowMoving'}Items.csv'
         : 'MovingSummary.csv';
     final tempFilePath = '${tempDir.path}/$fileName';
     final file = File(tempFilePath);
@@ -700,7 +590,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Fast vs Slow Moving Summary of $company',
+        text: 'Sharing Fast vs Slow Moving Summary of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -711,13 +601,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
-    final companyName = company!;
+    final companyName = _s.company;
 
-    if (_movingSummaryDrilldown != null) {
-      final list = _movingSummaryDrilldown == 'fast'
-          ? fastMovingSummaryList
-          : slowMovingSummaryList;
-      final reportname = _movingSummaryDrilldown == 'fast'
+    if (_s.movingSummaryDrilldown != null) {
+      final list = _s.movingSummaryDrilldown == 'fast'
+          ? _s.fastMovingSummaryList
+          : _s.slowMovingSummaryList;
+      final reportname = _s.movingSummaryDrilldown == 'fast'
           ? 'Fast Moving Items'
           : 'Slow Moving Items';
       final headersRow = [
@@ -801,13 +691,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       final rows = [
         [
           'Fast Moving',
-          fastMovingSummaryList.length.toString(),
-          formatAmount(_movingListTotalValue(fastMovingSummaryList).toString()),
+          _s.fastMovingSummaryList.length.toString(),
+          formatAmount(_movingListTotalValue(_s.fastMovingSummaryList).toString()),
         ],
         [
           'Slow Moving',
-          slowMovingSummaryList.length.toString(),
-          formatAmount(_movingListTotalValue(slowMovingSummaryList).toString()),
+          _s.slowMovingSummaryList.length.toString(),
+          formatAmount(_movingListTotalValue(_s.slowMovingSummaryList).toString()),
         ],
       ];
 
@@ -856,8 +746,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     final pdfData = await pdf.save();
     final tempDir = await getTemporaryDirectory();
-    final fileName = _movingSummaryDrilldown != null
-        ? '${_movingSummaryDrilldown == 'fast' ? 'FastMoving' : 'SlowMoving'}Items.pdf'
+    final fileName = _s.movingSummaryDrilldown != null
+        ? '${_s.movingSummaryDrilldown == 'fast' ? 'FastMoving' : 'SlowMoving'}Items.pdf'
         : 'MovingSummary.pdf';
     final tempFilePath = '${tempDir.path}/$fileName';
     final file = File(tempFilePath);
@@ -865,7 +755,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Fast vs Slow Moving Summary of $company',
+        text: 'Sharing Fast vs Slow Moving Summary of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -883,7 +773,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       'Amount',
     ]);
 
-    for (final item in filteredItems_inactive_items) {
+    for (final item in _s.filteredItems_inactive_items) {
       csvData.add([
         item.itemname,
         formatlastsaledate(item.lastsale),
@@ -903,7 +793,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Inactive Items Report of $company',
+        text: 'Sharing Inactive Items Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -915,9 +805,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     );
 
     final pdf = pw.Document();
-    final companyName = company!;
+    final companyName = _s.company;
     final reportname = 'Stock Summary';
-    final parentname = _selecteditem;
+    final parentname = _s.selectedItem ?? '';
     final headersRow3 = [
       'Item Name',
       'Qty',
@@ -1021,7 +911,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing All Items Report of $company',
+        text: 'Sharing All Items Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -1032,9 +922,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
-    final companyName = company!;
+    final companyName = _s.company;
     final reportname = 'Stock Summary';
-    final parentname = _selecteditem;
+    final parentname = _s.selectedItem ?? '';
     final headersRow3 = [
       'Item Name',
       'Qty',
@@ -1045,15 +935,15 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     ];
 
     final itemsPerPage = 8;
-    final pageCount = (filteredItems_active_items.length / itemsPerPage).ceil();
+    final pageCount = (_s.filteredItems_active_items.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = filteredItems_active_items.sublist(
+      final itemsSubset = _s.filteredItems_active_items.sublist(
         startIndex,
-        endIndex > filteredItems_active_items.length
-            ? filteredItems_active_items.length
+        endIndex > _s.filteredItems_active_items.length
+            ? _s.filteredItems_active_items.length
             : endIndex,
       );
 
@@ -1140,7 +1030,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Fast/Slow Moving Items Report of $company',
+        text: 'Sharing Fast/Slow Moving Items Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
@@ -1151,9 +1041,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
-    final companyName = company!;
+    final companyName = _s.company;
     final reportname = 'Stock Summary';
-    final parentname = _selecteditem;
+    final parentname = _s.selectedItem ?? '';
     final headersRow3 = [
       'Item Name',
       'Inactive Since',
@@ -1165,16 +1055,16 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     ];
 
     final itemsPerPage = 8;
-    final pageCount = (filteredItems_inactive_items.length / itemsPerPage)
+    final pageCount = (_s.filteredItems_inactive_items.length / itemsPerPage)
         .ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = inactive_items_list.sublist(
+      final itemsSubset = _s.inactive_items_list.sublist(
         startIndex,
-        endIndex > filteredItems_inactive_items.length
-            ? filteredItems_inactive_items.length
+        endIndex > _s.filteredItems_inactive_items.length
+            ? _s.filteredItems_inactive_items.length
             : endIndex,
       );
 
@@ -1262,410 +1152,19 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing Inactive Items Report of $company',
+        text: 'Sharing Inactive Items Report of ${_s.company}',
         files: [XFile(tempFilePath)],
       ),
     );
   }
 
-  Future<void> fetchParentData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    spinner_list.clear();
-
-    try {
-      final groups = await StockRepository.instance.listStockGroups();
-      spinner_list.add(allitems);
-      _groupMasterIdByName.clear();
-      for (final group in groups) {
-        final name = group['name'] as String;
-        _groupMasterIdByName[name] = group['masterId'] as int;
-        spinner_list.add(name);
-      }
-
-      setState(() {
-        _selecteditem = spinner_list[0];
-      });
-
-      if (allitems_visibility) {
-        fetchItemData('All Items', _selecteditem);
-      } else if (fastmovingitems_visibility) {
-        fetchMovingSummary(_selecteditem);
-      } else if (inactiveitems_visibility) {
-        fetchItemData('InactiveItems', _selecteditem);
-      }
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() => _isLoading = false);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() => _isLoading = false);
-    }
-  }
-
-  void fetchItemData(String item_type, String item) {
-    if (item == "All Items") {
-      item = "";
-    }
-    if (item_type == "All Items") {
-      fetchall_items(item);
-    } else if (item_type == "FastMovingItems") {
-      fetchactive_items(item, _selectedFilter!);
-    } else if (item_type == "SlowMovingItems") {
-      fetchslow_items(item, _selectedFilter!);
-    } else if (item_type == "InactiveItems") {
-      fetchinactive_items(item);
-    }
-  }
-
-  /// Shared by fetchall_items/fetchStockValuation/fetchItemAgeing - all
-  /// three read the exact same underlying list, just process it
-  /// differently (raw / sorted-by-amount / bucketed-by-date).
-  Future<List<items>> _fetchStockItemsList(String parent) async {
-    final groupMasterId = parent.isEmpty ? null : _groupMasterIdByName[parent];
-    final rows = await StockRepository.instance.listStockItems(
-      stockGroupMasterId: groupMasterId,
-    );
-    return rows.map(items.fromJson).toList();
-  }
-
-  /// Fetches the full, unpaginated "All Items" list on demand for PDF/CSV
-  /// export - export is an occasional explicit action (not the initial
-  /// screen render infinite scroll is optimizing), so it's fine for it to
-  /// fetch everything rather than being limited to whatever's been
-  /// scrolled into view so far (`all_items_list`, once infinite scroll is
-  /// wired up below, only holds the pages loaded so far).
-  Future<List<items>> _fullAllItemsForExport() async {
-    final parent = _selecteditem == "All Items" ? "" : (_selecteditem ?? "");
-    final all = await _fetchStockItemsList(parent);
-    final query = searchController.text.toLowerCase();
-    return query.isEmpty
-        ? all
-        : all.where((e) => e.itemname.toLowerCase().contains(query)).toList();
-  }
-
-  /// Starts (or restarts, e.g. on parent-group change) incremental paging
-  /// of the "All Items" tab and loads its first page. Bumps
-  /// [_itemsRequestGen] so a still-in-flight older group's page load can
-  /// never land after this one - see that field's doc comment.
-  Future<void> fetchall_items(final String parent) async {
-    _itemsRequestGen++;
-    setState(() {
-      item_count = "0";
-      _isLoading = true;
-      _isAllList = false;
-      _isInactiveList = false;
-      _isActiveList = false;
-      isClicked_allitems = true;
-      isClicked_fastmoving = false;
-      isClicked_slowmoving = false;
-      isClicked_inactiveitems = false;
-      isClicked_movingsummary = false;
-      isClicked_stockvaluation = false;
-      isClicked_itemageing = false;
-      isVisibleNoDataFound = false;
-      isVisibleFilterby = false;
-      searchController.clear();
-    });
-
-    filteredItems_all_items.clear();
-    all_items_list.clear();
-    _itemsPage = 1;
-    _itemsTotalPages = 1;
-
-    await _loadNextItemsPage(parent: parent);
-  }
-
-  /// Loads one more page (30 rows) of the "All Items" tab into
-  /// `all_items_list`. [parent] only needs to be passed by [fetchall_items]
-  /// for the first page - subsequent calls (from the scroll listener) reuse
-  /// whichever parent group is currently selected.
-  Future<void> _loadNextItemsPage({String? parent}) async {
-    if (_isLoadingMoreItems) return;
-    if (parent == null && _itemsPage > _itemsTotalPages) return;
-
-    final myGen = _itemsRequestGen;
-    setState(() => _isLoadingMoreItems = true);
-
-    try {
-      final resolvedParent =
-          parent ?? (_selecteditem == "All Items" ? "" : (_selecteditem ?? ""));
-      final groupMasterId = resolvedParent.isEmpty
-          ? null
-          : _groupMasterIdByName[resolvedParent];
-      final result = await StockRepository.instance.listStockItemsPage(
-        page: _itemsPage,
-        limit: _itemsPageLimit,
-        stockGroupMasterId: groupMasterId,
-      );
-      if (myGen != _itemsRequestGen) {
-        // Superseded while awaiting - a newer group selection already
-        // cleared/restarted the list; don't apply this stale page.
-        setState(() => _isLoadingMoreItems = false);
-        return;
-      }
-      all_items_list.addAll(result.items.map(items.fromJson));
-      _itemsTotalPages = result.totalPages;
-      _itemsPage++;
-
-      setState(() {
-        _isInactiveList = false;
-        _isActiveList = false;
-        _isAllList = true;
-      });
-      _onSearchChanged(searchController.text);
-      setState(() {
-        _isLoadingMoreItems = false;
-        _isLoading = false;
-        isVisibleNoDataFound = all_items_list.isEmpty;
-        item_count = filteredItems_all_items.length.toString();
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = all_items_list.isNotEmpty;
-        _isActiveList = false;
-        _isLoading = false;
-        _isLoadingMoreItems = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = all_items_list.isNotEmpty;
-        _isActiveList = false;
-        _isLoading = false;
-        _isLoadingMoreItems = false;
-      });
-    }
-  }
-
   void _onItemsScroll() {
-    if (!isClicked_allitems || !_isAllList) return;
-    if (_isLoadingMoreItems || _itemsPage > _itemsTotalPages) return;
+    if (!_s.isClicked_allitems || !_s.isAllList) return;
+    if (_s.isLoadingMoreItems || _s.itemsPage > _s.itemsTotalPages) return;
     if (!_scrollFabController.hasClients) return;
     final position = _scrollFabController.position;
     if (position.pixels >= position.maxScrollExtent - 400) {
-      _loadNextItemsPage();
-    }
-  }
-
-  Future<void> fetchactive_items(
-    final String parent,
-    final String filter,
-  ) async {
-    setState(() {
-      item_count = "0";
-      isClicked_allitems = false;
-      isClicked_fastmoving = true;
-      isClicked_slowmoving = false;
-      isClicked_inactiveitems = false;
-      isClicked_movingsummary = false;
-      isClicked_stockvaluation = false;
-      isClicked_itemageing = false;
-      _isLoading = true;
-      _isAllList = false;
-      _isInactiveList = false;
-      _isActiveList = false;
-      isVisibleNoDataFound = false;
-      isVisibleFilterby = true;
-    });
-
-    filteredItems_active_items.clear();
-    active_items_list.clear();
-
-    try {
-      final parsed = await _fetchMovingList(parent, filter, 'FAST');
-      isVisibleNoDataFound = false;
-      active_items_list.addAll(parsed);
-      filteredItems_active_items = active_items_list;
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        _isLoading = false;
-      });
-    }
-
-    setState(() {
-      if (filteredItems_active_items.isEmpty) {
-        item_count = "0";
-
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        isVisibleNoDataFound = true;
-      } else {
-        item_count = filteredItems_active_items.length.toString();
-        _isInactiveList = false;
-        _isActiveList = true;
-        _isAllList = false;
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> fetchslow_items(final String parent, final String filter) async {
-    setState(() {
-      item_count = "0";
-      isClicked_allitems = false;
-      isClicked_fastmoving = false;
-      isClicked_slowmoving = true;
-      isClicked_inactiveitems = false;
-      isClicked_movingsummary = false;
-      isClicked_stockvaluation = false;
-      isClicked_itemageing = false;
-      _isLoading = true;
-      _isAllList = false;
-      _isInactiveList = false;
-      _isActiveList = false;
-      isVisibleNoDataFound = false;
-      isVisibleFilterby = true;
-    });
-
-    filteredItems_active_items.clear();
-    active_items_list.clear();
-
-    try {
-      final parsed = await _fetchMovingList(parent, filter, 'SLOW');
-      isVisibleNoDataFound = false;
-      active_items_list.addAll(parsed);
-      filteredItems_active_items = active_items_list;
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        _isLoading = false;
-      });
-    }
-
-    setState(() {
-      if (filteredItems_active_items.isEmpty) {
-        item_count = "0";
-
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        isVisibleNoDataFound = true;
-      } else {
-        item_count = filteredItems_active_items.length.toString();
-        _isInactiveList = false;
-        _isActiveList = true;
-        _isAllList = false;
-      }
-      _isLoading = false;
-    });
-  }
-
-  /// `reports/stock-items/movement-analysis` only accepts a single
-  /// quantity threshold (compares against `totalQuantitySold`, per
-  /// stock-reports.service.ts) - legacy's "value" filter mode (a monetary
-  /// threshold) has no server-side equivalent, so it's passed through as
-  /// no threshold at all (unfiltered) rather than silently misapplying a
-  /// currency amount as a quantity.
-  Future<List<items>> _fetchMovingList(
-    final String parent,
-    final String filter,
-    final String status,
-  ) async {
-    String qtyStr = '';
-    int days = 0;
-    switch (status) {
-      case 'FAST':
-        qtyStr = filter == 'qty' ? fastmovingqty : '';
-        days = int.tryParse(fastmovingdays) ?? 0;
-        break;
-      case 'SLOW':
-        qtyStr = filter == 'qty' ? slowmovingqty : '';
-        days = int.tryParse(slowmovingdays) ?? 0;
-        break;
-      default: // INACTIVE
-        days = int.tryParse(inactivedays) ?? 0;
-    }
-
-    final asOf = DateTime.now().subtract(Duration(days: days));
-    final groupMasterId = parent.isEmpty ? null : _groupMasterIdByName[parent];
-
-    final rows = await StockRepository.instance.movementAnalysis(
-      status: status,
-      asOf: asOf,
-      threshold: double.tryParse(qtyStr),
-      stockGroupMasterId: groupMasterId,
-    );
-    return rows.map(items.fromJson).toList();
-  }
-
-  Future<void> fetchMovingSummary(final String parent) async {
-    setState(() {
-      item_count = "0";
-      isClicked_allitems = false;
-      isClicked_fastmoving = false;
-      isClicked_slowmoving = false;
-      isClicked_inactiveitems = false;
-      isClicked_movingsummary = true;
-      isClicked_stockvaluation = false;
-      isClicked_itemageing = false;
-      _isAllList = false;
-      _isInactiveList = false;
-      _isActiveList = false;
-      isVisibleNoDataFound = false;
-      isVisibleFilterby = true;
-      _movingSummaryDrilldown = null;
-      fastMovingSummaryList = [];
-      slowMovingSummaryList = [];
-      _movingSummaryFilteredDrilldown = [];
-      searchController.clear();
-      _isLoading = true;
-    });
-
-    final resolvedParent = parent == "All Items" ? "" : parent;
-
-    try {
-      final results = await Future.wait([
-        _fetchMovingList(resolvedParent, _selectedFilter!, 'FAST'),
-        _fetchMovingList(resolvedParent, _selectedFilter!, 'SLOW'),
-      ]);
-
-      if (!mounted) return;
-      setState(() {
-        fastMovingSummaryList = results[0];
-        slowMovingSummaryList = results[1];
-        _isLoading = false;
-        isVisibleNoDataFound =
-            fastMovingSummaryList.isEmpty && slowMovingSummaryList.isEmpty;
-      });
-    } catch (e) {
-      print(e);
-      if (!mounted) return;
-      setState(() {
-        fastMovingSummaryList = [];
-        slowMovingSummaryList = [];
-        _isLoading = false;
-        isVisibleNoDataFound = true;
-      });
+      _notifier.loadMoreItemsIfNeeded(searchController.text);
     }
   }
 
@@ -1674,19 +1173,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       0.0,
       (sum, item) => sum + (double.tryParse(item.c_amount) ?? 0.0),
     );
-  }
-
-  void _onMovingSummarySearchChanged(String value) {
-    if (_movingSummaryDrilldown == null) return;
-    final query = value.toLowerCase();
-    final source = _movingSummaryDrilldown == 'fast'
-        ? fastMovingSummaryList
-        : slowMovingSummaryList;
-    setState(() {
-      _movingSummaryFilteredDrilldown = source
-          .where((e) => e.itemname.toLowerCase().contains(query))
-          .toList();
-    });
   }
 
   double _stockValuationTotal(List<items> list) {
@@ -1709,408 +1195,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     );
   }
 
-  void _onStockValuationSearchChanged(String value) {
-    final query = value.toLowerCase();
-    setState(() {
-      _stockValuationFiltered = stockValuationList
-          .where((e) => e.itemname.toLowerCase().contains(query))
-          .toList();
-    });
-  }
-
-  Future<void> fetchStockValuation(final String parent) async {
-    setState(() {
-      item_count = "0";
-      isClicked_allitems = false;
-      isClicked_fastmoving = false;
-      isClicked_slowmoving = false;
-      isClicked_inactiveitems = false;
-      isClicked_movingsummary = false;
-      isClicked_stockvaluation = true;
-      isClicked_itemageing = false;
-      _isAllList = false;
-      _isInactiveList = false;
-      _isActiveList = false;
-      isVisibleNoDataFound = false;
-      isVisibleFilterby = false;
-      stockValuationList = [];
-      _stockValuationFiltered = [];
-      searchController.clear();
-      _isLoading = true;
-    });
-
-    final resolvedParent = parent == "All Items" ? "" : parent;
-
-    try {
-      final parsed = await _fetchStockItemsList(resolvedParent)
-        ..sort(
-          (a, b) => (double.tryParse(b.c_amount) ?? 0.0).compareTo(
-            double.tryParse(a.c_amount) ?? 0.0,
-          ),
-        );
-
-      if (!mounted) return;
-      setState(() {
-        stockValuationList = parsed;
-        item_count = parsed.length.toString();
-        isVisibleNoDataFound = parsed.isEmpty;
-        _isLoading = false;
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      if (!mounted) return;
-      setState(() {
-        stockValuationList = [];
-        isVisibleNoDataFound = true;
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      if (!mounted) return;
-      setState(() {
-        stockValuationList = [];
-        isVisibleNoDataFound = true;
-        _isLoading = false;
-      });
-    }
-  }
-
-  DateTime? _parseItemDateSafe(String value) {
-    if (value == 'null' || value.isEmpty) return null;
-    try {
-      return DateTime.parse(value);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  void _onItemAgeingSearchChanged(String value) {
-    if (_selectedItemAgeingBucket == null) return;
-    final query = value.toLowerCase();
-    setState(() {
-      _itemAgeingFilteredDrilldown = _selectedItemAgeingBucket!.itemsList
-          .where((e) => e.itemname.toLowerCase().contains(query))
-          .toList();
-    });
-  }
-
-  Future<void> fetchItemAgeing(final String parent) async {
-    setState(() {
-      item_count = "0";
-      isClicked_allitems = false;
-      isClicked_fastmoving = false;
-      isClicked_slowmoving = false;
-      isClicked_inactiveitems = false;
-      isClicked_movingsummary = false;
-      isClicked_stockvaluation = false;
-      isClicked_itemageing = true;
-      _isAllList = false;
-      _isInactiveList = false;
-      _isActiveList = false;
-      isVisibleNoDataFound = false;
-      isVisibleFilterby = false;
-      itemAgeingBuckets = [];
-      _selectedItemAgeingBucket = null;
-      _itemAgeingFilteredDrilldown = [];
-      searchController.clear();
-      _isLoading = true;
-    });
-
-    final resolvedParent = parent == "All Items" ? "" : parent;
-
-    try {
-      final parsedItems = await _fetchStockItemsList(resolvedParent);
-      if (!mounted) return;
-
-      // Same configurable thresholds as the voucher Ageing Report
-      // (AgeingConfig.dart), so both reports stay in sync from one
-      // settings screen.
-      final ageingPrefs = await SharedPreferences.getInstance();
-      final h1 = int.tryParse(ageingPrefs.getString('heading1') ?? '30') ?? 30;
-      final h2 = int.tryParse(ageingPrefs.getString('heading2') ?? '60') ?? 60;
-      final h3 = int.tryParse(ageingPrefs.getString('heading3') ?? '90') ?? 90;
-      final h4 =
-          int.tryParse(ageingPrefs.getString('heading4') ?? '120') ?? 120;
-      final h5 =
-          int.tryParse(ageingPrefs.getString('heading5') ?? '180') ?? 180;
-
-      final b1 = ItemAgeingBucket('0-$h1 Days');
-      final b2 = ItemAgeingBucket('$h1-$h2 Days');
-      final b3 = ItemAgeingBucket('$h2-$h3 Days');
-      final b4 = ItemAgeingBucket('$h3-$h4 Days');
-      final b5 = ItemAgeingBucket('$h4-$h5 Days');
-      final b6 = ItemAgeingBucket('$h5+ Days');
-      final noMovement = ItemAgeingBucket('No Sales/Purchase Data');
-
-      final today = DateTime.now();
-      final todayDate = DateTime(today.year, today.month, today.day);
-
-      for (final item in parsedItems) {
-        final saleDate = _parseItemDateSafe(item.lastsale);
-        final purcDate = _parseItemDateSafe(item.lastpurc);
-
-        DateTime? lastMovement;
-        if (saleDate != null && purcDate != null) {
-          lastMovement = saleDate.isAfter(purcDate) ? saleDate : purcDate;
-        } else {
-          lastMovement = saleDate ?? purcDate;
-        }
-
-        final amount = double.tryParse(item.c_amount)?.abs() ?? 0.0;
-
-        if (lastMovement == null) {
-          noMovement.count++;
-          noMovement.value += amount;
-          noMovement.itemsList.add(item);
-          continue;
-        }
-
-        final daysSince = todayDate
-            .difference(
-              DateTime(
-                lastMovement.year,
-                lastMovement.month,
-                lastMovement.day,
-              ),
-            )
-            .inDays;
-
-        ItemAgeingBucket bucket;
-        if (daysSince <= h1) {
-          bucket = b1;
-        } else if (daysSince <= h2) {
-          bucket = b2;
-        } else if (daysSince <= h3) {
-          bucket = b3;
-        } else if (daysSince <= h4) {
-          bucket = b4;
-        } else if (daysSince <= h5) {
-          bucket = b5;
-        } else {
-          bucket = b6;
-        }
-
-        bucket.count++;
-        bucket.value += amount;
-        bucket.itemsList.add(item);
-      }
-
-      final buckets = [b1, b2, b3, b4, b5, b6, noMovement]
-          .where((b) => b.count > 0)
-          .toList();
-
-      setState(() {
-        itemAgeingBuckets = buckets;
-        item_count = parsedItems.length.toString();
-        isVisibleNoDataFound = parsedItems.isEmpty;
-        _isLoading = false;
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      if (!mounted) return;
-      setState(() {
-        itemAgeingBuckets = [];
-        isVisibleNoDataFound = true;
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      if (!mounted) return;
-      setState(() {
-        itemAgeingBuckets = [];
-        isVisibleNoDataFound = true;
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> fetchinactive_items(final String parent) async {
-    setState(() {
-      item_count = "0";
-      _isLoading = true;
-      _isAllList = false;
-      _isActiveList = false;
-      _isInactiveList = false;
-      isVisibleNoDataFound = false;
-      isClicked_allitems = false;
-      isClicked_fastmoving = false;
-      isClicked_slowmoving = false;
-      isClicked_movingsummary = false;
-      isClicked_stockvaluation = false;
-      isClicked_itemageing = false;
-      isVisibleFilterby = false;
-
-      isClicked_inactiveitems = true;
-    });
-
-    filteredItems_inactive_items.clear();
-    inactive_items_list.clear();
-
-    try {
-      final parsed = await _fetchMovingList(parent, 'qty', 'INACTIVE');
-      isVisibleNoDataFound = false;
-      inactive_items_list.addAll(parsed);
-      filteredItems_inactive_items = inactive_items_list;
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        _isLoading = false;
-      });
-    }
-
-    setState(() {
-      if (inactive_items_list.isEmpty) {
-        _isInactiveList = false;
-        _isAllList = false;
-        _isActiveList = false;
-        item_count = "0";
-        isVisibleNoDataFound = true;
-      } else {
-        item_count = filteredItems_inactive_items.length.toString();
-        _isInactiveList = true;
-        _isActiveList = false;
-        _isAllList = false;
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    decimal = prefs.getInt('decimalplace') ?? 2;
-
-    currencyFormat = new NumberFormat();
-
-    String? currencyCode = '';
-
-    currencyCode = prefs.getString('currencycode') ?? "AED";
-
-    try {
-      if (currencyCode == 'INR' ||
-          currencyCode == 'EUR' ||
-          currencyCode == 'USD' ||
-          currencyCode == 'PKR') {
-        currencyFormat = NumberFormat('#,##0');
-        NumberFormat format = NumberFormat.simpleCurrency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-      } else {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-    } catch (e) {
-      NumberFormat format = NumberFormat.currency(
-        locale: 'en',
-        name: currencyCode,
-      );
-      currencysymbol = format.currencySymbol;
-      currencyFormat = NumberFormat('#,##0');
-    }
-
-    _currencyCode = currencyCode ?? 'AED';
-
-    hostname = prefs.getString('hostname');
-    company = prefs.getString('company_name');
-    company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-    serial_no = prefs.getString('serial_no');
-    username = prefs.getString('username');
-
-    fastmovingdays = prefs.getString('fastmovingdays') ?? '180';
-    fastmovingqty = prefs.getString('fastmovingqty') ?? '1000';
-    fastmovingvalue = prefs.getString('fastmovingvalue') ?? '10000';
-
-    slowmovingdays = prefs.getString('slowmovingdays') ?? '181';
-    slowmovingqty = prefs.getString('slowmovingqty') ?? '1000';
-    slowmovingvalue = prefs.getString('slowmovingvalue') ?? '10000';
-
-    inactivedays = prefs.getString('inactivedays') ?? '182';
-
-    String allitemsaccess = prefs.getString("allitems") ?? 'False';
-    String fastmovingitemsaccess = prefs.getString("activeitems") ?? 'False';
-    String inactiveitemsaccess = prefs.getString("inactiveitems") ?? 'False';
-    String rateaccess = prefs.getString("rate") ?? 'False';
-    String amountaccess = prefs.getString("item_amount") ?? 'False';
-
-    if (allitemsaccess == 'True') {
-      allitems_visibility = true;
-    } else {
-      allitems_visibility = false;
-    }
-    if (fastmovingitemsaccess == 'True') {
-      fastmovingitems_visibility = true;
-    } else {
-      fastmovingitems_visibility = false;
-    }
-    if (inactiveitemsaccess == 'True') {
-      inactiveitems_visibility = true;
-    } else {
-      inactiveitems_visibility = false;
-    }
-    if (rateaccess == 'True') {
-      rate_visibility = true;
-    } else {
-      rate_visibility = false;
-    }
-    if (amountaccess == 'True') {
-      amount_visibility = true;
-    } else {
-      amount_visibility = false;
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-    if (allitems_visibility ||
-        fastmovingitems_visibility ||
-        inactiveitems_visibility) {
-      isVisibleParent = true;
-      isVisibleListLayout = true;
-      await fetchParentData();
-    } else {
-      isVisibleListLayout = false;
-      isVisibleNoAccess = true;
-      isVisibleParent = false;
-    }
-  }
-
   String formatAmountinDecimals(num amount, int decimals) {
     final formatter = NumberFormat.decimalPattern('en')
       ..minimumFractionDigits = decimals
@@ -2130,7 +1214,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       double parsed = double.parse(numberOnly);
       if (isNegative) parsed = -parsed;
 
-      // Agar value decimal ke bagair hai → int dikhado
+      // Agar value _s.decimal ke bagair hai → int dikhado
       if (parsed % 1 == 0) {
         return parsed.toInt().toString(); // 731.0 → 731
       } else {
@@ -2153,7 +1237,6 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
     _scrollFabController.addListener(_onItemsScroll);
-    _initSharedPreferences();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
@@ -2161,6 +1244,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(itemsNotifierProvider);
+    ref.listen<ItemsState>(itemsNotifierProvider, (previous, next) {
+      if (next.errorMessage != null) {
+        showAppMessage(context, next.errorMessage!);
+        ref.read(itemsNotifierProvider.notifier).clearError();
+      }
+    });
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.items),
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -2195,7 +1285,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  company ?? '',
+                  _s.company,
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
@@ -2250,41 +1340,41 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (isClicked_movingsummary) {
-                            if (fastMovingSummaryList.isNotEmpty ||
-                                slowMovingSummaryList.isNotEmpty) {
+                          if (_s.isClicked_movingsummary) {
+                            if (_s.fastMovingSummaryList.isNotEmpty ||
+                                _s.slowMovingSummaryList.isNotEmpty) {
                               generateAndSharePDF_MovingSummary();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (isClicked_stockvaluation) {
-                            if (stockValuationList.isNotEmpty) {
+                          } else if (_s.isClicked_stockvaluation) {
+                            if (_s.stockValuationList.isNotEmpty) {
                               generateAndSharePDF_StockValuation();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (isClicked_itemageing) {
-                            if (itemAgeingBuckets.isNotEmpty) {
+                          } else if (_s.isClicked_itemageing) {
+                            if (_s.itemAgeingBuckets.isNotEmpty) {
                               generateAndSharePDF_ItemAgeing();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (_isAllList) {
-                            if (!all_items_list.isEmpty) {
-                              _fullAllItemsForExport().then(
+                          } else if (_s.isAllList) {
+                            if (!_s.all_items_list.isEmpty) {
+                              _notifier.fullAllItemsForExport(searchController.text).then(
                                 generateAndSharePDF_AllItems,
                               );
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (_isActiveList) {
-                            if (!active_items_list.isEmpty) {
+                          } else if (_s.isActiveList) {
+                            if (!_s.active_items_list.isEmpty) {
                               generateAndSharePDF_FastSlowItems();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (_isInactiveList) {
-                            if (!inactive_items_list.isEmpty) {
+                          } else if (_s.isInactiveList) {
+                            if (!_s.inactive_items_list.isEmpty) {
                               generateAndSharePDF_InactiveItems();
                             } else {
                               showToast('Data Not Found');
@@ -2320,41 +1410,41 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                         onTap: () {
                           Navigator.pop(context);
 
-                          if (isClicked_movingsummary) {
-                            if (fastMovingSummaryList.isNotEmpty ||
-                                slowMovingSummaryList.isNotEmpty) {
+                          if (_s.isClicked_movingsummary) {
+                            if (_s.fastMovingSummaryList.isNotEmpty ||
+                                _s.slowMovingSummaryList.isNotEmpty) {
                               generateAndShareCSV_MovingSummary();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (isClicked_stockvaluation) {
-                            if (stockValuationList.isNotEmpty) {
+                          } else if (_s.isClicked_stockvaluation) {
+                            if (_s.stockValuationList.isNotEmpty) {
                               generateAndShareCSV_StockValuation();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (isClicked_itemageing) {
-                            if (itemAgeingBuckets.isNotEmpty) {
+                          } else if (_s.isClicked_itemageing) {
+                            if (_s.itemAgeingBuckets.isNotEmpty) {
                               generateAndShareCSV_ItemAgeing();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (_isAllList) {
-                            if (!all_items_list.isEmpty) {
-                              _fullAllItemsForExport().then(
+                          } else if (_s.isAllList) {
+                            if (!_s.all_items_list.isEmpty) {
+                              _notifier.fullAllItemsForExport(searchController.text).then(
                                 generateAndShareCSV_AllItems,
                               );
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (_isActiveList) {
-                            if (!active_items_list.isEmpty) {
+                          } else if (_s.isActiveList) {
+                            if (!_s.active_items_list.isEmpty) {
                               generateAndShareCSV_FastSlowItems();
                             } else {
                               showToast('Data Not Found');
                             }
-                          } else if (_isInactiveList) {
-                            if (!inactive_items_list.isEmpty) {
+                          } else if (_s.isInactiveList) {
+                            if (!_s.inactive_items_list.isEmpty) {
                               generateAndShareCSV_InactiveItems();
                             } else {
                               showToast('Data Not Found');
@@ -2388,7 +1478,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 );
               },
             ),
-            if (isVisibleFilterby)
+            if (_s.isVisibleFilterby)
               IconButton(
                 icon: Icon(
                   Icons.filter_alt_rounded,
@@ -2408,7 +1498,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             controller: _scrollFabController,
             slivers: [
               // 🔹 Dropdown + Tabs Container
-              if (isVisibleParent)
+              if (_s.isVisibleParent)
                 SliverToBoxAdapter(
                   child: Container(
                     margin: EdgeInsets.only(
@@ -2448,10 +1538,10 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                         _buildViewSelector(),
 
                         if (_isSearchViewVisible &&
-                            !(isClicked_movingsummary &&
-                                _movingSummaryDrilldown == null) &&
-                            !(isClicked_itemageing &&
-                                _selectedItemAgeingBucket == null))
+                            !(_s.isClicked_movingsummary &&
+                                _s.movingSummaryDrilldown == null) &&
+                            !(_s.isClicked_itemageing &&
+                                _s.selectedItemAgeingBucket == null))
                           Padding(
                             padding: const EdgeInsets.only(
                               left: 0,
@@ -2463,12 +1553,12 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                               height: 46,
                               child: TextField(
                                 controller: searchController,
-                                onChanged: isClicked_movingsummary
-                                    ? _onMovingSummarySearchChanged
-                                    : isClicked_stockvaluation
-                                    ? _onStockValuationSearchChanged
-                                    : isClicked_itemageing
-                                    ? _onItemAgeingSearchChanged
+                                onChanged: _s.isClicked_movingsummary
+                                    ? _notifier.onMovingSummarySearchChanged
+                                    : _s.isClicked_stockvaluation
+                                    ? _notifier.onStockValuationSearchChanged
+                                    : _s.isClicked_itemageing
+                                    ? _notifier.onItemAgeingSearchChanged
                                     : _onSearchChanged,
                                 style: GoogleFonts.poppins(
                                   fontSize: 13.5,
@@ -2523,13 +1613,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 ),
 
               // 🔹 List / Empty State
-              if (isClicked_movingsummary)
+              if (_s.isClicked_movingsummary)
                 ..._buildMovingSummarySlivers()
-              else if (isClicked_stockvaluation)
+              else if (_s.isClicked_stockvaluation)
                 ..._buildStockValuationSlivers()
-              else if (isClicked_itemageing)
+              else if (_s.isClicked_itemageing)
                 ..._buildItemAgeingSlivers()
-              else if (isVisibleNoDataFound)
+              else if (_s.isVisibleNoDataFound)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _buildEmptyState(),
@@ -2548,7 +1638,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
               // Bottom-of-list spinner while the next page of the "All
               // Items" tab loads - never shown for the other tabs, which
               // always load their full result set in one go.
-              if (isClicked_allitems && _isAllList && _isLoadingMoreItems)
+              if (_s.isClicked_allitems && _s.isAllList && _s.isLoadingMoreItems)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2571,7 +1661,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           // dropdown + view selector) plus a list of item-card-shaped
           // placeholders while the initial fetch is in flight, replacing
           // the old dimmed spinner-over-stale-content overlay.
-          if (_isLoading)
+          if (_s.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
@@ -2599,8 +1689,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
         borderRadius: BorderRadius.circular(14),
       ),
       child: SearchableSelectorField<String>(
-        value: _selecteditem,
-        items: spinner_list,
+        value: _s.selectedItem,
+        items: _s.spinner_list,
         itemLabel: (v) => v,
         hintText: "Select Item",
         decorated: false,
@@ -2615,8 +1705,9 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
         onChanged: (value) {
-          setState(() => _selecteditem = value);
-          fetchItemData('All Items', _selecteditem);
+          _notifier.selectItem(value);
+          searchController.clear();
+          _notifier.fetchItemData('All Items', value);
         },
       ),
     );
@@ -2624,7 +1715,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
   List<_TabConfig> _buildViewOptions() {
     return [
-      if (allitems_visibility)
+      if (_s.allitems_visibility)
         _TabConfig(
           // Labeled "Item List" (not "All Items") to avoid duplicating
           // the parent-category dropdown right above it, which also
@@ -2632,35 +1723,47 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           // two together looked like an unexplained repeat.
           "Item List",
           Icons.inventory_2_outlined,
-          isClicked_allitems,
-          () => fetchItemData('All Items', _selecteditem),
+          _s.isClicked_allitems,
+          () {
+            searchController.clear();
+            _notifier.fetchItemData('All Items', _s.selectedItem);
+          },
         ),
-      if (fastmovingitems_visibility)
+      if (_s.fastmovingitems_visibility)
         _TabConfig(
           "Moving Summary",
           Icons.compare_arrows_rounded,
-          isClicked_movingsummary,
-          () => fetchMovingSummary(_selecteditem),
+          _s.isClicked_movingsummary,
+          () {
+            searchController.clear();
+            _notifier.fetchMovingSummary(_s.selectedItem ?? '');
+          },
         ),
-      if (allitems_visibility)
+      if (_s.allitems_visibility)
         _TabConfig(
           "Stock Valuation",
           Icons.bar_chart_rounded,
-          isClicked_stockvaluation,
-          () => fetchStockValuation(_selecteditem),
+          _s.isClicked_stockvaluation,
+          () {
+            searchController.clear();
+            _notifier.fetchStockValuation(_s.selectedItem ?? '');
+          },
         ),
-      if (allitems_visibility)
+      if (_s.allitems_visibility)
         _TabConfig(
           "Item Ageing",
           Icons.history_rounded,
-          isClicked_itemageing,
-          () => fetchItemAgeing(_selecteditem),
+          _s.isClicked_itemageing,
+          () {
+            searchController.clear();
+            _notifier.fetchItemAgeing(_s.selectedItem ?? '');
+          },
         ),
-      if (inactiveitems_visibility)
+      if (_s.inactiveitems_visibility)
         _TabConfig(
           "Inactive",
           Icons.block,
-          isClicked_inactiveitems,
+          _s.isClicked_inactiveitems,
           () => _showInactiveDaysDialog(context),
         ),
     ];
@@ -2810,16 +1913,16 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   List<Widget> _buildMovingSummarySlivers() {
-    if (_isLoading) {
+    if (_s.isLoading) {
       return [const SliverToBoxAdapter(child: SizedBox.shrink())];
     }
 
-    if (_movingSummaryDrilldown != null) {
-      final fullList = _movingSummaryDrilldown == 'fast'
-          ? fastMovingSummaryList
-          : slowMovingSummaryList;
+    if (_s.movingSummaryDrilldown != null) {
+      final fullList = _s.movingSummaryDrilldown == 'fast'
+          ? _s.fastMovingSummaryList
+          : _s.slowMovingSummaryList;
       final visible = _isSearchViewVisible && searchController.text.isNotEmpty
-          ? _movingSummaryFilteredDrilldown
+          ? _s.movingSummaryFilteredDrilldown
           : fullList;
 
       return [
@@ -2829,11 +1932,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () {
-                setState(() {
-                  _movingSummaryDrilldown = null;
-                  searchController.clear();
-                  _movingSummaryFilteredDrilldown = [];
-                });
+                _notifier.setMovingSummaryDrilldown(null);
+                searchController.clear();
               },
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2842,7 +1942,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                     Icon(Icons.arrow_back_rounded, size: 20, color: app_color),
                     const SizedBox(width: 8),
                     Text(
-                      _movingSummaryDrilldown == 'fast'
+                      _s.movingSummaryDrilldown == 'fast'
                           ? 'Fast Moving Items'
                           : 'Slow Moving Items',
                       style: GoogleFonts.poppins(
@@ -2871,7 +1971,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       ];
     }
 
-    if (fastMovingSummaryList.isEmpty && slowMovingSummaryList.isEmpty) {
+    if (_s.fastMovingSummaryList.isEmpty && _s.slowMovingSummaryList.isEmpty) {
       return [
         SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState()),
       ];
@@ -2887,16 +1987,16 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                 title: 'Fast Moving',
                 icon: Icons.flash_on_rounded,
                 accentColor: Colors.green,
-                list: fastMovingSummaryList,
-                onTap: () => setState(() => _movingSummaryDrilldown = 'fast'),
+                list: _s.fastMovingSummaryList,
+                onTap: () => _notifier.setMovingSummaryDrilldown('fast'),
               ),
               const SizedBox(height: 12),
               _buildMovingSummaryCard(
                 title: 'Slow Moving',
                 icon: Icons.timer_outlined,
                 accentColor: Colors.deepOrange,
-                list: slowMovingSummaryList,
-                onTap: () => setState(() => _movingSummaryDrilldown = 'slow'),
+                list: _s.slowMovingSummaryList,
+                onTap: () => _notifier.setMovingSummaryDrilldown('slow'),
               ),
             ],
           ),
@@ -2992,21 +2092,21 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   List<Widget> _buildStockValuationSlivers() {
-    if (_isLoading) {
+    if (_s.isLoading) {
       return [const SliverToBoxAdapter(child: SizedBox.shrink())];
     }
 
-    if (stockValuationList.isEmpty) {
+    if (_s.stockValuationList.isEmpty) {
       return [
         SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState()),
       ];
     }
 
     final visible = searchController.text.isNotEmpty
-        ? _stockValuationFiltered
-        : stockValuationList;
-    final totalValue = _stockValuationTotal(stockValuationList);
-    final absTotalValue = _stockValuationAbsTotal(stockValuationList);
+        ? _s.stockValuationFiltered
+        : _s.stockValuationList;
+    final totalValue = _stockValuationTotal(_s.stockValuationList);
+    final absTotalValue = _stockValuationAbsTotal(_s.stockValuationList);
 
     return [
       SliverToBoxAdapter(
@@ -3060,7 +2160,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${stockValuationList.length} item${stockValuationList.length == 1 ? '' : 's'}',
+                        '${_s.stockValuationList.length} item${_s.stockValuationList.length == 1 ? '' : 's'}',
                         style: GoogleFonts.poppins(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
@@ -3094,7 +2194,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildStockValuationCard(
                 visible[index],
-                stockValuationList.indexOf(visible[index]) + 1,
+                _s.stockValuationList.indexOf(visible[index]) + 1,
                 absTotalValue,
               ),
             );
@@ -3253,14 +2353,14 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   List<Widget> _buildItemAgeingSlivers() {
-    if (_isLoading) {
+    if (_s.isLoading) {
       return [const SliverToBoxAdapter(child: SizedBox.shrink())];
     }
 
-    if (_selectedItemAgeingBucket != null) {
-      final bucket = _selectedItemAgeingBucket!;
+    if (_s.selectedItemAgeingBucket != null) {
+      final bucket = _s.selectedItemAgeingBucket!;
       final visible = searchController.text.isNotEmpty
-          ? _itemAgeingFilteredDrilldown
+          ? _s.itemAgeingFilteredDrilldown
           : bucket.itemsList;
 
       return [
@@ -3270,11 +2370,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () {
-                setState(() {
-                  _selectedItemAgeingBucket = null;
-                  searchController.clear();
-                  _itemAgeingFilteredDrilldown = [];
-                });
+                _notifier.setSelectedItemAgeingBucket(null);
+                searchController.clear();
               },
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3310,7 +2407,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
       ];
     }
 
-    if (itemAgeingBuckets.isEmpty) {
+    if (_s.itemAgeingBuckets.isEmpty) {
       return [
         SliverFillRemaining(hasScrollBody: false, child: _buildEmptyState()),
       ];
@@ -3321,7 +2418,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: Column(
-            children: itemAgeingBuckets.map((bucket) {
+            children: _s.itemAgeingBuckets.map((bucket) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _buildItemAgeingBucketCard(bucket),
@@ -3345,9 +2442,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: () {
-        setState(() {
-          _selectedItemAgeingBucket = bucket;
-        });
+        _notifier.setSelectedItemAgeingBucket(bucket);
       },
       child: Container(
         padding: const EdgeInsets.all(16),
@@ -3717,7 +2812,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                           ? _currencyValueWidget(
                               formatAmountinDecimals(
                                 double.parse(removeUnit(card.saleprice).toString()),
-                                decimal!,
+                                _s.decimal!,
                               ),
                             )
                           : null,
@@ -3731,13 +2826,13 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                           ? _currencyValueWidget(
                               formatAmountinDecimals(
                                 double.parse(removeUnit(card.standardprice).toString()),
-                                decimal!,
+                                _s.decimal!,
                               ),
                             )
                           : null,
                     ),
 
-                    if (rate_visibility && card.c_rate != "null")
+                    if (_s.rate_visibility && card.c_rate != "null")
                       _modernDetailRow(
                         Icons.attach_money,
                         "Rate",
@@ -3745,12 +2840,12 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                         valueWidget: _currencyValueWidget(
                           formatAmountinDecimals(
                             double.parse(removeUnit(card.c_rate).toString()),
-                            decimal!,
+                            _s.decimal!,
                           ),
                         ),
                       ),
 
-                    if (amount_visibility)
+                    if (_s.amount_visibility)
                       _modernDetailRow(
                         Icons.payments,
                         "Amount",
@@ -3762,7 +2857,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                             : null,
                       ),
 
-                    if (_isInactiveList)
+                    if (_s.isInactiveList)
                       _modernDetailRow(
                         Icons.calendar_today,
                         "Inactive Since",
@@ -3783,8 +2878,8 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   // their plain symbol text unchanged, matching _modernDetailRow's style.
   Widget _currencyValueWidget(String amountText) {
     return currencyAmountText(
-      currencyCode: _currencyCode,
-      symbol: currencysymbol,
+      currencyCode: _s.currencyCode,
+      symbol: _s.currencysymbol,
       amountText: amountText,
       overflow: TextOverflow.visible,
       style: GoogleFonts.poppins(
@@ -3996,23 +3091,23 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
           Divider(),
           RadioListTile<String>(
             value: "qty",
-            groupValue: _selectedFilter,
+            groupValue: _s.selectedFilter,
             onChanged: (v) {
-              setState(() => _selectedFilter = v);
+              _notifier.selectFilter(v);
               Navigator.pop(context);
-              if (isClicked_movingsummary)
-                fetchMovingSummary(_selecteditem);
+              if (_s.isClicked_movingsummary)
+                _notifier.fetchMovingSummary(_s.selectedItem ?? '');
             },
             title: Text("Quantity"),
           ),
           RadioListTile<String>(
             value: "value",
-            groupValue: _selectedFilter,
+            groupValue: _s.selectedFilter,
             onChanged: (v) {
-              setState(() => _selectedFilter = v);
+              _notifier.selectFilter(v);
               Navigator.pop(context);
-              if (isClicked_movingsummary)
-                fetchMovingSummary(_selecteditem);
+              if (_s.isClicked_movingsummary)
+                _notifier.fetchMovingSummary(_s.selectedItem ?? '');
             },
             title: Text("Sale Price"),
           ),
@@ -4023,81 +3118,21 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
   }
 
   List<dynamic> _getVisibleList() {
-    if (_isAllList) return filteredItems_all_items;
-    if (_isActiveList) return filteredItems_active_items;
-    return filteredItems_inactive_items;
+    if (_s.isAllList) return _s.filteredItems_all_items;
+    if (_s.isActiveList) return _s.filteredItems_active_items;
+    return _s.filteredItems_inactive_items;
   }
 
   /// Narrower than before on the "All Items" tab: tally-api's
   /// `/stock-items` list has no server-side name-search query param, so
   /// this only searches pages already loaded by infinite scroll
-  /// (`all_items_list`), not the whole company's items. Fast/Slow Moving
+  /// (`_s.all_items_list`), not the whole _s.company's items. Fast/Slow Moving
   /// and Inactive Items are unaffected - those still load their full
-  /// result set up front.
-  ///
-  /// A plain "search what's loaded" filter alone would wrongly report "no
-  /// match" for an item that exists but sits on a page not yet scrolled
-  /// into view - [_autoLoadPagesForItemSearch] below keeps loading pages in
-  /// the background while a query has zero matches so far, same pattern as
-  /// Transactions.dart's equivalent (see that class's doc comment for the
-  /// live-text-reread rationale: closing over a frozen query would starve
-  /// itself on fast typing).
+  /// result set up front. See [ItemsNotifier.onSearchChanged] (and its
+  /// private `_autoLoadPagesForItemSearch` helper) for the live-text-reread
+  /// background-paging behavior this now drives.
   void _onSearchChanged(String value) {
-    final query = value.toLowerCase();
-    setState(() {
-      if (_isAllList) {
-        filteredItems_all_items = all_items_list
-            .where((e) => e.itemname.toLowerCase().contains(query))
-            .toList();
-      } else if (_isActiveList) {
-        filteredItems_active_items = active_items_list
-            .where((e) => e.itemname.toLowerCase().contains(query))
-            .toList();
-      } else if (_isInactiveList) {
-        filteredItems_inactive_items = inactive_items_list
-            .where((e) => e.itemname.toLowerCase().contains(query))
-            .toList();
-      }
-    });
-
-    if (_isAllList &&
-        query.isNotEmpty &&
-        filteredItems_all_items.isEmpty &&
-        _itemsPage <= _itemsTotalPages) {
-      _autoLoadPagesForItemSearch();
-    }
-  }
-
-  bool _isAutoSearchLoadingItems = false;
-
-  Future<void> _autoLoadPagesForItemSearch() async {
-    if (_isAutoSearchLoadingItems) return;
-    _isAutoSearchLoadingItems = true;
-    try {
-      while (true) {
-        final query = searchController.text.toLowerCase();
-        if (query.isEmpty || _itemsPage > _itemsTotalPages) break;
-        final hasMatch = all_items_list.any(
-          (e) => e.itemname.toLowerCase().contains(query),
-        );
-        if (hasMatch) break;
-
-        await _loadNextItemsPage();
-
-        final stillQuery = searchController.text.toLowerCase();
-        if (stillQuery.isEmpty) break;
-        setState(() {
-          filteredItems_all_items = all_items_list
-              .where((e) => e.itemname.toLowerCase().contains(stillQuery))
-              .toList();
-          item_count = filteredItems_all_items.length.toString();
-          isVisibleNoDataFound =
-              filteredItems_all_items.isEmpty && _itemsPage > _itemsTotalPages;
-        });
-      }
-    } finally {
-      _isAutoSearchLoadingItems = false;
-    }
+    _notifier.onSearchChanged(value, () => searchController.text.toLowerCase());
   }
 
   Widget buildNeumorphicTab({
@@ -4227,7 +3262,7 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
 
   void _showInactiveDaysDialog(BuildContext context) {
     final TextEditingController daysController = TextEditingController();
-    daysController.text = inactivedays.toString();
+    daysController.text = _s.inactivedays.toString();
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -4349,10 +3384,10 @@ class _ItemsPageState extends State<Items> with TickerProviderStateMixin {
                       onPressed: () {
                         final input = daysController.text.trim();
                         if (input.isNotEmpty && int.tryParse(input) != null) {
-                          inactivedays = input;
+                          _notifier.setInactiveDays(input);
 
                           // Call your same logic with days
-                          fetchItemData('InactiveItems', _selecteditem);
+                          _notifier.fetchItemData('InactiveItems', _s.selectedItem);
                           Navigator.pop(ctx);
                         }
                       },

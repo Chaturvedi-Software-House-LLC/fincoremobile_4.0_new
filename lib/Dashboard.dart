@@ -3,27 +3,23 @@ import 'dart:ui';
 import 'package:FincoreGo/PendingDeliveryNoteEntry.dart';
 import 'package:FincoreGo/l10n/app_localizations.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
-import 'package:flutter/foundation.dart';
 import 'package:FincoreGo/DashboardClicked.dart';
 import 'package:FincoreGo/PendingReceiptEntry.dart';
 import 'package:FincoreGo/PendingSalesEntry.dart';
 import 'package:FincoreGo/utils/number_formatter.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'utils/currency_helper.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'DashboardAnalytics.dart';
 import 'PendingSalesOrderEntry.dart';
 import 'CompanySelectTallyOauth.dart';
 import 'constants.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/dashboard_repository.dart';
-import 'api/monthly_bucket_helper.dart' show parseMoneyField;
+import 'providers/dashboard_notifier.dart';
 
 List<String> months_chart = [];
 List<String> months_chart_line_graph = [
@@ -43,142 +39,29 @@ List<String> months_chart_line_graph = [
 
 List<Map<String, dynamic>> data = [];
 
-String apiResponseTime = "";
-
 List<dynamic> piechartsaleslist = [];
 List<dynamic> piechartpurchaselist = [];
 
-class Dashboard extends StatefulWidget {
+class Dashboard extends ConsumerStatefulWidget {
   const Dashboard({Key? key}) : super(key: key);
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  ConsumerState<Dashboard> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
+class _MyHomePageState extends ConsumerState<Dashboard>
+    with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = false,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true;
-
-  bool isSalesEntryVisible = false,
-      isReceiptEntryVisible = false,
-      isSalesOrderEntryVisible = false,
-      isDeliveryNoteEntryVisible = false;
-
-  String SalesEntryHolder = '',
-      ReceiptEntryHolder = '',
-      SalesOrderEntryHolder = "",
-      DeliveryNoteEntryHolder = '';
-  String email = "";
-  String name = "", token = '';
-
-  late final TickerProvider tickerProvider;
-
-  String vchtype = "";
-  DateTime? expire_date;
-
-  String salesparty = '';
-  String purchaseparty = '';
-  String creditnoteparty = '';
-  String journalparty = '';
-  String payableparty = '';
-  String pendingpurchaseorderparty = '';
-  String receiptparty = '';
-  String paymentparty = '';
-  String debitnoteparty = '';
-  String receivableparty = '';
-  String pendingsalesorderparty = '';
-  String party_suppliers = '';
-  String party_customers = '';
-
-  String ledgerentries = '';
-  String inventoryentries = '';
-  String billsentries = '';
-  String costcentreentries = '';
-
-  bool isVisibleItemBtn = false,
-      isVisiblePartyBtn = false,
-      isVisibleTransactionBtn = false,
-      isVisibleEntriesBtn = false;
-
-  List<LineChartBarData> lineBars = [];
-
-  bool sales_visiblity = false,
-      purchase_visibility = false,
-      receipt_visibility = false,
-      payment_visibility = false,
-      receivable_visibility = false,
-      payable_visibility = false,
-      cash_visibility = false,
-      isVisibleNoAccess = false,
-      isVisibleDate = false;
-
-  bool isChartsVisible = false;
-
-  bool isBarChartVisible = false;
-
-  late NumberFormat currencyFormat;
-
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  late String startdate_text = "", enddate_text = "";
-  bool _isDashVisible = true,
-      _isEnddateVisible = true,
-      _IsSizeboxVisible = true;
 
+  // Local UI-only state for the custom date-range pickers - not read by
+  // build(), only used as fallback seed values for showDateRangePicker in
+  // the _selectDateRange*/refresh/auto helpers below.
   DateTime _startDate = DateTime.now();
-
   DateTime _endDate = DateTime.now().add(Duration(days: 7));
 
-  bool _isTextEnabled = true;
-
-  String? datetype;
-  bool isVisibleLineChart = false,
-      isPieChartVisible = false,
-      isSalesPieChartVisible = false,
-      isPurchasePieChartVisible = false;
-
-  late double sales_value = 0.0,
-      purchase_value = 0.0,
-      receipt_value = 0.0,
-      payment_value = 0.0,
-      outstandingreceivable_value = 0.0,
-      outstandingpayable_value = 0.0,
-      cash_value = 0.0;
-
-  List<double> salesDataList = [];
-  List<double> recDataList = [];
-  late String? startdate_pref, enddate_pref;
-
-  String? license_expiry;
-
-  bool allitems_visibility = false,
-      fastmovingitems_visibility = false,
-      inactiveitems_visibility = false;
-
-  bool isExpired = false;
-
-  String startDateString = "", endDateString = "";
-  String? company = "",
-      serial_no = "",
-      company_lowercase = "",
-      username = "",
-      base_currency = "";
-
-  String? barchartdashprefs, linechartdashprefs, piechartdashprefs;
-
-  bool _isLoading = false;
-
-  bool _isRefreshing = false;
-
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
-
-  dynamic _selecteddate = "Today";
+  DashboardState get _s => ref.read(dashboardNotifierProvider);
+  DashboardNotifier get _notifier =>
+      ref.read(dashboardNotifierProvider.notifier);
 
   List<String> date_range = [
     'Today',
@@ -190,29 +73,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     'Year To Date',
     'Custom Date',
   ];
-
-  /*
-  void showProgressDialog_LoadData(BuildContext context, bool _isLoading) {
-    ProgressDialog progressDialog;
-    progressDialog = ProgressDialog(context,
-      isDismissible: true,);
-    progressDialog.style(
-      message: 'Loading...', // Message displayed in the dialog
-      messageGoogleFonts.poppins: GoogleFonts.poppins(fontWeight: FontWeight.bold,),
-    );
-    if (_isLoading)
-    {
-      progressDialog.show();
-    } else
-    {
-      progressDialog.hide();
-    }
-  }
-*/
-
-  late int? decimal = 2;
-
-  NumberScale _selectedScale = NumberScale.thousand;
 
   void _showEntriesBottomSheet(BuildContext context) {
     showModalBottomSheet(
@@ -306,7 +166,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 18),
 
-                if (isSalesEntryVisible)
+                if (_s.isSalesEntryVisible)
                   _buildEntryOption(
                     icon: Icons.point_of_sale,
                     label: AppLocalizations.of(context).dashEntrySales,
@@ -320,7 +180,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     },
                   ),
 
-                if (isReceiptEntryVisible)
+                if (_s.isReceiptEntryVisible)
                   _buildEntryOption(
                     icon: Icons.receipt_long,
                     label: AppLocalizations.of(context).dashEntryReceipts,
@@ -336,7 +196,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     },
                   ),
 
-                if (isSalesOrderEntryVisible)
+                if (_s.isSalesOrderEntryVisible)
                   _buildEntryOption(
                     icon: Icons.assignment,
                     label: AppLocalizations.of(context).dashEntrySalesOrder,
@@ -354,8 +214,8 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                       );
                     },
                   ),
-                if (vanSalesSerialNo.contains(serial_no) &&
-                    (isDeliveryNoteEntryVisible))
+                if (vanSalesSerialNo.contains(_s.serialNo) &&
+                    (_s.isDeliveryNoteEntryVisible))
                   _buildEntryOption(
                     icon: Icons.local_shipping,
                     label: AppLocalizations.of(context).dashEntryDeliveryNote,
@@ -448,58 +308,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     );
   }
 
-  void generateMonthsList() {
-    months_chart.clear();
-
-    DateTime startDate = DateTime.parse(startDateString);
-    DateTime endDate = DateTime.parse(endDateString);
-    while (startDate.isBefore(endDate) || startDate.isAtSameMomentAs(endDate)) {
-      String month = DateFormat('MMM-yy').format(startDate);
-      months_chart.add(month);
-      startDate = DateTime(startDate.year, startDate.month + 1, startDate.day);
-    }
-  }
-
-  double calculateContainerWidthBarGraph() {
-    int totalMonths = months_chart.length; // Total number of months
-    double averageLabelWidth = 60.0; // Adjust as needed
-
-    double screensize = MediaQuery.of(context).size.width - 20.0;
-
-    // Calculate the total width needed for all month labels
-    double totalLabelWidth = totalMonths * averageLabelWidth;
-
-    // Add extra width for margins, padding, and other elements
-    double extraWidth = 100.0;
-
-    // Calculate the final container width
-    double containerWidth = totalLabelWidth + extraWidth;
-    if (containerWidth < screensize) {
-      containerWidth = screensize;
-    }
-
-    return containerWidth;
-  }
-
-  double calculateContainerWidthLineGraph() {
-    int totalMonths = months_chart_line_graph.length; // Total number of months
-    double averageLabelWidth = 60.0; // Adjust as needed
-
-    double screensize = MediaQuery.of(context).size.width - 20.0;
-
-    // Calculate the total width needed for all month labels
-    double totalLabelWidth = totalMonths * averageLabelWidth;
-
-    // Add extra width for margins, padding, and other elements
-    double extraWidth = 100.0; // Adjust as needed
-    // Calculate the final container width
-    double containerWidth = totalLabelWidth + extraWidth;
-    if (containerWidth < screensize) {
-      containerWidth = screensize;
-    }
-    return containerWidth;
-  }
-
   Future<void> _showConfirmationDialogAndExit(BuildContext context) async {
     await showDialog<void>(
       context: context,
@@ -509,7 +317,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           scale: CurvedAnimation(
             parent: AnimationController(
               duration: const Duration(milliseconds: 500),
-              vsync: tickerProvider,
+              vsync: this,
             )..forward(),
             curve: Curves.fastOutSlowIn,
           ),
@@ -554,1270 +362,180 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   }
 
   Future<void> _handleRefresh() async {
-    setState(() {
-      _isRefreshing = true;
-    });
-
-    // Do your refresh work here.
-    datetype = prefs.getString('datetype');
-    if (datetype != null) {
-      _selecteddate = datetype;
-      if (_selecteddate == "Today") {
-        DateTime currentDate = DateTime.now();
-        String startMonth = DateFormat('MMM').format(currentDate);
-        String sdf = DateFormat(
-          'MM',
-        ).format(currentDate); // converting month into string
-
-        String startDay = DateFormat('dd').format(currentDate);
-        int startYear = currentDate.year;
-
-        String endMonth = DateFormat('MMM').format(currentDate);
-        String sdfEnd = DateFormat('MM').format(currentDate);
-
-        String endDay = DateFormat('dd').format(currentDate);
-        int endYear = currentDate.year;
-
-        startDateString = "$startYear$sdf$startDay";
-        endDateString = "$endYear$sdfEnd$endDay";
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-          _isDashVisible = false;
-          _isEnddateVisible = false;
-          _IsSizeboxVisible = false;
-        });
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-      } else if (_selecteddate == "Year To Date") {
-        DateTime now = DateTime.now();
-        DateTime startDate = DateTime(
-          now.year,
-          1,
-          1,
-        ); // Start of the current year
-        DateTime endDate = DateTime(
-          now.year,
-          now.month,
-          now.day,
-        ); // Today's date
-
-        DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-        String startMonth = dateFormat.format(startDate).substring(3, 6);
-        String sdf = DateFormat('MM').format(startDate);
-
-        String startDay = dateFormat.format(startDate).substring(0, 2);
-        int startYear = startDate.year;
-
-        String endMonth = dateFormat.format(endDate).substring(3, 6);
-        String sdfEnd = DateFormat('MM').format(endDate);
-
-        String endDay = dateFormat.format(endDate).substring(0, 2);
-        int endYear = endDate.year;
-
-        startDateString = "$startYear$sdf$startDay";
-        endDateString = "$endYear$sdfEnd$endDay";
-        print(startDateString);
-        print(endDateString);
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Yesterday") {
-        DateTime yesterday = DateTime.now().subtract(Duration(days: 1));
-        DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-        String startMonth = dateFormat.format(yesterday).substring(3, 6);
-        String sdf = DateFormat(
-          'MM',
-        ).format(yesterday); // converting month into string
-
-        String startDay = dateFormat.format(yesterday).substring(0, 2);
-        int startYear = yesterday.year;
-
-        String endMonth = dateFormat.format(yesterday).substring(3, 6);
-        String sdfEnd = DateFormat('MM').format(yesterday);
-
-        String endDay = dateFormat.format(yesterday).substring(0, 2);
-        int endYear = yesterday.year;
-
-        startDateString = "$startYear$sdf$startDay";
-        endDateString = "$endYear$sdfEnd$endDay";
-        print(startDateString);
-        print(endDateString);
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-          _isDashVisible = false;
-          _isEnddateVisible = false;
-          _IsSizeboxVisible = false;
-        });
-      } else if (_selecteddate == "This Month") {
-        DateTime now = DateTime.now();
-        DateTime startOfMonth = DateTime(now.year, now.month, 1);
-        DateTime endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-        String startMonth = DateFormat('MMM').format(startOfMonth);
-        String sdf = DateFormat(
-          'MM',
-        ).format(startOfMonth); // converting month into string
-        String startDay = DateFormat('dd').format(startOfMonth);
-        int startYear = startOfMonth.year;
-
-        String endMonth = DateFormat('MMM').format(endOfMonth);
-        String sdfEnd = DateFormat('MM').format(endOfMonth);
-        String endDay = DateFormat('dd').format(endOfMonth);
-        int endYear = endOfMonth.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Last Month") {
-        var calendarLastMonthStart = DateTime.now();
-        var calendarLastMonthEnd = DateTime.now();
-
-        calendarLastMonthStart = DateTime(
-          calendarLastMonthStart.year,
-          calendarLastMonthStart.month - 1,
-          1,
-        );
-
-        calendarLastMonthStart = DateTime(
-          calendarLastMonthStart.year,
-          calendarLastMonthStart.month,
-          1,
-        );
-        calendarLastMonthEnd = DateTime(
-          calendarLastMonthStart.year,
-          calendarLastMonthStart.month + 1,
-          0,
-        );
-
-        var startMonth = DateFormat('MMM').format(calendarLastMonthStart);
-        var sdf = DateFormat('MM').format(calendarLastMonthStart);
-        var startDay = DateFormat('dd').format(calendarLastMonthStart);
-        var startYear = calendarLastMonthStart.year;
-
-        var endMonth = DateFormat('MMM').format(calendarLastMonthEnd);
-        var sdfEnd = DateFormat('MM').format(calendarLastMonthEnd);
-        var endDay = DateFormat('dd').format(calendarLastMonthEnd);
-        var endYear = calendarLastMonthEnd.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "This Year") {
-        DateTime today = DateTime.now();
-        DateTime yearStart = DateTime(today.year, 1, 1);
-        DateTime yearEnd = DateTime(today.year, 12, 31);
-
-        String startMonth = DateFormat('MMM').format(yearStart);
-        String sdf = DateFormat(
-          'MM',
-        ).format(yearStart); // converting month into string
-        String startDay = DateFormat('dd').format(yearStart);
-        String startYear = DateFormat('yyyy').format(yearStart);
-
-        String endMonth = DateFormat('MMM').format(yearEnd);
-        String sdfEnd = DateFormat('MM').format(yearEnd);
-        String endDay = DateFormat('dd').format(yearEnd);
-        String endYear = DateFormat('yyyy').format(yearEnd);
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Last Year") {
-        DateTime today = DateTime.now();
-        DateTime yearStart = DateTime(today.year - 1, 1, 1);
-        DateTime yearEnd = DateTime(today.year - 1, 12, 31);
-
-        String startMonth = DateFormat('MMM').format(yearStart);
-        String sdf = DateFormat(
-          'MM',
-        ).format(yearStart); // converting month into string
-        String startDay = DateFormat('dd').format(yearStart);
-        String startYear = DateFormat('yyyy').format(yearStart);
-
-        String endMonth = DateFormat('MMM').format(yearEnd);
-        String sdfEnd = DateFormat('MM').format(yearEnd);
-        String endDay = DateFormat('dd').format(yearEnd);
-        String endYear = DateFormat('yyyy').format(yearEnd);
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Custom Date") {
-        setState(() {
-          _isTextEnabled = true;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-
-        _selectDateRange_refresh(context);
-      }
-      prefs.setString('datetype', _selecteddate);
-    } else {
-      if (_selecteddate == "Today") {
-        DateTime currentDate = DateTime.now();
-        String startMonth = DateFormat('MMM').format(currentDate);
-        String sdf = DateFormat(
-          'MM',
-        ).format(currentDate); // converting month into string
-
-        String startDay = DateFormat('dd').format(currentDate);
-        int startYear = currentDate.year;
-
-        String endMonth = DateFormat('MMM').format(currentDate);
-        String sdfEnd = DateFormat('MM').format(currentDate);
-
-        String endDay = DateFormat('dd').format(currentDate);
-        int endYear = currentDate.year;
-
-        startDateString = "$startYear$sdf$startDay";
-        endDateString = "$endYear$sdfEnd$endDay";
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-          _isDashVisible = false;
-          _isEnddateVisible = false;
-          _IsSizeboxVisible = false;
-        });
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-      } else if (_selecteddate == "Year To Date") {
-        DateTime now = DateTime.now();
-        DateTime startDate = DateTime(
-          now.year,
-          1,
-          1,
-        ); // Start of the current year
-        DateTime endDate = DateTime(
-          now.year,
-          now.month,
-          now.day,
-        ); // Today's date
-
-        DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-        String startMonth = dateFormat.format(startDate).substring(3, 6);
-        String sdf = DateFormat('MM').format(startDate);
-
-        String startDay = dateFormat.format(startDate).substring(0, 2);
-        int startYear = startDate.year;
-
-        String endMonth = dateFormat.format(endDate).substring(3, 6);
-        String sdfEnd = DateFormat('MM').format(endDate);
-
-        String endDay = dateFormat.format(endDate).substring(0, 2);
-        int endYear = endDate.year;
-
-        startDateString = "$startYear$sdf$startDay";
-        endDateString = "$endYear$sdfEnd$endDay";
-        print(startDateString);
-        print(endDateString);
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Yesterday") {
-        DateTime yesterday = DateTime.now().subtract(Duration(days: 1));
-        DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-        String startMonth = dateFormat.format(yesterday).substring(3, 6);
-        String sdf = DateFormat(
-          'MM',
-        ).format(yesterday); // converting month into string
-
-        String startDay = dateFormat.format(yesterday).substring(0, 2);
-        int startYear = yesterday.year;
-
-        String endMonth = dateFormat.format(yesterday).substring(3, 6);
-        String sdfEnd = DateFormat('MM').format(yesterday);
-
-        String endDay = dateFormat.format(yesterday).substring(0, 2);
-        int endYear = yesterday.year;
-
-        startDateString = "$startYear$sdf$startDay";
-        endDateString = "$endYear$sdfEnd$endDay";
-        print(startDateString);
-        print(endDateString);
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-          _isDashVisible = false;
-          _isEnddateVisible = false;
-          _IsSizeboxVisible = false;
-        });
-      } else if (_selecteddate == "This Month") {
-        DateTime now = DateTime.now();
-        DateTime startOfMonth = DateTime(now.year, now.month, 1);
-        DateTime endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-        String startMonth = DateFormat('MMM').format(startOfMonth);
-        String sdf = DateFormat(
-          'MM',
-        ).format(startOfMonth); // converting month into string
-        String startDay = DateFormat('dd').format(startOfMonth);
-        int startYear = startOfMonth.year;
-
-        String endMonth = DateFormat('MMM').format(endOfMonth);
-        String sdfEnd = DateFormat('MM').format(endOfMonth);
-        String endDay = DateFormat('dd').format(endOfMonth);
-        int endYear = endOfMonth.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Last Month") {
-        var calendarLastMonthStart = DateTime.now();
-        var calendarLastMonthEnd = DateTime.now();
-
-        calendarLastMonthStart = DateTime(
-          calendarLastMonthStart.year,
-          calendarLastMonthStart.month - 1,
-          1,
-        );
-
-        calendarLastMonthStart = DateTime(
-          calendarLastMonthStart.year,
-          calendarLastMonthStart.month,
-          1,
-        );
-        calendarLastMonthEnd = DateTime(
-          calendarLastMonthStart.year,
-          calendarLastMonthStart.month + 1,
-          0,
-        );
-
-        var startMonth = DateFormat('MMM').format(calendarLastMonthStart);
-        var sdf = DateFormat('MM').format(calendarLastMonthStart);
-        var startDay = DateFormat('dd').format(calendarLastMonthStart);
-        var startYear = calendarLastMonthStart.year;
-
-        var endMonth = DateFormat('MMM').format(calendarLastMonthEnd);
-        var sdfEnd = DateFormat('MM').format(calendarLastMonthEnd);
-        var endDay = DateFormat('dd').format(calendarLastMonthEnd);
-        var endYear = calendarLastMonthEnd.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "This Year") {
-        DateTime today = DateTime.now();
-        DateTime yearStart = DateTime(today.year, 1, 1);
-        DateTime yearEnd = DateTime(today.year, 12, 31);
-
-        String startMonth = DateFormat('MMM').format(yearStart);
-        String sdf = DateFormat(
-          'MM',
-        ).format(yearStart); // converting month into string
-        String startDay = DateFormat('dd').format(yearStart);
-        String startYear = DateFormat('yyyy').format(yearStart);
-
-        String endMonth = DateFormat('MMM').format(yearEnd);
-        String sdfEnd = DateFormat('MM').format(yearEnd);
-        String endDay = DateFormat('dd').format(yearEnd);
-        String endYear = DateFormat('yyyy').format(yearEnd);
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Last Year") {
-        DateTime today = DateTime.now();
-        DateTime yearStart = DateTime(today.year - 1, 1, 1);
-        DateTime yearEnd = DateTime(today.year - 1, 12, 31);
-
-        String startMonth = DateFormat('MMM').format(yearStart);
-        String sdf = DateFormat(
-          'MM',
-        ).format(yearStart); // converting month into string
-        String startDay = DateFormat('dd').format(yearStart);
-        String startYear = DateFormat('yyyy').format(yearStart);
-
-        String endMonth = DateFormat('MMM').format(yearEnd);
-        String sdfEnd = DateFormat('MM').format(yearEnd);
-        String endDay = DateFormat('dd').format(yearEnd);
-        String endYear = DateFormat('yyyy').format(yearEnd);
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        print(startDateString);
-        print(endDateString);
-
-        fetchDashData(startDateString, endDateString);
-
-        setState(() {
-          _isTextEnabled = false;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-      } else if (_selecteddate == "Custom Date") {
-        setState(() {
-          _isTextEnabled = true;
-
-          _isDashVisible = true;
-          _isEnddateVisible = true;
-          _IsSizeboxVisible = true;
-        });
-
-        _selectDateRange_refresh(context);
-      }
-      prefs.setString('datetype', _selecteddate);
+    final showPicker = await _notifier.refresh();
+    if (showPicker) {
+      await _selectDateRangeRefresh(context);
     }
-
-    // Set the isRefreshing variable to false.
-    setState(() {
-      _isRefreshing = false;
-    });
+    _notifier.finishRefresh();
   }
 
-  /// Dashboard's own date strings are built as `yyyyMMdd` (no separators,
-  /// see startDateString/endDateString above) - tally-api's date query
-  /// params expect `YYYY-MM-DD`.
-  DateTime _parseYyyyMMdd(String value) => DateTime(
-    int.parse(value.substring(0, 4)),
-    int.parse(value.substring(4, 6)),
-    int.parse(value.substring(6, 8)),
-  );
-
-  // ---------------------------------------------------------------------
-  // Voucher-type classification shared by the KPI totals, the bar-chart
-  // bucketing and the pie-chart breakdown below - matches by
-  // `voucherTypeName` (Tally's own standard names, space-stripped) exactly
-  // the way `DashboardClicked.dart`'s `_fetchSalesPurchaseCashTallyApi`
-  // classifies its own voucher list ('Sales'/'CreditNote' => sales,
-  // 'Purchase'/'DebitNote' => purchase), extended here with 'Receipt' and
-  // 'Payment' for the two KPI tiles that screen doesn't need. A voucher's
-  // "amount" is the sum of its debit-side ledger entries, again matching
-  // that screen's `Sale_purc_cash.amount` (and its own `getTotalAmount()`
-  // fold) so the numbers shown here line up with what a KPI-tile tap
-  // drills into.
-  static const _dashSalesVchTypes = {'Sales', 'CreditNote'};
-  static const _dashPurchaseVchTypes = {'Purchase', 'DebitNote'};
-  static const _dashReceiptVchTypes = {'Receipt'};
-  static const _dashPaymentVchTypes = {'Payment'};
-
-  String _dashVoucherTypeKey(Map<String, dynamic> voucher) =>
-      (voucher['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
-
-  double _dashVoucherDebitTotal(Map<String, dynamic> voucher) {
-    final entries =
-        (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-        const [];
-    return entries
-        .where((e) => e['isDebit'] == true)
-        .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-  }
-
-  // ---------------------------------------------------------------------
-  // tally-api's `reports/dashboard/summary`/`sales-chart`/
-  // `voucher-type-breakdown` were assumed permanently broken (a
-  // reservedName mixed-case-vs-enum mismatch) when this screen was first
-  // migrated, and a client-side workaround was built instead: fetch every
-  // voucher in range (`VoucherRepository.listInRange`) and aggregate it in
-  // Dart, mirroring `DashboardClicked.dart`'s own KPI-tile drill-downs.
-  // That assumption turned out to be **stale** - re-verified live against
-  // tally-api directly (not just re-reading old notes): all three
-  // endpoints already use the correct enum-interpolated reservedName
-  // comparisons and return correct, fast results (a full year of 365k
-  // vouchers: ~200ms for `summary`, ~700ms for `sales-chart`, both
-  // including the real cash/receivable/payable figures the old workaround
-  // fetched separately). The full-voucher-fetch approach doesn't scale -
-  // it means one HTTP round trip per ~100 vouchers in range, so a
-  // large company's "This Year" view could mean thousands of sequential
-  // requests, which read as the dashboard simply never finishing loading.
-  // Switched to the real endpoints below; `DashboardRepository` already
-  // existed for this (built alongside the workaround, never wired up).
-  Future<void> fetchDashData(String startdate, String enddate) async {
-    if (!isVisibleNoAccess) {
-      setState(() {
-        _isLoading = true;
-      });
-      /*showProgressDialog_LoadData(context, _isLoading);*/
-
-      final stopwatch = Stopwatch()..start();
-
-      // Both charts below re-derive their own date bounds from
-      // startdate/enddate, so from/to only need computing once here for
-      // the KPI summary call.
-      final from = _parseYyyyMMdd(startdate);
-      final to = _parseYyyyMMdd(enddate);
-
-      try {
-        final summary = await DashboardRepository.instance.summary(
-          from: from,
-          to: to,
-        );
-
-        stopwatch.stop();
-        setState(() {
-          apiResponseTime = "${stopwatch.elapsedMilliseconds} ms";
-        });
-
-        sales_value = parseMoneyField(summary['sales']);
-        purchase_value = parseMoneyField(summary['purchase']);
-        receipt_value = parseMoneyField(summary['receipt']);
-        payment_value = parseMoneyField(summary['payment']);
-        cash_value = parseMoneyField(summary['cash']);
-        outstandingreceivable_value = parseMoneyField(summary['receivable']);
-        outstandingpayable_value = parseMoneyField(summary['payable']);
-
-        prefs.setDouble('sales', sales_value);
-        prefs.setDouble('purchase', purchase_value);
-        prefs.setDouble('receipt', receipt_value);
-        prefs.setDouble('payment', payment_value);
-        prefs.setDouble('receivable', outstandingreceivable_value);
-        prefs.setDouble('payable', outstandingpayable_value);
-        prefs.setDouble('cash', cash_value);
-      } on ApiException catch (e) {
-        showAppMessage(context, e.message);
-      } catch (e) {
-        showAppMessage(context, AppLocalizations.of(context).errorFetchingData);
-      }
-
-      try {
-        if (linechartdashprefs == 'True' ||
-            barchartdashprefs == 'True' ||
-            piechartdashprefs == 'True') {
-          if (linechartdashprefs == 'True' || barchartdashprefs == 'True') {
-            try {
-              // dashboard-reports/sales-chart returns one flat period list
-              // (no year grouping), unlike the legacy endpoint's
-              // year->months nesting that fed the multi-year line-overlay
-              // view (`data`/`lineChartData`, colored per year via
-              // yearColors). That overlay can't be reconstructed from this
-              // shape either, so the line-chart mode stays dropped here -
-              // `data` stays empty and only the single-series bar chart
-              // (salesDataList/recDataList) is shown, regardless of the
-              // linechartdash preference.
-              final chartRows = await DashboardRepository.instance.salesChart(
-                from: from,
-                to: to,
-                groupBy: 'month',
-              );
-
-              if (chartRows.isEmpty) {
-                setState(() {
-                  isBarChartVisible = false;
-                  isVisibleLineChart = false;
-                  _isLoading = false;
-                });
-              } else {
-                lineBars.clear();
-                salesDataList.clear();
-                recDataList.clear();
-                data.clear();
-
-                setState(() {
-                  isVisibleLineChart = false;
-                  isBarChartVisible = barchartdashprefs == 'True';
-
-                  for (final row in chartRows) {
-                    final sales = parseMoneyField(row['sales']);
-                    final receipt = parseMoneyField(row['receipt']);
-                    salesDataList.add(-sales);
-                    recDataList.add(receipt);
-                  }
-                });
-              }
-
-              generateMonthsList();
-            } on ApiException catch (e) {
-              showAppMessage(context, e.message);
-              setState(() {
-                isVisibleLineChart = false;
-                isBarChartVisible = false;
-              });
-            } catch (e) {
-              showAppMessage(
-                context,
-                AppLocalizations.of(context).errorSomethingWentWrong,
-              );
-              setState(() {
-                isVisibleLineChart = false;
-                isBarChartVisible = false;
-              });
-            }
-          } else {
-            setState(() {
-              isVisibleLineChart = false;
-              isBarChartVisible = false;
-            });
-          }
-
-          if (piechartdashprefs == 'True') {
-            try {
-              // reports/dashboard/voucher-type-breakdown already returns
-              // exactly this shape server-side, grouped by
-              // voucherTypeMasterId/voucherTypeName with `sales`/`purchase`
-              // pre-summed per row - no client-side grouping needed, zero
-              // entries filtered out same as before.
-              final breakdownRows = await DashboardRepository.instance
-                  .voucherTypeBreakdown(from: from, to: to);
-
-              final salesSlices = breakdownRows
-                  .where((row) => parseMoneyField(row['sales']).abs() > 0)
-                  .map(
-                    (row) => {
-                      'name': row['voucherTypeName'] ?? 'Unknown',
-                      'amount': parseMoneyField(row['sales']),
-                    },
-                  )
-                  .toList();
-              final purchaseSlices = breakdownRows
-                  .where((row) => parseMoneyField(row['purchase']).abs() > 0)
-                  .map(
-                    (row) => {
-                      'name': row['voucherTypeName'] ?? 'Unknown',
-                      'amount': parseMoneyField(row['purchase']),
-                    },
-                  )
-                  .toList();
-
-              piechartsaleslist = salesSlices;
-              piechartpurchaselist = purchaseSlices;
-
-              if (piechartsaleslist.isEmpty && piechartpurchaselist.isEmpty) {
-                setState(() {
-                  isPieChartVisible = false;
-                  isSalesPieChartVisible = false;
-                  isPurchasePieChartVisible = false;
-                });
-              } else {
-                setState(() {
-                  isPieChartVisible = true;
-                  isSalesPieChartVisible = piechartsaleslist.isNotEmpty;
-                  isPurchasePieChartVisible = piechartpurchaselist.isNotEmpty;
-                });
-              }
-            } on ApiException catch (e) {
-              setState(() {
-                isPieChartVisible = false;
-                isPurchasePieChartVisible = false;
-                isSalesPieChartVisible = false;
-              });
-              showAppMessage(context, e.message);
-            } catch (e) {
-              setState(() {
-                isPieChartVisible = false;
-                isPurchasePieChartVisible = false;
-                isSalesPieChartVisible = false;
-              });
-              showAppMessage(
-                context,
-                AppLocalizations.of(context).errorSomethingWentWrong,
-              );
-            }
-          }
-          setState(() {
-            isChartsVisible = true;
-          });
-        } else {
-          setState(() {
-            isChartsVisible = false;
-          });
-        }
-      } catch (e) {
-        showAppMessage(context, e.toString());
-      }
-
-      setState(() {
-        _isLoading = false;
-      });
-      /*showProgressDialog_LoadData(context, _isLoading);*/
+  Future<void> _handleDate(dynamic value) async {
+    await _notifier.applyDatePreset(value as String);
+    if (value == 'Custom Date') {
+      await _selectDateRangeAuto(context);
     }
   }
 
-  Future<void> _selectDateRange_refresh(BuildContext context) async {
-    if (_isTextEnabled) {
-      startdate_pref = prefs.getString('startdate');
-      enddate_pref = prefs.getString('enddate');
+  // Shared date-range-picker theming, identical across every
+  // showDateRangePicker call site below (was copy-pasted three times in
+  // the original).
+  Widget _dateRangePickerThemeBuilder(BuildContext context, Widget? child) {
+    return Theme(
+      data: Theme.of(context).copyWith(
+        colorScheme: Theme.of(context).colorScheme.copyWith(
+          primary: app_color, // main accent color
+          onPrimary: Colors.white,
+          surface: Theme.of(context).colorScheme.surface,
+          onSurface: Theme.of(context).colorScheme.onSurface,
+        ),
+        datePickerTheme: DatePickerThemeData(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          surfaceTintColor: Colors.transparent,
+          rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
+          rangeSelectionOverlayColor: WidgetStatePropertyAll(
+            app_color.withOpacity(0.15),
+          ),
+        ),
+        dialogTheme: DialogThemeData(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+        ),
+        dialogBackgroundColor: Theme.of(context).colorScheme.surface,
+      ),
+      child: child!,
+    );
+  }
 
-      if (startdate_pref == null ||
-          enddate_pref == null ||
-          startdate_pref == "") {
-        startdate_pref = prefs.getString('startfrom')!;
+  /// Mirrors the original `_selectDateRange_refresh` (used by pull-to-
+  /// refresh's Custom Date branch), including its stale-prefs-write-on-
+  /// cancel quirk: when the range picker is cancelled/unchanged, prefs are
+  /// still overwritten with whatever `startDateString`/`endDateString`
+  /// happen to already be on state at that point.
+  Future<void> _selectDateRangeRefresh(BuildContext context) async {
+    if (!_s.isTextEnabled) return;
 
-        final initialDateRange = DateTimeRange(
-          start: _startDate,
-          end: _endDate,
-        );
-        String? startfrom = startdate_pref;
-        DateTime earliestDate = DateTime.parse(startfrom!);
+    final startdatePref = _notifier.getPref('startdate');
+    final enddatePref = _notifier.getPref('enddate');
 
-        DateTimeRange? selectedDateRange = await showDateRangePicker(
-          context: context,
-          initialDateRange: initialDateRange,
-          firstDate: earliestDate,
-          lastDate: DateTime(2100),
-          builder: (BuildContext context, Widget? child) {
-            return Theme(
-              data: Theme.of(context).copyWith(
-                colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: app_color, // main accent color
-                  onPrimary: Colors.white,
+    if (startdatePref == null || enddatePref == null || startdatePref == "") {
+      final startfrom = _notifier.getPref('startfrom')!;
+      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+      final earliestDate = DateTime.parse(startfrom);
 
-                  surface: Theme.of(context).colorScheme.surface,
-                  onSurface: Theme.of(context).colorScheme.onSurface,
-                ), // 🔹 important
-                datePickerTheme: DatePickerThemeData(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).scaffoldBackgroundColor, // 🔹 THIS fixes the picker bg
-                  surfaceTintColor: Colors.transparent,
-                  rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
-                  rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                    app_color.withOpacity(0.15),
-                  ),
-                ),
-                dialogTheme: DialogThemeData(
-                  backgroundColor: Theme.of(context).colorScheme.surface,
-                ),
-                dialogBackgroundColor: Theme.of(context).colorScheme.surface,
-              ),
-              child: child!,
-            );
-          },
-        );
+      final selectedDateRange = await showDateRangePicker(
+        context: context,
+        initialDateRange: initialDateRange,
+        firstDate: earliestDate,
+        lastDate: DateTime(2100),
+        builder: _dateRangePickerThemeBuilder,
+      );
 
-        if (selectedDateRange != null &&
-            selectedDateRange != initialDateRange) {
-          setState(() async {
-            _startDate = selectedDateRange.start;
-            _endDate = selectedDateRange.end;
-
-            DateTime start = _startDate;
-            DateTime end = _endDate;
-
-            String startMonth = DateFormat('MMM').format(start);
-            String sdf = DateFormat(
-              'MM',
-            ).format(start); // converting month into string
-            String startDay = DateFormat('dd').format(start);
-            int startYear = start.year;
-
-            String endMonth = DateFormat('MMM').format(end);
-            String sdfEnd = DateFormat('MM').format(end);
-            String endDay = DateFormat('dd').format(end);
-            int endYear = end.year;
-
-            startDateString = '$startYear$sdf$startDay';
-            endDateString = '$endYear$sdfEnd$endDay';
-
-            startdate_text =
-                startDay + "-" + startMonth + "-" + startYear.toString();
-            enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-            print(startDateString);
-            print(endDateString);
-
-            fetchDashData(startDateString, endDateString);
-          });
-        }
-
-        prefs.setString('startdate', startDateString);
-        prefs.setString('enddate', endDateString);
+      if (selectedDateRange != null && selectedDateRange != initialDateRange) {
+        _startDate = selectedDateRange.start;
+        _endDate = selectedDateRange.end;
+        await _notifier.applyPickedRange(_startDate, _endDate);
       } else {
-        if (!_isRefreshing) {
-          showAppMessage(context, AppLocalizations.of(context).infoSwipeDownToRefresh);
-        }
-
-        /*String? sales = prefs.getString('sales');
-        String? purchase = prefs.getString('purchase');
-        String? receipt = prefs.getString('receipt');
-        String? payment = prefs.getString('payment');
-        String? receivable = prefs.getString('receivable');
-        String? payable = prefs.getString('payable');
-        String? cash = prefs.getString('cash');*/
-
-        DateTime start = DateTime.parse(startdate_pref!);
-        DateTime end = DateTime.parse(enddate_pref!);
-
-        String startMonth = DateFormat('MMM').format(start);
-        String sdf = DateFormat(
-          'MM',
-        ).format(start); // converting month into string
-        String startDay = DateFormat('dd').format(start);
-        int startYear = start.year;
-
-        String endMonth = DateFormat('MMM').format(end);
-        String sdfEnd = DateFormat('MM').format(end);
-        String endDay = DateFormat('dd').format(end);
-        int endYear = end.year;
-
-        startDateString = '$startYear$sdf$startDay';
-        endDateString = '$endYear$sdfEnd$endDay';
-
-        startdate_text =
-            startDay + "-" + startMonth + "-" + startYear.toString();
-        enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-        print(startDateString);
-        print(endDateString);
-
-        /*if(sales!=null)
-        {
-          sales_value = sales;
-          purchase_value = purchase!;
-          receipt_value = receipt!;
-          payment_value = payment!;
-          outstandingreceivable_value = receivable!;
-          outstandingpayable_value = payable!;
-          cash_value = cash!;
-        }*/
-
-        fetchDashData(startDateString, endDateString);
-
-        prefs.setString('startdate', startDateString);
-        prefs.setString('enddate', endDateString);
+        await _notifier.setPref('startdate', _s.startDateString);
+        await _notifier.setPref('enddate', _s.endDateString);
       }
+    } else {
+      if (!_s.isRefreshing) {
+        showAppMessage(
+          context,
+          AppLocalizations.of(context).infoSwipeDownToRefresh,
+        );
+      }
+      final start = DateTime.parse(startdatePref);
+      final end = DateTime.parse(enddatePref);
+      await _notifier.applyPickedRange(start, end);
     }
   }
 
-  Future<void> _selectDateRange_auto(BuildContext context) async {
-    if (!_isTextEnabled) return;
+  /// Mirrors the original `_selectDateRange_auto` (used when the dropdown
+  /// itself is switched to "Custom Date") - always shows the picker, and
+  /// leaves the current range untouched (no prefs write) if it's
+  /// cancelled.
+  Future<void> _selectDateRangeAuto(BuildContext context) async {
+    if (!_s.isTextEnabled) return;
 
-    // Always show the picker when "Custom Date" is chosen, instead of
-    // only the very first time ever - the old gate (skip the picker once
-    // startdate/enddate already existed in prefs) meant every later
-    // "Custom Date" selection silently reused the old cached range with
-    // no way to actually pick a new one. And since the fallback branch's
-    // prefs.setString calls ran even when the picker was cancelled (using
-    // whatever stale/empty startDateString happened to be set), other
-    // screens like Transactions could end up reading an empty date and
-    // falling back to their own unrelated default range.
-    final cachedStart = DateTime.tryParse(prefs.getString('startdate') ?? '');
-    final cachedEnd = DateTime.tryParse(prefs.getString('enddate') ?? '');
+    final cachedStart =
+        DateTime.tryParse(_notifier.getPref('startdate') ?? '');
+    final cachedEnd = DateTime.tryParse(_notifier.getPref('enddate') ?? '');
     final initialDateRange = DateTimeRange(
       start: cachedStart ?? _startDate,
       end: cachedEnd ?? _endDate,
     );
-    final startfrom = prefs.getString('startfrom');
-    DateTime earliestDate = DateTime.tryParse(startfrom ?? '') ?? DateTime(2000);
+    final startfrom = _notifier.getPref('startfrom');
+    final earliestDate =
+        DateTime.tryParse(startfrom ?? '') ?? DateTime(2000);
 
-    DateTimeRange? selectedDateRange = await showDateRangePicker(
+    final selectedDateRange = await showDateRangePicker(
       context: context,
       initialDateRange: initialDateRange,
       firstDate: earliestDate,
       lastDate: DateTime(2100),
-      builder: (BuildContext context, Widget? child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: app_color, // main accent color
-              onPrimary: Colors.white,
-              surface: Theme.of(context).colorScheme.surface,
-              onSurface: Theme.of(context).colorScheme.onSurface,
-            ),
-
-            datePickerTheme: DatePickerThemeData(
-              backgroundColor: Theme.of(
-                context,
-              ).scaffoldBackgroundColor, // 🔹 THIS fixes the picker bg
-              surfaceTintColor: Colors.transparent,
-              rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
-              rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                app_color.withOpacity(0.15),
-              ),
-            ),
-            dialogTheme: DialogThemeData(
-              backgroundColor: Theme.of(context).colorScheme.surface,
-            ),
-            dialogBackgroundColor: Theme.of(context).colorScheme.surface,
-          ),
-          child: child!,
-        );
-      },
+      builder: _dateRangePickerThemeBuilder,
     );
 
-    // Cancelled - leave whatever range was already active alone, don't
-    // touch prefs at all (previously this still overwrote startdate/
-    // enddate with stale/empty values on cancel).
     if (selectedDateRange == null) return;
 
-    setState(() {
-      _startDate = selectedDateRange.start;
-      _endDate = selectedDateRange.end;
-
-      DateTime start = _startDate;
-      DateTime end = _endDate;
-
-      String startMonth = DateFormat('MMM').format(start);
-      String sdf = DateFormat(
-        'MM',
-      ).format(start); // converting month into string
-      String startDay = DateFormat('dd').format(start);
-      int startYear = start.year;
-
-      String endMonth = DateFormat('MMM').format(end);
-      String sdfEnd = DateFormat('MM').format(end);
-      String endDay = DateFormat('dd').format(end);
-      int endYear = end.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text =
-          startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchDashData(startDateString, endDateString);
-    });
-
-    prefs.setString('startdate', startDateString);
-    prefs.setString('enddate', endDateString);
+    _startDate = selectedDateRange.start;
+    _endDate = selectedDateRange.end;
+    await _notifier.applyPickedRange(_startDate, _endDate);
   }
 
+  /// Mirrors the original `_selectDateRange` (tapping the date-range text
+  /// row), including the same stale-prefs-write-on-cancel quirk as
+  /// `_selectDateRangeRefresh` (this branch never showed the "swipe down
+  /// to refresh" message, unlike that one).
   Future<void> _selectDateRange(BuildContext context) async {
-    if (_isTextEnabled) {
-      startdate_pref = prefs.getString('startdate');
-      enddate_pref = prefs.getString('enddate');
+    if (!_s.isTextEnabled) return;
 
-      if (startdate_pref == null ||
-          enddate_pref == null ||
-          startdate_pref == "") {
-        startdate_pref = prefs.getString('startfrom')!;
+    final startdatePref = _notifier.getPref('startdate');
+    final enddatePref = _notifier.getPref('enddate');
 
-        final initialDateRange = DateTimeRange(
-          start: _startDate,
-          end: _endDate,
-        );
-        String? startfrom = startdate_pref;
-        DateTime earliestDate = DateTime.parse(startfrom!);
+    if (startdatePref == null || enddatePref == null || startdatePref == "") {
+      final startfrom = _notifier.getPref('startfrom')!;
+      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+      final earliestDate = DateTime.parse(startfrom);
 
-        DateTimeRange? selectedDateRange = await showDateRangePicker(
-          context: context,
-          initialDateRange: initialDateRange,
-          firstDate: earliestDate,
-          lastDate: DateTime(2100),
-          builder: (BuildContext context, Widget? child) {
-            return Theme(
-              data: Theme.of(context).copyWith(
-                colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: app_color, // main accent color
-                  onPrimary: Colors.white,
-                  surface: Theme.of(context).colorScheme.surface,
-                  onSurface: Theme.of(context).colorScheme.onSurface,
-                ),
-                datePickerTheme: DatePickerThemeData(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).scaffoldBackgroundColor, // 🔹 THIS fixes the picker bg
-                  surfaceTintColor: Colors.transparent,
-                  rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
-                  rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                    app_color.withOpacity(0.15),
-                  ),
-                ),
-                dialogTheme: DialogThemeData(
-                  backgroundColor: Theme.of(context).colorScheme.surface,
-                ),
-                dialogBackgroundColor: Theme.of(context).colorScheme.surface,
-              ),
-              child: child!,
-            );
-          },
-        );
+      final selectedDateRange = await showDateRangePicker(
+        context: context,
+        initialDateRange: initialDateRange,
+        firstDate: earliestDate,
+        lastDate: DateTime(2100),
+        builder: _dateRangePickerThemeBuilder,
+      );
 
-        if (selectedDateRange != null &&
-            selectedDateRange != initialDateRange) {
-          setState(() async {
-            _startDate = selectedDateRange.start;
-            _endDate = selectedDateRange.end;
-
-            DateTime start = _startDate;
-            DateTime end = _endDate;
-
-            String startMonth = DateFormat('MMM').format(start);
-            String sdf = DateFormat(
-              'MM',
-            ).format(start); // converting month into string
-            String startDay = DateFormat('dd').format(start);
-            int startYear = start.year;
-
-            String endMonth = DateFormat('MMM').format(end);
-            String sdfEnd = DateFormat('MM').format(end);
-            String endDay = DateFormat('dd').format(end);
-            int endYear = end.year;
-
-            startDateString = '$startYear$sdf$startDay';
-            endDateString = '$endYear$sdfEnd$endDay';
-
-            startdate_text =
-                startDay + "-" + startMonth + "-" + startYear.toString();
-            enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-            print(startDateString);
-            print(endDateString);
-
-            fetchDashData(startDateString, endDateString);
-          });
-        }
-
-        prefs.setString('startdate', startDateString);
-        prefs.setString('enddate', endDateString);
+      if (selectedDateRange != null && selectedDateRange != initialDateRange) {
+        _startDate = selectedDateRange.start;
+        _endDate = selectedDateRange.end;
+        await _notifier.applyPickedRange(_startDate, _endDate);
       } else {
-        /*String? sales = prefs.getString('sales');
-        String? purchase = prefs.getString('purchase');
-        String? receipt = prefs.getString('receipt');
-        String? payment = prefs.getString('payment');
-        String? receivable = prefs.getString('receivable');
-        String? payable = prefs.getString('payable');
-        String? cash = prefs.getString('cash');*/
+        await _notifier.setPref('startdate', _s.startDateString);
+        await _notifier.setPref('enddate', _s.endDateString);
+      }
+    } else {
+      _startDate = DateTime.parse(startdatePref);
+      _endDate = DateTime.parse(enddatePref);
+      final initialDateRange = DateTimeRange(start: _startDate, end: _endDate);
+      final startfrom = _notifier.getPref('startfrom');
+      final earliestDate = DateTime.parse(startfrom!);
 
-        _startDate = DateTime.parse(startdate_pref!);
-        _endDate = DateTime.parse(enddate_pref!);
-        final initialDateRange = DateTimeRange(
-          start: _startDate,
-          end: _endDate,
-        );
-        String? startfrom = prefs.getString('startfrom');
-        DateTime earliestDate = DateTime.parse(startfrom!);
+      final selectedDateRange = await showDateRangePicker(
+        context: context,
+        initialDateRange: initialDateRange,
+        firstDate: earliestDate,
+        lastDate: DateTime(2100),
+        builder: _dateRangePickerThemeBuilder,
+      );
 
-        DateTimeRange? selectedDateRange = await showDateRangePicker(
-          context: context,
-          initialDateRange: initialDateRange,
-          firstDate: earliestDate,
-          lastDate: DateTime(2100),
-          builder: (BuildContext context, Widget? child) {
-            return Theme(
-              data: Theme.of(context).copyWith(
-                colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: app_color, // main accent color
-                  onPrimary: Colors.white,
-                  surface: Theme.of(context).colorScheme.surface,
-                  onSurface: Theme.of(context).colorScheme.onSurface,
-                ),
-                datePickerTheme: DatePickerThemeData(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).scaffoldBackgroundColor, // 🔹 THIS fixes the picker bg
-                  surfaceTintColor: Colors.transparent,
-                  rangeSelectionBackgroundColor: app_color.withOpacity(0.15),
-                  rangeSelectionOverlayColor: WidgetStatePropertyAll(
-                    app_color.withOpacity(0.15),
-                  ),
-                ),
-                dialogTheme: DialogThemeData(
-                  backgroundColor: Theme.of(context).colorScheme.surface,
-                ),
-                dialogBackgroundColor: Theme.of(context).colorScheme.surface,
-              ),
-              child: child!,
-            );
-          },
-        );
-
-        if (selectedDateRange != null) {
-          setState(() async {
-            _startDate = selectedDateRange.start;
-            _endDate = selectedDateRange.end;
-
-            DateTime start = _startDate;
-            DateTime end = _endDate;
-
-            String startMonth = DateFormat('MMM').format(start);
-            String sdf = DateFormat(
-              'MM',
-            ).format(start); // converting month into string
-            String startDay = DateFormat('dd').format(start);
-            int startYear = start.year;
-
-            String endMonth = DateFormat('MMM').format(end);
-            String sdfEnd = DateFormat('MM').format(end);
-            String endDay = DateFormat('dd').format(end);
-            int endYear = end.year;
-
-            startDateString = '$startYear$sdf$startDay';
-            endDateString = '$endYear$sdfEnd$endDay';
-
-            startdate_text =
-                startDay + "-" + startMonth + "-" + startYear.toString();
-            enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-            /*if(sales!=null)
-              {
-                sales_value = sales;
-                purchase_value = purchase!;
-                receipt_value = receipt!;
-                payment_value = payment!;
-                outstandingreceivable_value = receivable!;
-                outstandingpayable_value = payable!;
-                cash_value = cash!;
-              }*/
-            fetchDashData(startDateString, endDateString);
-          });
-        }
-
-        prefs.setString('startdate', startDateString);
-        prefs.setString('enddate', endDateString);
+      if (selectedDateRange != null) {
+        _startDate = selectedDateRange.start;
+        _endDate = selectedDateRange.end;
+        await _notifier.applyPickedRange(_startDate, _endDate);
+      } else {
+        await _notifier.setPref('startdate', _s.startDateString);
+        await _notifier.setPref('enddate', _s.endDateString);
       }
     }
   }
@@ -1876,7 +594,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               scheme: 'mailto',
               path: 'saadan@ca-eim.com',
               query:
-                  'subject=License%20Renewal%20Request&body=Dear%20CSH%20LLC%20Support,%0A%0AMy%20license%20for%20Serial%20No%20$serial_no%20is%20expiring.%20Please%20assist%20with%20renewal.%0A%0ARegards,',
+                  'subject=License%20Renewal%20Request&body=Dear%20CSH%20LLC%20Support,%0A%0AMy%20license%20for%20Serial%20No%20${_s.serialNo}%20is%20expiring.%20Please%20assist%20with%20renewal.%0A%0ARegards,',
             );
             if (await canLaunchUrl(emailUri)) {
               await launchUrl(emailUri);
@@ -2100,8 +818,8 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   // expired-license dialog exactly (red/orange gradient, Serial No +
   // Expired-on rows, contact chips for renewal).
   void _showLicenseExpiredDialog() {
-    final String expiryDateText = license_expiry != null
-        ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(license_expiry!))
+    final String expiryDateText = _s.licenseExpiry != null
+        ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(_s.licenseExpiry!))
         : AppLocalizations.of(context).commonUnknown;
 
     _showStyledLicenseDialog(
@@ -2113,7 +831,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           label: AppLocalizations.of(context).licenseSerialNo,
           icon: Icons.confirmation_number_outlined,
           iconColor: Colors.deepOrange,
-          value: serial_no ?? '',
+          value: _s.serialNo ?? '',
           valueColor: Theme.of(context).colorScheme.onSurface,
         ),
         _licenseDialogInfoRow(
@@ -2141,8 +859,8 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
   // distinct in severity.
   void _showLicenseExpiringSoonDialog(int daysRemaining) {
     final bool isToday = daysRemaining <= 0;
-    final String expiryDateText = license_expiry != null
-        ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(license_expiry!))
+    final String expiryDateText = _s.licenseExpiry != null
+        ? DateFormat('dd-MMM-yyyy').format(DateTime.parse(_s.licenseExpiry!))
         : AppLocalizations.of(context).commonUnknown;
 
     _showStyledLicenseDialog(
@@ -2156,7 +874,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           label: AppLocalizations.of(context).licenseSerialNo,
           icon: Icons.confirmation_number_outlined,
           iconColor: Colors.deepOrange,
-          value: serial_no ?? '',
+          value: _s.serialNo ?? '',
           valueColor: Theme.of(context).colorScheme.onSurface,
         ),
         _licenseDialogInfoRow(
@@ -2201,599 +919,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    company = prefs.getString('company_name');
-    company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-    serial_no = prefs.getString('serial_no');
-    username = prefs.getString('username');
-    license_expiry = prefs.getString('license_expiry');
-    // `token` is a legacy-backend bearer token - absent entirely for a
-    // tally-oauth-only login (Phase 6), which never populates it. A bare
-    // `!` here used to throw and abort the rest of this function (and
-    // therefore fetchDashData()) before it ever ran, leaving the dashboard
-    // silently blank for those sessions.
-    token = prefs.getString('token') ?? '';
-    base_currency = prefs.getString('base_currency') ?? '';
-
-    _loadNumberScale();
-
-    print('base_currency -> $base_currency');
-    SalesEntryHolder = prefs.getString('salesentry') ?? "False";
-    ReceiptEntryHolder = prefs.getString('receiptentry') ?? "False";
-    SalesOrderEntryHolder = prefs.getString('salesorderentry') ?? "True";
-    DeliveryNoteEntryHolder = prefs.getString('deliverynoteentry') ?? "True";
-
-    _selecteddate = prefs.getString('dateRangeOption') ?? 'Today';
-
-    print('selected date option -> $_selecteddate');
-
-    decimal = prefs.getInt('decimalplace') ?? 2;
-
-    if (SalesEntryHolder == 'False') {
-      isSalesEntryVisible = false;
-    } else if (SalesEntryHolder == 'True') {
-      isSalesEntryVisible = true;
-    }
-
-    if (ReceiptEntryHolder == 'False') {
-      isReceiptEntryVisible = false;
-    } else if (ReceiptEntryHolder == 'True') {
-      isReceiptEntryVisible = true;
-    }
-
-    if (SalesOrderEntryHolder == 'False') {
-      isSalesOrderEntryVisible = false;
-    } else if (SalesOrderEntryHolder == 'True') {
-      isSalesOrderEntryVisible = true;
-    }
-    if (DeliveryNoteEntryHolder == 'False') {
-      isDeliveryNoteEntryVisible = false;
-    } else if (DeliveryNoteEntryHolder == 'True') {
-      isDeliveryNoteEntryVisible = true;
-    }
-
-    /*print('token : $token');
-    print('hostname : $hostname');*/
-
-    // license_expiry can be null (fresh install, cleared prefs) - the old
-    // `DateTime.parse(license_expiry!)` would throw immediately in that
-    // case and break dashboard init entirely.
-    try {
-      expire_date = license_expiry == null || license_expiry!.isEmpty
-          ? null
-          : DateTime.parse(license_expiry!);
-    } catch (_) {
-      expire_date = null;
-    }
-
-    int? daysUntilExpiry;
-
-    if (expire_date != null) {
-      // Compare calendar dates only (matches SerialSelect's expiry check)
-      // - comparing full DateTime.now() against a midnight-valued
-      // expire_date treated the license as already expired from the very
-      // start of the expiry day itself, a full day earlier than
-      // SerialSelect's own check for the same license.
-      final DateTime today = DateTime.now();
-      final DateTime todayDate = DateTime(today.year, today.month, today.day);
-      final DateTime expiryDate = DateTime(
-        expire_date!.year,
-        expire_date!.month,
-        expire_date!.day,
-      );
-      isExpired = todayDate.isAfter(expiryDate);
-      daysUntilExpiry = expiryDate.difference(todayDate).inDays;
-    } else {
-      // Can't verify a missing/invalid expiry - treat as expired rather
-      // than silently granting unrestricted access.
-      isExpired = true;
-    }
-
-    if (isExpired && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showLicenseExpiredDialog();
-      });
-    } else if (daysUntilExpiry != null &&
-        daysUntilExpiry <= 3 &&
-        mounted) {
-      // Not expired yet, but 3 days or fewer remain - a dismissible
-      // heads-up (not a hard block) so the license doesn't lapse as a
-      // surprise.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showLicenseExpiringSoonDialog(daysUntilExpiry!);
-      });
-    }
-
-    tickerProvider = this;
-
-    String? currencyCode = '';
-
-    String? salesdash = prefs.getString("salesdash") ?? 'False';
-    String? purchasedash = prefs.getString("purchasedash") ?? 'False';
-    barchartdashprefs = prefs.getString("barchartdash") ?? 'False';
-    linechartdashprefs = prefs.getString("linechartdash") ?? 'False';
-    piechartdashprefs = prefs.getString("piechartdash") ?? 'False';
-
-    String? receivabledash =
-        prefs.getString("outstandingreceivabledash") ?? 'False';
-    String? payabledash = prefs.getString("outstandingpayabledash") ?? 'False';
-    String? cashdash = prefs.getString("cashdash") ?? 'False';
-    String? receiptdash = prefs.getString("receiptsdash") ?? 'False';
-    String? paymentdash = prefs.getString("paymentsdash") ?? 'False';
-
-    String allitemsaccess = prefs.getString("allitems") ?? 'False';
-    String fastmovingitemsaccess = prefs.getString("activeitems") ?? 'False';
-    String inactiveitemsaccess = prefs.getString("inactiveitems") ?? 'False';
-
-    salesparty = prefs.getString("salesparty") ?? 'False';
-    purchaseparty = prefs.getString("purchaseparty") ?? 'False';
-    creditnoteparty = prefs.getString("creditnoteparty") ?? 'False';
-    journalparty = prefs.getString("journalparty") ?? 'False';
-    payableparty = prefs.getString("payableparty") ?? 'False';
-    pendingpurchaseorderparty =
-        prefs.getString("pendingpurchaseorderparty") ?? 'False';
-    receiptparty = prefs.getString("receiptparty") ?? 'False';
-    paymentparty = prefs.getString("paymentparty") ?? 'False';
-    debitnoteparty = prefs.getString("debitnoteparty") ?? 'False';
-    receivableparty = prefs.getString("receivableparty") ?? 'False';
-    pendingsalesorderparty =
-        prefs.getString("pendingsalesorderparty") ?? 'False';
-    party_suppliers = prefs.getString("party_suppliers") ?? 'False';
-    party_customers = prefs.getString("party_customers") ?? 'False';
-
-    ledgerentries = prefs.getString("ledgerentries") ?? 'False';
-    inventoryentries = prefs.getString("inventoryentries") ?? 'False';
-    billsentries = prefs.getString("billsentries") ?? 'False';
-    costcentreentries = prefs.getString("costcentreentries") ?? 'False';
-
-    if (ledgerentries == 'False' &&
-        inventoryentries == 'False' &&
-        billsentries == 'False' &&
-        costcentreentries == 'False') {
-      isVisibleTransactionBtn = false;
-    } else {
-      isVisibleTransactionBtn = true;
-    }
-
-    if (!isReceiptEntryVisible &&
-        !isSalesEntryVisible &&
-        !isSalesOrderEntryVisible) {
-      isVisibleEntriesBtn = false;
-    } else {
-      isVisibleEntriesBtn = true;
-    }
-
-    if (party_suppliers == 'False' && party_customers == 'False') {
-      isVisiblePartyBtn = false;
-    } else {
-      if (salesparty == 'False' &&
-          purchaseparty == 'False' &&
-          receiptparty == 'False' &&
-          paymentparty == 'False' &&
-          creditnoteparty == 'False' &&
-          debitnoteparty == 'False' &&
-          journalparty == 'False' &&
-          receivableparty == 'False' &&
-          payableparty == 'False' &&
-          pendingsalesorderparty == 'False' &&
-          pendingpurchaseorderparty == 'False') {
-        isVisiblePartyBtn = false;
-      } else {
-        isVisiblePartyBtn = true;
-      }
-    }
-
-    if (allitemsaccess == 'True' ||
-        fastmovingitemsaccess == 'True' ||
-        inactiveitemsaccess == 'True') {
-      isVisibleItemBtn = true;
-    } else {
-      isVisibleItemBtn = false;
-    }
-
-    if (salesdash == 'True') {
-      sales_visiblity = true;
-    } else {
-      sales_visiblity = false;
-    }
-
-    if (purchasedash == 'True') {
-      purchase_visibility = true;
-    } else {
-      purchase_visibility = false;
-    }
-    if (receiptdash == 'True') {
-      receipt_visibility = true;
-    } else {
-      receipt_visibility = false;
-    }
-    if (paymentdash == 'True') {
-      payment_visibility = true;
-    } else {
-      payment_visibility = false;
-    }
-    if (receivabledash == 'True') {
-      receivable_visibility = true;
-    } else {
-      receivable_visibility = false;
-    }
-    if (payabledash == 'True') {
-      payable_visibility = true;
-    } else {
-      payable_visibility = false;
-    }
-    if (cashdash == 'True') {
-      cash_visibility = true;
-    } else {
-      cash_visibility = false;
-    }
-
-    if (!sales_visiblity &&
-        !purchase_visibility &&
-        !receipt_visibility &&
-        !payment_visibility &&
-        !receivable_visibility &&
-        !payable_visibility &&
-        !cash_visibility &&
-        !isBarChartVisible &&
-        !isVisibleLineChart &&
-        !isPieChartVisible) {
-      isVisibleNoAccess = true;
-      isVisibleDate = false;
-    } else {
-      isVisibleNoAccess = false;
-      isVisibleDate = true;
-    }
-
-    try {
-      currencyCode = prefs.getString('currencycode') ?? "AED";
-    } catch (e) {
-      if (currencyCode == null) {
-        currencyCode = 'AED';
-      }
-    }
-    currencyFormat = new NumberFormat();
-
-    try {
-      if (currencyCode == 'INR' ||
-          currencyCode == 'EUR' ||
-          currencyCode == 'USD' ||
-          currencyCode == 'PKR') {
-        currencyFormat = NumberFormat('#,##0');
-        NumberFormat format = NumberFormat.simpleCurrency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-      } else {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-    } catch (e) {
-      NumberFormat format = NumberFormat.currency(
-        locale: 'en',
-        name: currencyCode,
-      );
-      currencysymbol = format.currencySymbol;
-      currencyFormat = NumberFormat('#,##0');
-    }
-
-    _currencyCode = currencyCode ?? 'AED';
-
-    // String default_value = currencyFormat.format(0) + " CR";
-    sales_value = 0.0;
-    purchase_value = 0.0;
-    receipt_value = 0.0;
-    payment_value = 0.0;
-    outstandingpayable_value = 0.0;
-    outstandingreceivable_value = 0.0;
-    cash_value = 0.0;
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    // `name_nav`/`email_nav` are populated straight from tally-oauth's own
-    // login response (see AuthRepository.loginToTallyOauth) - no legacy
-    // backend lookup is made here anymore.
-    name = prefs.getString('name_nav') ?? prefs.getString('name') ?? '';
-    email = prefs.getString('email_nav') ?? '';
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-    datetype = prefs.getString('datetype');
-    if (datetype != null) {
-      _handleDate(datetype!);
-    } else {
-      _handleDate(_selecteddate);
-    }
-  }
-
-  void _handleDate(String value) async {
-    setState(() {
-      _selecteddate = value;
-    });
-
-    if (_selecteddate == "Today") {
-      DateTime currentDate = DateTime.now();
-      String startMonth = DateFormat('MMM').format(currentDate);
-      String sdf = DateFormat(
-        'MM',
-      ).format(currentDate); // converting month into string
-
-      String startDay = DateFormat('dd').format(currentDate);
-      int startYear = currentDate.year;
-
-      String endMonth = DateFormat('MMM').format(currentDate);
-      String sdfEnd = DateFormat('MM').format(currentDate);
-
-      String endDay = DateFormat('dd').format(currentDate);
-      int endYear = currentDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-    } else if (_selecteddate == "Year To Date") {
-      DateTime now = DateTime.now();
-      DateTime startDate = DateTime(
-        now.year,
-        1,
-        1,
-      ); // Start of the current year
-      DateTime endDate = DateTime(now.year, now.month, now.day); // Today's date
-
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(startDate).substring(3, 6);
-      String sdf = DateFormat('MM').format(startDate);
-
-      String startDay = dateFormat.format(startDate).substring(0, 2);
-      int startYear = startDate.year;
-
-      String endMonth = dateFormat.format(endDate).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(endDate);
-
-      String endDay = dateFormat.format(endDate).substring(0, 2);
-      int endYear = endDate.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Yesterday") {
-      DateTime yesterday = DateTime.now().subtract(Duration(days: 1));
-      DateFormat dateFormat = DateFormat("dd-MMM-yyyy");
-
-      String startMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yesterday); // converting month into string
-
-      String startDay = dateFormat.format(yesterday).substring(0, 2);
-      int startYear = yesterday.year;
-
-      String endMonth = dateFormat.format(yesterday).substring(3, 6);
-      String sdfEnd = DateFormat('MM').format(yesterday);
-
-      String endDay = dateFormat.format(yesterday).substring(0, 2);
-      int endYear = yesterday.year;
-
-      startDateString = "$startYear$sdf$startDay";
-      endDateString = "$endYear$sdfEnd$endDay";
-      print(startDateString);
-      print(endDateString);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = false;
-        _isEnddateVisible = false;
-        _IsSizeboxVisible = false;
-      });
-    } else if (_selecteddate == "This Month") {
-      DateTime now = DateTime.now();
-      DateTime startOfMonth = DateTime(now.year, now.month, 1);
-      DateTime endOfMonth = DateTime(now.year, now.month + 1, 0);
-
-      String startMonth = DateFormat('MMM').format(startOfMonth);
-      String sdf = DateFormat(
-        'MM',
-      ).format(startOfMonth); // converting month into string
-      String startDay = DateFormat('dd').format(startOfMonth);
-      int startYear = startOfMonth.year;
-
-      String endMonth = DateFormat('MMM').format(endOfMonth);
-      String sdfEnd = DateFormat('MM').format(endOfMonth);
-      String endDay = DateFormat('dd').format(endOfMonth);
-      int endYear = endOfMonth.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Month") {
-      var calendarLastMonthStart = DateTime.now();
-      var calendarLastMonthEnd = DateTime.now();
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month - 1,
-        1,
-      );
-
-      calendarLastMonthStart = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month,
-        1,
-      );
-      calendarLastMonthEnd = DateTime(
-        calendarLastMonthStart.year,
-        calendarLastMonthStart.month + 1,
-        0,
-      );
-
-      var startMonth = DateFormat('MMM').format(calendarLastMonthStart);
-      var sdf = DateFormat('MM').format(calendarLastMonthStart);
-      var startDay = DateFormat('dd').format(calendarLastMonthStart);
-      var startYear = calendarLastMonthStart.year;
-
-      var endMonth = DateFormat('MMM').format(calendarLastMonthEnd);
-      var sdfEnd = DateFormat('MM').format(calendarLastMonthEnd);
-      var endDay = DateFormat('dd').format(calendarLastMonthEnd);
-      var endYear = calendarLastMonthEnd.year;
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "This Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year, 1, 1);
-      DateTime yearEnd = DateTime(today.year, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Last Year") {
-      DateTime today = DateTime.now();
-      DateTime yearStart = DateTime(today.year - 1, 1, 1);
-      DateTime yearEnd = DateTime(today.year - 1, 12, 31);
-
-      String startMonth = DateFormat('MMM').format(yearStart);
-      String sdf = DateFormat(
-        'MM',
-      ).format(yearStart); // converting month into string
-      String startDay = DateFormat('dd').format(yearStart);
-      String startYear = DateFormat('yyyy').format(yearStart);
-
-      String endMonth = DateFormat('MMM').format(yearEnd);
-      String sdfEnd = DateFormat('MM').format(yearEnd);
-      String endDay = DateFormat('dd').format(yearEnd);
-      String endYear = DateFormat('yyyy').format(yearEnd);
-
-      startdate_text = startDay + "-" + startMonth + "-" + startYear.toString();
-      enddate_text = endDay + "-" + endMonth + "-" + endYear.toString();
-
-      startDateString = '$startYear$sdf$startDay';
-      endDateString = '$endYear$sdfEnd$endDay';
-
-      print(startDateString);
-      print(endDateString);
-
-      fetchDashData(startDateString, endDateString);
-
-      setState(() {
-        _isTextEnabled = false;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-    } else if (_selecteddate == "Custom Date") {
-      setState(() {
-        _isTextEnabled = true;
-
-        _isDashVisible = true;
-        _isEnddateVisible = true;
-        _IsSizeboxVisible = true;
-      });
-
-      _selectDateRange_auto(context);
-    }
-    prefs.setString('datetype', _selecteddate);
-  }
+  bool _licenseDialogShown = false;
 
   @override
   void initState() {
@@ -2801,59 +927,66 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
 
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
-    _initSharedPreferences();
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
   }
 
-  NumberScale _numberScaleFromString(String? scale) {
-    switch (scale) {
-      case "full":
-        return NumberScale.full;
-      case "million":
-        return NumberScale.million;
-      case "billion":
-        return NumberScale.billion;
-      case "thousand":
-      default:
-        return NumberScale.thousand;
-    }
-  }
-
-  String _numberScaleToString(NumberScale scale) {
-    switch (scale) {
-      case NumberScale.full:
-        return "full";
-      case NumberScale.million:
-        return "million";
-      case NumberScale.billion:
-        return "billion";
-      case NumberScale.thousand:
-        return "thousand";
-    }
-  }
-
-  Future<void> _loadNumberScale() async {
-    final loadedScale = _numberScaleFromString(prefs.getString("number_scale"));
-    if (!mounted) return;
-
-    setState(() {
-      _selectedScale = loadedScale;
-    });
-  }
-
-  Future<void> _saveNumberScale(NumberScale scale) async {
-    setState(() {
-      _selectedScale = scale;
-    });
-
-    await prefs.setString("number_scale", _numberScaleToString(scale));
+  Widget _buildDecentCard(
+    BuildContext context,
+    String label,
+    String symbol,
+    String amountText,
+    String currencyCode,
+    String type,
+    VoidCallback onTap,
+  ) {
+    return _dashboardDecentCard(
+      context,
+      label,
+      symbol,
+      amountText,
+      currencyCode,
+      type,
+      onTap,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Establishes the rebuild subscription for the whole synchronous build
+    // call - values are then read through the `_s` getter below, same as
+    // Login.dart/CompanySelectTallyOauth.dart.
+    ref.watch(dashboardNotifierProvider);
+
+    ref.listen<DashboardState>(dashboardNotifierProvider, (previous, next) {
+      if (next.errorMessage != null) {
+        showAppMessage(context, next.errorMessage!);
+        ref.read(dashboardNotifierProvider.notifier).clearError();
+      }
+
+      // Fires once, right after the notifier's init finishes computing
+      // isExpired/daysUntilExpiry - mirrors the original
+      // `_initSharedPreferences`'s own addPostFrameCallback-scheduled
+      // dialogs.
+      if (!_licenseDialogShown &&
+          (previous?.initialized != true) &&
+          next.initialized) {
+        _licenseDialogShown = true;
+        final daysUntilExpiry =
+            ref.read(dashboardNotifierProvider.notifier).daysUntilExpiry;
+        if (next.isExpired) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _showLicenseExpiredDialog();
+          });
+        } else if (daysUntilExpiry != null && daysUntilExpiry <= 3) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _showLicenseExpiringSoonDialog(daysUntilExpiry);
+          });
+        }
+      }
+    });
+
     final Map<int, Color> yearColors = {};
 
     return WillPopScope(
@@ -2874,12 +1007,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             ),
             automaticallyImplyLeading: false,
             leadingWidth: kToolbarHeight,
-            /*leading: IconButton(
-                icon: Icon(Icons.menu, color: Colors.white),
-                onPressed: () {
-                  _scaffoldKey.currentState!.openDrawer();
-                },
-              ),*/
             centerTitle: true,
             title: GestureDetector(
               onTap: () => navigateToCompanySwitch(context),
@@ -2895,7 +1022,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   children: [
                     Flexible(
                       child: Text(
-                        company ?? '',
+                        _s.company,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         softWrap: false,
@@ -2916,16 +1043,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
           ),
         ),
 
-        /*drawer: Sidebar(
-              isDashEnable: isDashEnable,
-              isRolesVisible: isRolesVisible,
-              isRolesEnable: isRolesEnable,
-              isUserEnable: isUserEnable,
-              isUserVisible: isUserVisible,
-              Username: name,
-              Email: email,
-              tickerProvider: this),*/
-        // add the Sidebar widget here
         bottomNavigationBar: const AppBottomNav(
           activeTab: AppBottomNavTab.dashboard,
           activeMoreItem: AppMoreItem.dashboard,
@@ -2941,7 +1058,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                   child: Column(
                     children: [
                       _buildDashboardHeader(),
-                      if (_isLoading)
+                      if (_s.isLoading)
                         _buildSkeletonDateCard()
                       else
                         Container(
@@ -2961,7 +1078,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (isVisibleDate)
+                              if (_s.isVisibleDate)
                                 Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
@@ -2971,7 +1088,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                           ),
                         ),
 
-                      if (_isLoading)
+                      if (_s.isLoading)
                         _buildSkeletonGrid()
                       else
                       GridView.builder(
@@ -2986,171 +1103,164 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               mainAxisSpacing: 12,
                             ),
                         itemCount: [
-                          if (sales_visiblity) 1 else 0,
-                          if (purchase_visibility) 1 else 0,
-                          if (receipt_visibility) 1 else 0,
-                          if (payment_visibility) 1 else 0,
-                          if (receivable_visibility) 1 else 0,
-                          if (payable_visibility) 1 else 0,
-                          if (cash_visibility) 1 else 0,
+                          if (_s.salesVisibility) 1 else 0,
+                          if (_s.purchaseVisibility) 1 else 0,
+                          if (_s.receiptVisibility) 1 else 0,
+                          if (_s.paymentVisibility) 1 else 0,
+                          if (_s.receivableVisibility) 1 else 0,
+                          if (_s.payableVisibility) 1 else 0,
+                          if (_s.cashVisibility) 1 else 0,
                         ].where((e) => e == 1).length,
                         itemBuilder: (context, index) {
                           final items = <Widget>[
-                            if (sales_visiblity)
+                            if (_s.salesVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tileSalesCreditNote,
-                                currencysymbol,
-                                formatNumberAbbreviation(sales_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.salesValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "sales", // 👈 type auto handle karega
                                 () {
-                                  vchtype = "Sales";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Sales",
                                       ),
                                     ),
                                   );
                                 },
                               ),
 
-                            if (purchase_visibility)
+                            if (_s.purchaseVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tilePurchaseDebitNote,
-                                currencysymbol,
-                                formatNumberAbbreviation(purchase_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.purchaseValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "purchase",
                                 () {
-                                  vchtype = "Purchase";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Purchase",
                                       ),
                                     ),
                                   );
                                 },
                               ),
 
-                            if (receipt_visibility)
+                            if (_s.receiptVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tileReceipt,
-                                currencysymbol,
-                                formatNumberAbbreviation(receipt_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.receiptValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "receipt",
                                 () {
-                                  vchtype = "Receipt";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Receipt",
                                       ),
                                     ),
                                   );
                                 },
                               ),
 
-                            if (payment_visibility)
+                            if (_s.paymentVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tilePayment,
-                                currencysymbol,
-                                formatNumberAbbreviation(payment_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.paymentValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "payment",
                                 () {
-                                  vchtype = "Payment";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Payment",
                                       ),
                                     ),
                                   );
                                 },
                               ),
 
-                            if (receivable_visibility)
+                            if (_s.receivableVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tileOutstandingReceivable,
-                                currencysymbol,
-                                formatNumberAbbreviation(outstandingreceivable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.outstandingReceivableValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "receivable",
                                 () {
-                                  vchtype = "Receivable";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Receivable",
                                       ),
                                     ),
                                   );
                                 },
                               ),
 
-                            if (payable_visibility)
+                            if (_s.payableVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tileOutstandingPayable,
-                                currencysymbol,
-                                formatNumberAbbreviation(outstandingpayable_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.outstandingPayableValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "payable",
                                 () {
-                                  vchtype = "Payable";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Payable",
                                       ),
                                     ),
                                   );
                                 },
                               ),
 
-                            if (cash_visibility)
+                            if (_s.cashVisibility)
                               _buildDecentCard(
                                 context,
                                 AppLocalizations.of(context).tileCashBankBalance,
-                                currencysymbol,
-                                formatNumberAbbreviation(cash_value, decimalPlaces: decimal!, scale: _selectedScale, showSuffix: true),
-                                _currencyCode,
+                                _s.currencySymbol,
+                                formatNumberAbbreviation(_s.cashValue, decimalPlaces: _s.decimal, scale: _s.selectedScale, showSuffix: true),
+                                _s.currencyCode,
                                 "Cash", // type (for icon + gradient auto handle)
                                 () {
-                                  vchtype = "Cash";
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => DashboardClicked(
-                                        startdate_string: startDateString,
-                                        enddate_string: endDateString,
-                                        vchtypes: vchtype,
+                                        startdate_string: _s.startDateString,
+                                        enddate_string: _s.endDateString,
+                                        vchtypes: "Cash",
                                       ),
                                     ),
                                   );
@@ -3167,7 +1277,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (isVisibleLineChart || isPieChartVisible)
+                            if (_s.isVisibleLineChart || _s.isPieChartVisible)
                               GestureDetector(
                                 onTap: () {
                                   Navigator.push(
@@ -3181,19 +1291,19 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                                             .cast<Map<String, dynamic>>(),
                                         piePurchaseList: piechartpurchaselist
                                             .cast<Map<String, dynamic>>(),
-                                        isVisibleLineChart: isVisibleLineChart,
-                                        decimalPlaces: decimal!,
-                                        isVisiblePieChart: isPieChartVisible,
+                                        isVisibleLineChart: _s.isVisibleLineChart,
+                                        decimalPlaces: _s.decimal,
+                                        isVisiblePieChart: _s.isPieChartVisible,
                                         isSalesPieChartVisible:
-                                            isSalesPieChartVisible,
+                                            _s.isSalesPieChartVisible,
                                         isPurchasePieChartVisible:
-                                            isPurchasePieChartVisible,
-                                        isBarChartVisible: isBarChartVisible,
-                                        salesDataList: salesDataList,
-                                        recDataList: recDataList,
-                                        selectedScale: _selectedScale,
-                                        startDateString: startDateString,
-                                        endDateString: endDateString,
+                                            _s.isPurchasePieChartVisible,
+                                        isBarChartVisible: _s.isBarChartVisible,
+                                        salesDataList: _s.salesDataList,
+                                        recDataList: _s.recDataList,
+                                        selectedScale: _s.selectedScale,
+                                        startDateString: _s.startDateString,
+                                        endDateString: _s.endDateString,
                                       ),
                                     ),
                                   );
@@ -3302,7 +1412,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                               ),
 
                             Visibility(
-                              visible: isVisibleNoAccess,
+                              visible: _s.isVisibleNoAccess,
                               child: Container(
                                 margin: const EdgeInsets.fromLTRB(
                                   16,
@@ -3379,41 +1489,6 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 ),
               ),
             ),
-
-            /*Align(
-                  alignment: Alignment.centerRight, // stick to right center
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 16.0), // distance from right edge
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center, // center vertically
-                      children: [
-                        if (isVisibleItemBtn)
-                          _buildFloatingTile(context, "Items", Icons.inventory_outlined, Colors.blue, () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => Items()));
-                          }),
-                        const SizedBox(height: 16),
-
-                        if (isVisiblePartyBtn)
-                          _buildFloatingTile(context, "Parties",Icons.groups_outlined, Colors.green, () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => Party()));
-                          }),
-                        const SizedBox(height: 16),
-
-                        if (isVisibleTransactionBtn)
-                          _buildFloatingTile(context, "Register",Icons.payment_outlined, Colors.orange, () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => Transactions()));
-                          }),
-                        const SizedBox(height: 16),
-
-                        if (isVisibleEntriesBtn)
-                          _buildFloatingTile(context, "Entries",Icons.receipt_long, Colors.red, () {
-                            _showEntriesBottomSheet(context);
-                          }),
-                      ],
-                    ),
-                  ),
-                ),*/
           ],
         ),
 
@@ -3482,13 +1557,11 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             );
 
             if (result != null) {
-              await _saveNumberScale(result);
+              await _notifier.saveNumberScale(result);
             }
           },
         ),
       ),
-
-      // Empty container if the license is still valid
     );
   }
 
@@ -3499,7 +1572,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
     required String label,
   }) {
     final theme = Theme.of(context);
-    final isSelected = _selectedScale == value;
+    final isSelected = _s.selectedScale == value;
 
     return PopupMenuItem<NumberScale>(
       value: value,
@@ -3559,9 +1632,9 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  name.trim().isEmpty
+                  _s.name.trim().isEmpty
                       ? AppLocalizations.of(context).dashWelcome
-                      : AppLocalizations.of(context).dashWelcomeName(name),
+                      : AppLocalizations.of(context).dashWelcomeName(_s.name),
                   style: GoogleFonts.poppins(
                     color: Colors.white,
                     fontSize: 17,
@@ -3752,7 +1825,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      "$startdate_text - $enddate_text",
+                      "${_s.startdateText} - ${_s.enddateText}",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.poppins(
@@ -3776,7 +1849,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<dynamic>(
-                value: _selecteddate,
+                value: _s.selectedDate,
                 isDense: true,
                 icon: Icon(
                   Icons.expand_more_rounded,
@@ -3821,7 +1894,7 @@ class _MyHomePageState extends State<Dashboard> with TickerProviderStateMixin {
                 children: [
                   Expanded(
                     child: Text(
-                      "$startdate_text - $enddate_text",
+                      "${_s.startdateText} - ${_s.enddateText}",
                       style: GoogleFonts.poppins(
                         fontSize: 12.5,
                         color: Theme.of(context).colorScheme.onSurface,
@@ -3951,7 +2024,7 @@ Widget _buildFloatingTile(
   );
 }
 
-Widget _buildDecentCard(
+Widget _dashboardDecentCard(
   BuildContext context,
   String label,
   String symbol,

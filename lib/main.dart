@@ -4,12 +4,14 @@ import 'package:FincoreGo/Constants.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'SharedPreferencesService.dart';
 import 'SplashScreen.dart';
 import 'api/navigator_key.dart';
 import 'l10n/app_localizations.dart';
 import 'locale_controller.dart';
+import 'providers/app_controllers_providers.dart';
 import 'theme_controller.dart';
 
 Future<void> main() async {
@@ -18,7 +20,7 @@ Future<void> main() async {
   await themeController.loadThemeMode();
   await localeController.loadLocale();
 
-  runApp(const MyApp());
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 // ✅ Local notifications setup (for Android & iOS)
@@ -144,42 +146,45 @@ void didChangeAppLifecycleState(AppLifecycleState state) async {
   }
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge([themeController, localeController]),
-      builder: (context, _) {
-        return MaterialApp(
-          navigatorKey: navigatorKey,
-          debugShowCheckedModeBanner: false,
-          builder: (context, child) {
-            return MediaQuery(
-              data: MediaQuery.of(context).copyWith(textScaleFactor: 1.0),
-              child: child!,
-            );
-          },
-          title: 'Fincore Go',
-          themeMode: themeController.themeMode,
-          theme: _buildLightTheme(),
-          darkTheme: _buildDarkTheme(),
-          // Arabic support reverted - English only for now. Locale is
-          // pinned regardless of localeController/device settings so the
-          // app never switches to Arabic (which had bidi/number-formatting
-          // issues still being worked out).
-          locale: const Locale('en'),
-          supportedLocales: const [Locale('en')],
-          localizationsDelegates: const [
-            AppLocalizations.delegate,
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          home: SplashScreen(),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(
+      themeControllerProvider.select((c) => c.themeMode),
+    );
+    // Locale is watched to keep this widget rebuilding on locale changes
+    // (kept for parity with the prior AnimatedBuilder, even though the
+    // `locale:` below is pinned to English regardless).
+    ref.watch(localeControllerProvider);
+
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      debugShowCheckedModeBanner: false,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaleFactor: 1.0),
+          child: child!,
         );
       },
+      title: 'Fincore Go',
+      themeMode: themeMode,
+      theme: _buildLightTheme(),
+      darkTheme: _buildDarkTheme(),
+      // Arabic support reverted - English only for now. Locale is
+      // pinned regardless of localeController/device settings so the
+      // app never switches to Arabic (which had bidi/number-formatting
+      // issues still being worked out).
+      locale: const Locale('en'),
+      supportedLocales: const [Locale('en')],
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: SplashScreen(),
     );
   }
 

@@ -1,35 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'AddRole.dart';
 import 'RolesView.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/base_api_client.dart';
-import 'api/identity_repository.dart';
+import 'providers/modify_role_notifier.dart';
 
-class ModifyRole extends StatefulWidget {
+class ModifyRole extends ConsumerStatefulWidget {
   final String roleId;
   const ModifyRole({Key? key, required this.roleId}) : super(key: key);
 
   @override
-  _ModifyRolePageState createState() => _ModifyRolePageState();
+  ConsumerState<ModifyRole> createState() => _ModifyRolePageState();
 }
 
-class _ModifyRolePageState extends State<ModifyRole> {
+class _ModifyRolePageState extends ConsumerState<ModifyRole> {
   final nameController = TextEditingController();
-  final Set<String> selectedPermissionIds = {};
-
-  List<PermissionOption> permissions = [];
-  bool isLoading = true;
-  bool isSaving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+  bool _nameSeeded = false;
 
   @override
   void dispose() {
@@ -37,78 +25,47 @@ class _ModifyRolePageState extends State<ModifyRole> {
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => isLoading = true);
-    try {
-      final results = await Future.wait([
-        IdentityRepository.instance.listPermissions(),
-        IdentityRepository.instance.getRole(widget.roleId),
-      ]);
-
-      final permissionItems = ((results[0] as ApiResult).data as List)
-          .cast<Map<String, dynamic>>();
-      permissions = permissionItems.map(PermissionOption.fromJson).toList();
-
-      final role = results[1] as Map<String, dynamic>;
-      nameController.text = role['name'] as String;
-
-      // Each item is `{permision: {id, ...}}` - see the misspelled key
-      // note in identity_repository.dart's listRoles doc-comment.
-      final grantedPermissions = (role['permissions'] as List? ?? const [])
-          .cast<Map<String, dynamic>>();
-      selectedPermissionIds.addAll(
-        grantedPermissions.map(
-          (p) => (p['permision'] as Map<String, dynamic>)['id'] as String,
-        ),
-      );
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    }
-    setState(() => isLoading = false);
-  }
-
   Future<void> _saveRole() async {
     final name = nameController.text.trim();
-    if (name.isEmpty) {
-      showAppMessage(context, 'Please enter a role name');
-      return;
+    final result = await ref
+        .read(modifyRoleNotifierProvider(widget.roleId).notifier)
+        .saveRole(name);
+    if (!mounted) return;
+    if (result.message != null) {
+      showAppMessage(context, result.message!, isError: !result.success);
     }
-
-    setState(() => isSaving = true);
-    try {
-      await IdentityRepository.instance.updateRole(
-        widget.roleId,
-        name: name,
-        permissionIds: selectedPermissionIds.toList(),
+    if (result.success) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const RolesView()),
       );
-      showAppMessage(context, 'Role updated successfully', isError: false);
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const RolesView()),
-        );
-      }
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    } finally {
-      if (mounted) setState(() => isSaving = false);
     }
-  }
-
-  Map<String, List<PermissionOption>> get _groupedPermissions {
-    final grouped = <String, List<PermissionOption>>{};
-    for (final permission in permissions) {
-      grouped.putIfAbsent(permission.group, () => []).add(permission);
-    }
-    return grouped;
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = modifyRoleNotifierProvider(widget.roleId);
+    final vm = ref.watch(provider);
+    final notifier = ref.read(provider.notifier);
+
+    ref.listen<ModifyRoleState>(provider, (previous, next) {
+      if (next.loadError != null) {
+        showAppMessage(context, next.loadError!);
+        notifier.clearLoadError();
+      }
+    });
+
+    // Seed the name field once the role loads, without clobbering
+    // in-progress edits on every rebuild.
+    if (!_nameSeeded && !vm.isLoading && vm.name.isNotEmpty) {
+      _nameSeeded = true;
+      nameController.text = vm.name;
+    }
+
+    final isLoading = vm.isLoading;
+    final isSaving = vm.isSaving;
+    final selectedPermissionIds = vm.selectedPermissionIds;
+
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -164,7 +121,7 @@ class _ModifyRolePageState extends State<ModifyRole> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (final entry in _groupedPermissions.entries) ...[
+                for (final entry in vm.groupedPermissions.entries) ...[
                   Padding(
                     padding: const EdgeInsets.only(top: 12, bottom: 4),
                     child: Text(
@@ -187,13 +144,10 @@ class _ModifyRolePageState extends State<ModifyRole> {
                             (permission) => CheckboxListTile(
                               value: selectedPermissionIds.contains(permission.id),
                               onChanged: (checked) {
-                                setState(() {
-                                  if (checked ?? false) {
-                                    selectedPermissionIds.add(permission.id);
-                                  } else {
-                                    selectedPermissionIds.remove(permission.id);
-                                  }
-                                });
+                                notifier.togglePermission(
+                                  permission.id,
+                                  checked ?? false,
+                                );
                               },
                               title: Text(
                                 permission.displayName,

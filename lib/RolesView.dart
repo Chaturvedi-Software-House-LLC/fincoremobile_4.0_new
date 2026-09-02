@@ -1,7 +1,7 @@
 import 'package:FincoreGo/AddRole.dart';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'ModifyRole.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'CompanySelectTallyOauth.dart';
@@ -9,8 +9,7 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/identity_repository.dart';
+import 'providers/roles_view_notifier.dart';
 
 /// A tally-oauth CompanyRole - `id`/`name` plus how many permissions are
 /// granted (shown as a subtitle; the full set is only needed once you open
@@ -36,86 +35,25 @@ class RoleModel {
   }
 }
 
-class RolesView extends StatefulWidget {
+class RolesView extends ConsumerStatefulWidget {
   const RolesView({Key? key}) : super(key: key);
   @override
-  _RolesViewPageState createState() => _RolesViewPageState();
+  ConsumerState<RolesView> createState() => _RolesViewPageState();
 }
 
-class _RolesViewPageState extends State<RolesView>
+class _RolesViewPageState extends ConsumerState<RolesView>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = false,
-      _isLoading = false,
-      isVisibleNoRoleFound = false;
-
   final TextEditingController searchController = TextEditingController();
-
-  List<RoleModel> filteredRoles = [];
 
   String roleIdToDelete = "";
   String roleNameToDelete = "";
-
-  final List<RoleModel> roles = [];
-
-  String name = "", email = "";
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
 
-  late SharedPreferences prefs;
-
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
   void filterRoles(String query) {
-    setState(() {
-      if (query.trim().isEmpty) {
-        filteredRoles = List.from(roles);
-      } else {
-        filteredRoles = roles.where((role) {
-          return role.name.toLowerCase().contains(query.toLowerCase());
-        }).toList();
-      }
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    fetchRoles();
+    ref.read(rolesViewNotifierProvider.notifier).filterRoles(query);
   }
 
   Future<void> _showConfirmationDialogAndNavigate(BuildContext context) async {
@@ -255,25 +193,11 @@ class _RolesViewPageState extends State<RolesView>
   }
 
   Future<void> roledelete(String roleId, String roleName) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await IdentityRepository.instance.deleteRole(roleId);
-      showAppMessage(context, "Role '$roleName' deleted", isError: false);
-      await fetchRoles();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    final result = await ref
+        .read(rolesViewNotifierProvider.notifier)
+        .deleteRole(roleId, roleName);
+    if (!mounted) return;
+    showAppMessage(context, result.message, isError: !result.success);
   }
 
   Widget _buildSkeletonList() {
@@ -347,45 +271,31 @@ class _RolesViewPageState extends State<RolesView>
   /// The role's own company scoping now comes from the company-user
   /// session's token (see company-role.controller.ts's `findAll`), not a
   /// `serialno` in the request body - no param needed here anymore.
-  Future<void> fetchRoles() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final result = await IdentityRepository.instance.listRoles(limit: 100);
-      final items = (result.data as List).cast<Map<String, dynamic>>();
-
-      roles.clear();
-      roles.addAll(items.map(RoleModel.fromJson));
-      filteredRoles = List.from(roles);
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    }
-
-    setState(() {
-      isVisibleNoRoleFound = roles.isEmpty;
-      _isLoading = false;
-    });
-  }
+  Future<void> fetchRoles() =>
+      ref.read(rolesViewNotifierProvider.notifier).fetchRoles();
 
   @override
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
   }
 
-  Future<void> _refresh() async {
-    setState(() {
-      fetchRoles();
-    });
-  }
+  Future<void> _refresh() => fetchRoles();
 
   @override
   Widget build(BuildContext context) {
+    final vm = ref.watch(rolesViewNotifierProvider);
+    ref.listen<RolesViewState>(rolesViewNotifierProvider, (previous, next) {
+      if (next.errorMessage != null) {
+        showAppMessage(context, next.errorMessage!);
+        ref.read(rolesViewNotifierProvider.notifier).clearError();
+      }
+    });
+    final isVisibleNoRoleFound = vm.isVisibleNoRoleFound;
+    final isLoading = vm.isLoading;
+    final roles = vm.roles;
+    final company = vm.company;
+
     return WillPopScope(
       onWillPop: () async {
         Navigator.pushReplacement(
@@ -423,7 +333,7 @@ class _RolesViewPageState extends State<RolesView>
                 children: [
                   Flexible(
                     child: Text(
-                      company ?? '',
+                      company,
 
                       style: GoogleFonts.poppins(
                         color: Colors.white,
@@ -663,7 +573,7 @@ class _RolesViewPageState extends State<RolesView>
                 ],
               ),
 
-              if (_isLoading)
+              if (isLoading)
                 Positioned.fill(
                   child: Container(
                     color: Theme.of(context).scaffoldBackgroundColor,
