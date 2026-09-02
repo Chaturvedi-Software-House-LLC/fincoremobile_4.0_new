@@ -2,9 +2,9 @@ import 'package:FincoreGo/PartyClickedSalePurcOrder.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -13,10 +13,9 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
 import 'constants.dart';
-import 'api/ledger_repository.dart';
-import 'api/monthly_bucket_helper.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'providers/party_clicked_sale_purc_order_clicked_notifier.dart';
 
 class Data_List {
   final String orderno;
@@ -32,7 +31,7 @@ class Data_List {
   });
 }
 
-class PartyClickedSalePurcOrderClicked extends StatefulWidget {
+class PartyClickedSalePurcOrderClicked extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, vchtype, item;
   final List<Data> dropdownItems;
   final int ledgerMasterId;
@@ -50,7 +49,7 @@ class PartyClickedSalePurcOrderClicked extends StatefulWidget {
     required this.stockItemMasterId,
   });
   @override
-  _PartyClickedSalePurcOrderClickedPageState createState() =>
+  ConsumerState<PartyClickedSalePurcOrderClicked> createState() =>
       _PartyClickedSalePurcOrderClickedPageState(
         startDateString: startdate_string,
         endDateString: enddate_string,
@@ -65,28 +64,20 @@ class PartyClickedSalePurcOrderClicked extends StatefulWidget {
 }
 
 class _PartyClickedSalePurcOrderClickedPageState
-    extends State<PartyClickedSalePurcOrderClicked>
+    extends ConsumerState<PartyClickedSalePurcOrderClicked>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String startDateString = "",
       endDateString = "",
       type = "",
       ledger = "",
-      total = "",
       vchtype = "",
       item = "";
 
-  int counter = 0;
-  double total_double = 0;
   final int ledgerMasterId;
   final int stockItemMasterId;
 
-  String total_main = "0";
-
   List<Data> dropdownItems;
-
-  List<Data_List> filteredItems =
-      []; // Initialize an empty list to hold the filtered items
 
   _PartyClickedSalePurcOrderClickedPageState({
     required this.startDateString,
@@ -100,8 +91,6 @@ class _PartyClickedSalePurcOrderClickedPageState
     required this.stockItemMasterId,
   });
 
-  List<Data_List> item_list = [];
-
   final List<String> itemList = [
     'Default',
     'Newest to Oldest',
@@ -110,37 +99,39 @@ class _PartyClickedSalePurcOrderClickedPageState
     'Amount Low to High',
   ];
 
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isListVisible = false;
-
-  String email = "";
-  String name = "";
-
-  Data? selectedTopValue;
-
-  bool isSortVisible = false;
-
   TextEditingController searchController = TextEditingController();
 
-  bool isVisibleNoDataFound = false;
-
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  String? datetype;
-
-  late String? startdate_pref, enddate_pref;
-
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-  String selectedSortOption = '';
   ScrollController _scrollController = ScrollController();
+
+  late final _args = PartyClickedSalePurcOrderClickedArgs(
+    startDateString: startDateString,
+    endDateString: endDateString,
+    vchtype: vchtype,
+    item: item,
+    dropdownItems: dropdownItems,
+    ledgerMasterId: ledgerMasterId,
+    stockItemMasterId: stockItemMasterId,
+  );
+
+  PartyClickedSalePurcOrderClickedNotifier get _notifier => ref.read(
+        partyClickedSalePurcOrderClickedNotifierProvider(_args).notifier,
+      );
+  PartyClickedSalePurcOrderClickedState get _s =>
+      ref.read(partyClickedSalePurcOrderClickedNotifierProvider(_args));
+
+  void _scrollToTop() {
+    _scrollController.animateTo(
+      0.0,
+      duration: Duration(milliseconds: 500),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _selectSort(String option) {
+    if (_notifier.selectSortOption(option)) {
+      _scrollToTop();
+    }
+  }
 
   void _showSelectionWindow(BuildContext context) {
     final List<IconData> icons = [
@@ -190,28 +181,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                     // Replace this with your custom tile widget
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          selectedSortOption =
-                              itemList[index]; // Update the selected index
-                        });
-                        switch (selectedSortOption) {
-                          case 'Default':
-                            sortByDefault(); // Call the sorting function
-                            break;
-                          case 'Newest to Oldest':
-                            sortByDateHightoLow(); // Call the sorting function
-                            break;
-                          case 'Oldest to Newest':
-                            sortByDateLowtoHigh(); // Call the sorting function
-                            break;
-                          case 'Amount High to Low':
-                            sortByAmountHightoLow(); // Call the sorting function
-                            break;
-                          case 'Amount Low to High':
-                            sortByAmountLowtoHigh(); // Call the sorting function
-                            break;
-                        }
-                        print('Tile $index selected');
+                        _selectSort(itemList[index]);
                         Navigator.pop(
                           context,
                         ); // Close the selection window after a tile is selected
@@ -224,13 +194,14 @@ class _PartyClickedSalePurcOrderClickedPageState
                           title: Text(
                             itemList[index],
                             style: GoogleFonts.poppins(
-                              fontWeight: itemList[index] == selectedSortOption
-                                  ? FontWeight.bold
-                                  : FontWeight
-                                        .normal, // Apply bold style to the text if the tile is selected
+                              fontWeight:
+                                  itemList[index] == _s.selectedSortOption
+                                      ? FontWeight.bold
+                                      : FontWeight
+                                            .normal, // Apply bold style to the text if the tile is selected
                             ),
                           ),
-                          trailing: itemList[index] == selectedSortOption
+                          trailing: itemList[index] == _s.selectedSortOption
                               ? Icon(Icons.check, color: app_color)
                               : null, // Show arrow icon if the tile is selected
                         ),
@@ -246,99 +217,9 @@ class _PartyClickedSalePurcOrderClickedPageState
     );
   }
 
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems = List.from(item_list);
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.vchdate.compareTo(b.vchdate));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.vchdate.compareTo(a.vchdate));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        if (vchtype == 'sales') {
-          filteredItems.sort(
-            (a, b) => a.pendingAmount.compareTo(b.pendingAmount),
-          );
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else if (vchtype == 'purchase') {
-          filteredItems.sort(
-            (a, b) => b.pendingAmount.compareTo(a.pendingAmount),
-          );
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
-  void sortByAmountHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        if (vchtype == 'sales') {
-          filteredItems.sort(
-            (a, b) => b.pendingAmount.compareTo(a.pendingAmount),
-          );
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else if (vchtype == 'purchase') {
-          filteredItems.sort(
-            (a, b) => a.pendingAmount.compareTo(b.pendingAmount),
-          );
-          _scrollController.animateTo(
-            0.0,
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      }
-    });
-  }
-
   Future<void> generateAndSharePDF_SalePurc() async {
-    if (selectedTopValue == null) {
+    final vm = _s;
+    if (vm.selectedTopValue == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please select an item first")),
       );
@@ -356,22 +237,23 @@ class _PartyClickedSalePurcOrderClickedPageState
       typee = 'Pending Purchase Order';
     }
 
-    final companyName = company!;
+    final companyName = vm.company;
     final reportname = '$typee Summary';
     final partyname = ledger;
-    final item_name = selectedTopValue!.item;
+    final item_name = vm.selectedTopValue!.item;
 
     final headersRow3 = ['Date', 'Order No', 'Pending Qty', 'Amount'];
 
     final itemsPerPage = 10;
-    final pageCount = (item_list.length / itemsPerPage).ceil();
+    final orders = vm.itemList;
+    final pageCount = (orders.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
-      final endIndex = (pageNumber + 1) * itemsPerPage > item_list.length
-          ? item_list.length
+      final endIndex = (pageNumber + 1) * itemsPerPage > orders.length
+          ? orders.length
           : (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = item_list.sublist(startIndex, endIndex);
+      final itemsSubset = orders.sublist(startIndex, endIndex);
 
       final tableSubsetRows = itemsSubset.map((item) {
         return [
@@ -507,10 +389,11 @@ class _PartyClickedSalePurcOrderClickedPageState
     // ✅ Updated Share Plus usage
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing $typee Report of $company');
+    ], text: 'Sharing $typee Report of ${vm.company}');
   }
 
   Future<void> generateAndShareCSV_SalePurc() async {
+    final vm = _s;
     String typee = '';
     if (type == 'salesorder') {
       typee = 'Pending Sales Order';
@@ -522,7 +405,7 @@ class _PartyClickedSalePurcOrderClickedPageState
     final headersRow = ['Date', 'Order No', 'Pending Qty', 'Amount'];
     csvData.add(headersRow);
 
-    for (final item in item_list) {
+    for (final item in vm.itemList) {
       final rowData = [
         convertDateFormat(item.vchdate),
         item.orderno,
@@ -541,7 +424,7 @@ class _PartyClickedSalePurcOrderClickedPageState
     // ✅ Updated Share Plus usage
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing $typee Report of $company');
+    ], text: 'Sharing $typee Report of ${vm.company}');
   }
 
   String convertDateFormat(String dateStr) {
@@ -554,159 +437,10 @@ class _PartyClickedSalePurcOrderClickedPageState
     return formattedDate;
   }
 
-  /// Replaces legacy's `getOrderSummary`-with-item-filter call. [stockItemMasterId]
-  /// drives the request; [item]'s name-string param is legacy-shaped but no
-  /// longer used to select data (the dropdown/initial value resolve their
-  /// own `stockItemMasterId` via [Data.stockItemMasterId] instead).
-  Future<void> _fetchOrderDetail(int stockItemMasterId) async {
-    setState(() {
-      _isLoading = true;
-      _isListVisible = true;
-      isSortVisible = false;
-      isVisibleNoDataFound = false;
-    });
-    item_list.clear();
-    filteredItems.clear();
-
-    try {
-      final from = parseCompactDate(startDateString);
-      final to = parseCompactDate(endDateString);
-      final rows = await LedgerRepository.instance.pendingOrdersByVoucher(
-        ledgerMasterId,
-        stockItemMasterId,
-        isSales: vchtype == 'sales',
-        from: from,
-        to: to,
-      );
-
-      final items = [
-        for (final row in rows)
-          Data_List(
-            orderno: (row['voucherNumber'] ?? '').toString(),
-            pendingQty: parseMoneyField(row['pendingQuantity']).toString(),
-            pendingAmount: parseMoneyField(row['pendingAmount']),
-            vchdate: (row['date'] ?? '').toString(),
-          ),
-      ];
-
-      setState(() {
-        item_list.addAll(items);
-        filteredItems = item_list;
-        isVisibleNoDataFound = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (item_list.isEmpty) {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        isVisibleNoDataFound = false;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-    });
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-      if (!itemList.contains(selectedSortOption)) {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    String desiredValue = item; // Replace with your desired value
-    Data? selectedValue;
-
-    try {
-      selectedValue = dropdownItems.firstWhere(
-        (item) => item.item == desiredValue,
-      );
-    } catch (e) {
-      selectedValue = null;
-    }
-    // This runs inside an async initState-triggered call, so the first
-    // build() already happened before this resolves - assigning outside
-    // setState (as this used to) means the AppBar's DropdownButton never
-    // gets told to rebuild with the real value, and keeps showing its
-    // initial (blank) state until some unrelated rebuild happens to occur
-    // later. Release builds batch/skip more of those incidental rebuilds
-    // than debug does, which is why this only showed as a blank dropdown
-    // title in release.
-    setState(() {
-      selectedTopValue = selectedValue;
-    });
-    _fetchOrderDetail(selectedTopValue?.stockItemMasterId ?? stockItemMasterId);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
-  }
-
   @override
   Widget build(BuildContext context) {
+    ref.watch(partyClickedSalePurcOrderClickedNotifierProvider(_args));
+    final vm = _s;
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.party),
       key: _scaffoldKey,
@@ -747,18 +481,7 @@ class _PartyClickedSalePurcOrderClickedPageState
 
           actions: [
             IconButton(
-              onPressed: () {
-                counter++;
-                if (counter % 2 == 0) {
-                  setState(() {
-                    _isSearchViewVisible = false;
-                  });
-                } else {
-                  setState(() {
-                    _isSearchViewVisible = true;
-                  });
-                }
-              },
+              onPressed: _notifier.toggleSearchView,
               icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
             // Sort now lives in the app bar (standard Material/iOS
@@ -768,12 +491,12 @@ class _PartyClickedSalePurcOrderClickedPageState
             // (greyed out) rather than hidden when there's nothing to sort,
             // so its position doesn't jump around as data loads.
             IconButton(
-              onPressed: isSortVisible
+              onPressed: vm.isSortVisible
                   ? () => _showSelectionWindow(context)
                   : null,
               icon: Icon(
                 Icons.sort_rounded,
-                color: isSortVisible ? Colors.white : Colors.white38,
+                color: vm.isSortVisible ? Colors.white : Colors.white38,
                 size: 22,
               ),
             ),
@@ -802,7 +525,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (!item_list.isEmpty) {
+                          if (!vm.itemList.isEmpty) {
                             generateAndSharePDF_SalePurc();
                           }
                         },
@@ -833,7 +556,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                         onTap: () {
                           Navigator.pop(context);
 
-                          if (!item_list.isEmpty) {
+                          if (!vm.itemList.isEmpty) {
                             generateAndShareCSV_SalePurc();
                           }
                         },
@@ -901,7 +624,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                         padding: EdgeInsets.symmetric(horizontal: 12),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<Data>(
-                            value: selectedTopValue,
+                            value: vm.selectedTopValue,
                             isExpanded: true,
                             isDense: true,
                             icon: Icon(
@@ -921,12 +644,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                             ).colorScheme.surface,
                             underline: SizedBox(), // Remove default underline
                             onChanged: (newValue) {
-                              setState(() {
-                                selectedTopValue = newValue!;
-                              });
-                              _fetchOrderDetail(
-                                selectedTopValue!.stockItemMasterId,
-                              );
+                              _notifier.selectTopValue(newValue!);
                             },
                             items: dropdownItems.map((Data value) {
                               return DropdownMenuItem<Data>(
@@ -982,7 +700,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                           color: Theme.of(context).scaffoldBackgroundColor,
                           child: Column(
                             children: [
-                              if (_isSearchViewVisible) ...[
+                              if (vm.isSearchViewVisible) ...[
                                 Padding(
                                   padding: const EdgeInsets.only(
                                     left: 12,
@@ -993,25 +711,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                                     height: 46,
                                     child: TextField(
                                       controller: searchController,
-                                      onChanged: (value) {
-                                        if (value.isEmpty) {
-                                          setState(() {
-                                            filteredItems = item_list;
-                                          });
-                                        } else {
-                                          setState(() {
-                                            filteredItems = item_list.where((
-                                              item,
-                                            ) {
-                                              // Filter items based on the search query and the ledgerName property
-                                              final query = value.toLowerCase();
-                                              return item.orderno
-                                                  .toLowerCase()
-                                                  .contains(query);
-                                            }).toList();
-                                          });
-                                        }
-                                      },
+                                      onChanged: _notifier.filter,
                                       style: GoogleFonts.poppins(
                                         fontSize: 13.5,
                                         color: Theme.of(
@@ -1071,7 +771,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                                 ),
                               ],
 
-                              if (isVisibleNoDataFound)
+                              if (vm.isVisibleNoDataFound)
                                 SizedBox(
                                   height:
                                       MediaQuery.of(context).size.height * 0.5,
@@ -1104,7 +804,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                                 ),
 
                               Visibility(
-                                visible: _isListVisible,
+                                visible: vm.isListVisible,
                                 child: Expanded(
                                   child: ListView.builder(
                                     controller: _scrollController,
@@ -1112,9 +812,9 @@ class _PartyClickedSalePurcOrderClickedPageState
                                       horizontal: 16,
                                       vertical: 12,
                                     ),
-                                    itemCount: filteredItems.length,
+                                    itemCount: vm.filteredItems.length,
                                     itemBuilder: (context, index) {
-                                      final card = filteredItems[index];
+                                      final card = vm.filteredItems[index];
 
                                       return Container(
                                         margin: EdgeInsets.only(bottom: 7),
@@ -1279,7 +979,7 @@ class _PartyClickedSalePurcOrderClickedPageState
             ],
           ),
 
-          if (_isLoading)
+          if (vm.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
