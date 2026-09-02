@@ -1,19 +1,15 @@
-import 'dart:convert';
 import 'package:FincoreGo/Dashboard.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'widgets/entry_widgets.dart';
 import 'ModifySalesOrderEntry.dart';
 import 'SalesOrderRegistration.dart';
-import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
-import 'api/voucher_entry_repository.dart';
-import 'api/voucher_type_repository.dart';
-import 'api/api_exception.dart';
+import 'providers/pending_sales_order_entry_notifier.dart';
 
 /// Wraps one tally-api `VoucherEntry` (see `VoucherEntryRepository`) for this
 /// screen's list/card UI. [data] is populated with the same legacy field
@@ -105,91 +101,28 @@ class SalesOrderModel {
   }
 }
 
-class PendingSalesOrderEntry extends StatefulWidget {
+class PendingSalesOrderEntry extends ConsumerStatefulWidget {
   const PendingSalesOrderEntry({Key? key}) : super(key: key);
   @override
-  _PendingSalesOrderEntryPageState createState() =>
+  ConsumerState<PendingSalesOrderEntry> createState() =>
       _PendingSalesOrderEntryPageState();
 }
 
-class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
+class _PendingSalesOrderEntryPageState
+    extends ConsumerState<PendingSalesOrderEntry>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = false,
-      isVisibleNoSalesOrderEntryFound = false;
-
-  String rolename_fetched = "";
-
-  final List<SalesOrderModel> salesorderentries = [];
-  DateTime? selectedSingleDate;
-  DateTimeRange? selectedDateRange;
-
-  String name = "", email = "";
+  PendingSalesOrderEntryNotifier get _notifier =>
+      ref.read(pendingSalesOrderEntryNotifierProvider.notifier);
+  PendingSalesOrderEntryState get _s =>
+      ref.read(pendingSalesOrderEntryNotifierProvider);
 
   TextEditingController _searchController = TextEditingController();
-
-  List<SalesOrderModel> filteredSalesOrderEntries = [];
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
 
-  late SharedPreferences prefs;
-
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
   final Set<int> expandedCards = {};
-
-  bool get isVanSalesSerial {
-    final currentSerial = serial_no?.trim().toLowerCase();
-
-    if (currentSerial == null || currentSerial.isEmpty) {
-      return false;
-    }
-
-    return vanSalesSerialNo.any((s) => s.trim().toLowerCase() == currentSerial);
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    fetchSalesOrderEntries();
-  }
 
   Future<void> _showConfirmationDialogAndNavigate(
     BuildContext context,
@@ -316,159 +249,25 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
   }
 
   Future<void> entrydelete(int id) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final match = salesorderentries.firstWhere((e) => e.id == id);
-      await VoucherEntryRepository.instance.remove(match.entryId);
+    final error = await _notifier.entrydelete(id);
+    if (error != null) {
+      showAppMessage(context, error);
+    } else {
       showAppMessage(context, "Entry deleted successfully");
-      await fetchSalesOrderEntries();
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
-  /// tally-api's `/voucher-entries` has no `type=`/`vchName=` server-side
-  /// filter (unlike the legacy `getEntries` endpoint), so this narrows the
-  /// full list client-side instead: match `voucherTypeMasterId` against
-  /// whichever voucher type(s) resolve from Tally's own `'Sales Order'`
-  /// `reservedName` (`VoucherTypeRepository.byReservedName`, same
-  /// stability rationale the registration screens already use), and, when
-  /// `spectra_allocations`' `salesorder_voucher_type` names a specific
-  /// custom voucher type, additionally match `voucherTypeName` against it -
-  /// mirroring the legacy `type=sales order&vchName=...` combination.
+  /// Widget-side wrapper - the fetch/filter/sort logic moved verbatim into
+  /// `PendingSalesOrderEntryNotifier.fetchSalesOrderEntries`.
   Future<void> fetchSalesOrderEntries() async {
-    setState(() {
-      _isLoading = true;
-    });
-    final prefs = await SharedPreferences.getInstance();
-
-    String? voucherTypeName;
-
-    final String? spectraAllocationsString = prefs.getString(
-      'spectra_allocations',
-    );
-
-    if (spectraAllocationsString != null &&
-        spectraAllocationsString.isNotEmpty) {
-      final List<dynamic> spectraAllocations = jsonDecode(
-        spectraAllocationsString,
-      );
-
-      if (spectraAllocations.isNotEmpty) {
-        voucherTypeName = spectraAllocations.first['salesorder_voucher_type'];
-      }
-    }
-
-    try {
-      final salesOrderVoucherTypes = await VoucherTypeRepository.instance
-          .byReservedName('SALES_ORDER');
-      final allowedMasterIds = salesOrderVoucherTypes
-          .map((v) => v['masterId'])
-          .toSet();
-
-      final entries = await VoucherEntryRepository.instance.listAll();
-
-      final matching = entries.where((e) {
-        if (!allowedMasterIds.contains(e['voucherTypeMasterId'])) {
-          return false;
-        }
-        if (voucherTypeName != null && voucherTypeName!.trim().isNotEmpty) {
-          return (e['voucherTypeName'] ?? '').toString() == voucherTypeName;
-        }
-        return true;
-      }).toList();
-
-      salesorderentries.clear();
-      filteredSalesOrderEntries.clear();
-
-      int seq = 0;
-      salesorderentries.addAll(
-        matching.map((e) => SalesOrderModel.fromEntry(e, seq++)),
-      );
-
-      salesorderentries.sort((a, b) {
-        DateTime dateA = DateTime.parse(a.data['DATE']);
-        DateTime dateB = DateTime.parse(b.data['DATE']);
-        if (dateA != dateB) return dateB.compareTo(dateA);
-        final vchA =
-            int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        final vchB =
-            int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        return vchB.compareTo(vchA);
-      });
-
-      filteredSalesOrderEntries = List.from(salesorderentries);
-
-      setState(() {
-        FocusManager.instance.primaryFocus?.unfocus();
-        _searchController.clear();
-        selectedSingleDate = null;
-        selectedDateRange = null;
-        isVisibleNoSalesOrderEntryFound = filteredSalesOrderEntries.isEmpty;
-        _isLoading = false;
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-      setState(() {
-        if (filteredSalesOrderEntries.isEmpty) {
-          isVisibleNoSalesOrderEntryFound = true;
-        }
-        _isLoading = false;
-      });
-    } catch (e) {
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-      setState(() {
-        if (filteredSalesOrderEntries.isEmpty) {
-          isVisibleNoSalesOrderEntryFound = true;
-        }
-        _isLoading = false;
-      });
-    }
+    final error = await _notifier.fetchSalesOrderEntries();
+    if (error != null) showAppMessage(context, error);
+    FocusManager.instance.primaryFocus?.unfocus();
+    _searchController.clear();
   }
 
   void searchSalesOrder(String query) {
-    _applyFilters();
-  }
-
-  void _applyFilters() {
-    final query = _searchController.text.trim().toLowerCase();
-
-    setState(() {
-      filteredSalesOrderEntries = salesorderentries.where((entry) {
-        final data = entry.data;
-
-        final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
-        final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
-        final vchtype = (data['VOUCHERTYPENAME'] ?? '')
-            .toString()
-            .toLowerCase();
-        final amount = (data['totalAmount'] ?? '').toString().toLowerCase();
-
-        final bool matchesSearch =
-            query.isEmpty ||
-            party.contains(query) ||
-            vchno.contains(query) ||
-            vchtype.contains(query) ||
-            amount.contains(query);
-
-        final bool matchesDate = _matchesDateFilter(entry);
-
-        return matchesSearch && matchesDate;
-      }).toList();
-
-      isVisibleNoSalesOrderEntryFound = filteredSalesOrderEntries.isEmpty;
-    });
+    _notifier.searchSalesOrder(query);
   }
 
   Future<void> _pickSingleDate() async {
@@ -476,7 +275,7 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
 
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: selectedSingleDate ?? DateTime.now(),
+      initialDate: _s.selectedSingleDate ?? DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
       builder: (context, child) {
@@ -505,12 +304,7 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
     );
 
     if (pickedDate != null) {
-      setState(() {
-        selectedSingleDate = pickedDate;
-        selectedDateRange = null;
-      });
-
-      _applyFilters();
+      _notifier.setSingleDateFilter(pickedDate);
     }
   }
 
@@ -521,7 +315,7 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
       context: context,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
-      initialDateRange: selectedDateRange,
+      initialDateRange: _s.selectedDateRange,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -590,85 +384,33 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
     );
 
     if (pickedRange != null) {
-      setState(() {
-        selectedDateRange = pickedRange;
-        selectedSingleDate = null;
-      });
-
-      _applyFilters();
+      _notifier.setDateRangeFilter(pickedRange);
     }
   }
 
   void _clearDateFilter() {
-    setState(() {
-      selectedSingleDate = null;
-      selectedDateRange = null;
-    });
-
-    _applyFilters();
+    _notifier.clearDateFilter();
   }
 
   String _getDateFilterText() {
+    final selectedSingleDate = _s.selectedSingleDate;
+    final selectedDateRange = _s.selectedDateRange;
     if (selectedSingleDate != null) {
-      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate!);
+      return DateFormat("dd-MMM-yyyy").format(selectedSingleDate);
     }
 
     if (selectedDateRange != null) {
-      final start = DateFormat("dd-MMM").format(selectedDateRange!.start);
-      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange!.end);
+      final start = DateFormat("dd-MMM").format(selectedDateRange.start);
+      final end = DateFormat("dd-MMM-yyyy").format(selectedDateRange.end);
       return "$start to $end";
     }
 
     return "All Dates";
   }
 
-  bool _matchesDateFilter(SalesOrderModel entry) {
-    final dateValue = entry.data['DATE'];
-
-    if (dateValue == null) return false;
-
-    final entryDate = DateTime.tryParse(dateValue.toString());
-
-    if (entryDate == null) return false;
-
-    final onlyEntryDate = DateTime(
-      entryDate.year,
-      entryDate.month,
-      entryDate.day,
-    );
-
-    if (selectedSingleDate != null) {
-      final selected = DateTime(
-        selectedSingleDate!.year,
-        selectedSingleDate!.month,
-        selectedSingleDate!.day,
-      );
-
-      return onlyEntryDate == selected;
-    }
-
-    if (selectedDateRange != null) {
-      final start = DateTime(
-        selectedDateRange!.start.year,
-        selectedDateRange!.start.month,
-        selectedDateRange!.start.day,
-      );
-
-      final end = DateTime(
-        selectedDateRange!.end.year,
-        selectedDateRange!.end.month,
-        selectedDateRange!.end.day,
-      );
-
-      return onlyEntryDate.isAtSameMomentAs(start) ||
-          onlyEntryDate.isAtSameMomentAs(end) ||
-          (onlyEntryDate.isAfter(start) && onlyEntryDate.isBefore(end));
-    }
-
-    return true;
-  }
-
   Widget _buildDateFilterSection() {
+    final selectedSingleDate = _s.selectedSingleDate;
+    final selectedDateRange = _s.selectedDateRange;
     final bool hasDateFilter =
         selectedSingleDate != null || selectedDateRange != null;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -822,7 +564,9 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
+    // Trigger provider creation (and its _init()) eagerly, matching the
+    // original's initState-time kickoff.
+    _notifier;
   }
 
   Future<void> _refresh() async {
@@ -833,6 +577,13 @@ class _PendingSalesOrderEntryPageState extends State<PendingSalesOrderEntry>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(pendingSalesOrderEntryNotifierProvider);
+    final vm = _s;
+    final salesorderentries = vm.salesOrderEntries;
+    final filteredSalesOrderEntries = vm.filteredSalesOrderEntries;
+    final isVisibleNoSalesOrderEntryFound = vm.isVisibleNoSalesOrderEntryFound;
+    final _isLoading = vm.isLoading;
+    final serial_no = vm.serialNo;
     return WillPopScope(
       onWillPop: () async {
         Navigator.pushReplacement(
