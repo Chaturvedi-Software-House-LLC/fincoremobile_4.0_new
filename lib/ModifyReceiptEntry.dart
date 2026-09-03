@@ -2,11 +2,11 @@ import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/constants.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'Dashboard.dart';
 import 'PendingReceiptEntry.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -16,13 +16,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
-import 'api/api_exception.dart';
-import 'api/currency_repository.dart';
-import 'api/group_repository.dart';
-import 'api/ledger_repository.dart';
-import 'api/monthly_bucket_helper.dart' show parseCompactDate;
-import 'api/voucher_entry_repository.dart';
-import 'api/voucher_type_repository.dart';
+import 'providers/modify_receipt_entry_notifier.dart';
 
 // Migration note (legacy Node backend -> tally-api): this screen used to
 // receive `id`/`isSynced`/`type` alongside the raw Tally-XML-shaped `data`
@@ -38,7 +32,7 @@ import 'api/voucher_type_repository.dart';
 //     VoucherEntryRepository.instance.listAll()/getById() (camelCase
 //     fields, nested `ledgerEntries[].billAllocations`/`bankAllocations`
 //     with resolved `ledgerName`s) - see voucher-entry.schema.ts.
-class ModifyReceiptEntry extends StatefulWidget {
+class ModifyReceiptEntry extends ConsumerStatefulWidget {
   final String voucherEntryId;
   final Map<String, dynamic> data;
   const ModifyReceiptEntry({
@@ -46,10 +40,8 @@ class ModifyReceiptEntry extends StatefulWidget {
     required this.data,
   });
   @override
-  _ModifyReceiptEntryPageState createState() => _ModifyReceiptEntryPageState(
-    voucherEntryId: voucherEntryId,
-    data: data,
-  );
+  ConsumerState<ModifyReceiptEntry> createState() =>
+      _ModifyReceiptEntryPageState();
 }
 
 class Bills {
@@ -87,34 +79,16 @@ class Cheque {
   });
 }
 
-class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
-    with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = true,
-      isVisibleNoUserFound = false;
+class _ModifyReceiptEntryPageState extends ConsumerState<ModifyReceiptEntry> {
+  late final _args = ModifyReceiptEntryArgs(
+    id: widget.voucherEntryId,
+    data: widget.data,
+  );
 
-  bool _isInitialDataLoaded = false;
-
-  String voucherEntryId;
-  Map<String, dynamic> data;
-  _ModifyReceiptEntryPageState({
-    required this.voucherEntryId,
-    required this.data,
-  });
-
-  // tally-api's voucher-entries endpoint is masterId-keyed
-  // (voucherTypeMasterId/ledgerMasterId/currencyMasterId), unlike legacy's
-  // update endpoint which took names straight from these same dropdowns -
-  // resolved from the maps loadData() populates. Mirrors
-  // ReceiptRegistration.dart's own fields of the same name.
-  Map<String, int> _partyLedgerMasterIdByName = {};
-  Map<String, int> _bankCashLedgerMasterIdByName = {};
-  Map<String, int> _voucherTypeMasterIdByName = {};
-  int? _currencyMasterId;
+  ModifyReceiptEntryNotifier get _notifier =>
+      ref.read(modifyReceiptEntryNotifierProvider(_args).notifier);
+  ModifyReceiptEntryState get _s =>
+      ref.read(modifyReceiptEntryNotifierProvider(_args));
 
   TextEditingController _partyController = TextEditingController();
 
@@ -127,37 +101,18 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
   late final TextEditingController controller_narration =
       TextEditingController();
 
-  final FocusNode _textFieldFocusNodeNarration = FocusNode();
-
   final TextEditingController _vchnoController = TextEditingController();
 
-  double totalBillAmount = 0;
-
-  double totalChequeAmount = 0;
-
-  String errorMessageVchNo = '';
-
-  List<String> vchnos = [];
-
-  /// This entry's own voucher number as loaded by `loadData()` - excluded
-  /// from [vchnos] in `fetchvchnos()` so re-saving with the number
-  /// unchanged never flags itself as a duplicate.
-  String? _originalVoucherNumber;
-
-  bool isVchEditable = false; // state variable
-
-  late DateTime now = DateTime.now();
-
-  // Current year start date
-  late DateTime yearStartDate = DateTime(now.year, 1, 1);
-
-  // Current year end date
-  late DateTime yearEndDate = DateTime(now.year, 12, 31);
+  /// `isVchEditable` is always false in the pre-migration source (the "edit
+  /// voucher number" button's `onPressed` is a no-op) - kept exactly as-is,
+  /// not fixed (see `modify_receipt_entry_notifier.dart`'s doc-comment).
+  bool isVchEditable = false;
 
   Future<void> _selectDateRangeVchNo(BuildContext context) async {
+    final vm = _s;
     final initialDateRange = DateTimeRange(
-      start: yearStartDate,
-      end: yearEndDate,
+      start: vm.yearStartDate,
+      end: vm.yearEndDate,
     );
 
     DateTimeRange? selectedDateRange = await showDateRangePicker(
@@ -189,153 +144,32 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     );
 
     if (selectedDateRange != null && selectedDateRange != initialDateRange) {
-      setState(() {
-        yearStartDate = selectedDateRange.start;
-        yearEndDate = selectedDateRange.end;
-      });
-
-      fetchvchnos(_selectedvchtypename);
+      _notifier.setVchNoDateRange(
+        selectedDateRange.start,
+        selectedDateRange.end,
+      );
+      fetchvchnos(_s.selectedVchTypeName);
     }
   }
 
   void checkVchNoExistence(String vchNo) {
-    if (vchNo.isEmpty || vchNo == '') {
-      setState(() {
-        errorMessageVchNo = 'Voucher No. cannot be empty';
-      });
-    } else {
-      if (vchnos.contains(vchNo)) {
-        setState(() {
-          errorMessageVchNo =
-              'Voucher no: $vchNo against $_selectedvchtypename already exists';
-        });
-      } else {
-        setState(() {
-          errorMessageVchNo = '';
-        });
-      }
-    }
+    _notifier.checkVchNoExistence(vchNo);
   }
 
-  /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
-  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
-  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
-  /// `Voucher.number`s for this vchtype/date-range, replacing the earlier
-  /// client-side-only approach (`listAll()` + filter) that only ever saw
-  /// this app's own drafts. This entry's own [_originalVoucherNumber] is
-  /// excluded (one occurrence) so re-saving with it unchanged never flags
-  /// itself as a duplicate.
+  /// Thin wrapper around [ModifyReceiptEntryNotifier.fetchVchNos] - the
+  /// original also conditionally called [checkVchNoExistence] afterward
+  /// when `isVchEditable` (always false), kept here unchanged.
   Future<void> fetchvchnos(String vchname) async {
-    // Format the dates as yyyyMMdd
-    String formattedStartDateVchNo = DateFormat(
-      'yyyyMMdd',
-    ).format(yearStartDate);
-    String formattedEndDateVchNo = DateFormat('yyyyMMdd').format(yearEndDate);
-
-    vchnos.clear();
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
-
-      if (voucherTypeMasterId != null) {
-        final DateTime startDate = parseCompactDate(formattedStartDateVchNo);
-        final DateTime endDate = parseCompactDate(formattedEndDateVchNo);
-        final String fromParam = DateFormat('yyyy-MM-dd').format(startDate);
-        final String toParam = DateFormat('yyyy-MM-dd').format(endDate);
-
-        final fetched = await VoucherEntryRepository.instance.voucherNumbers(
-          voucherTypeMasterId: voucherTypeMasterId,
-          from: fromParam,
-          to: toParam,
-        );
-
-        vchnos = List<String>.from(fetched);
-        final ownNumber = _originalVoucherNumber;
-        if (ownNumber != null) {
-          final ownIndex = vchnos.indexOf(ownNumber);
-          if (ownIndex != -1) vchnos.removeAt(ownIndex);
-        }
-      }
-
-      setState(() {
-        int q = vchnos.length;
-        print('vchno list containes $q nos whos values are $vchnos');
-
-        if (isVchEditable) {
-          checkVchNoExistence(_vchnoController.text);
-        }
-      });
-    } on ApiException catch (e) {
-      vchnos.clear();
-      showAppMessage(context, e.message);
-    } catch (e) {
-      vchnos.clear();
-      print(e);
+    final error = await _notifier.fetchVchNos(vchname);
+    if (error != null && mounted) {
+      showAppMessage(context, error);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  String formatChequeAmount(double amount) {
-    String amountstring = '0';
-
-    amount = -amount;
-
-    amountstring = amount.toString();
-
-    return amountstring;
-  }
-
-  double _entryAmount(dynamic value) {
-    if (value == null) return 0;
-    if (value is num) return value.toDouble();
-    return double.tryParse(value.toString().replaceAll(',', '')) ?? 0;
-  }
-
-  List<dynamic> _entryList(dynamic value) {
-    if (value is List) return value;
-    return const [];
-  }
-
-  // tally-api's voucher-entry rows tag each ledger entry with an explicit
-  // `isPartyLedger` boolean (unlike legacy's Tally-XML shape, which had to
-  // be inferred from LEDGERNAME/BILLALLOCATIONS.LIST/ISPARTYLEDGER
-  // fallbacks) - the party ledger entry is always the one carrying
-  // billAllocations, so both finders key off that single flag now.
-  Map<String, dynamic>? _findBillLedgerEntry(List<dynamic> ledgerEntries) {
-    for (final entry in ledgerEntries) {
-      if (entry is Map<String, dynamic> && entry['isPartyLedger'] == true) {
-        return entry;
-      }
+    if (isVchEditable) {
+      checkVchNoExistence(_vchnoController.text);
     }
-    return null;
   }
-
-  Map<String, dynamic>? _findBankLedgerEntry(List<dynamic> ledgerEntries) {
-    for (final entry in ledgerEntries) {
-      if (entry is Map<String, dynamic> && entry['isPartyLedger'] == false) {
-        return entry;
-      }
-    }
-    return null;
-  }
-
-  late List<String> vchtypenamedata = [];
-
-  bool isVisibleBillHeading = false,
-      isVisibleChequeHeading = false,
-      isChequeVisible = false;
 
   final _formKey = GlobalKey<FormState>();
-
-  late String _selectedvchtypename = '';
-
-  String selectedbankname = '';
 
   bool isInstNoRepeated(String instNo, List<Cheque> cheques) {
     if (instNo.isNotEmpty) {
@@ -352,131 +186,65 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
   GlobalKey<FormState> _chequedetailsFormkey = GlobalKey<FormState>();
 
-  double roundedtotalVatAmount = 0.0;
+  String selectedbankname = '';
 
-  double roundedtotalBillAmount = 0.0;
+  // ---- read-only aliases/getters delegating to the notifier's state -----
+  List<String> get vchtypenamedata => _s.vchTypeNameData;
+  List<String> get partydata => _s.partyData;
+  List<Map<String, String>> get bankcashname_data => _s.bankCashNameData;
+  List<String> get paymentmode_data => _s.paymentModeData;
+  List<String> get bankname_data => _s.bankNameData;
 
-  double roundedtotalChequeAmount = 0.0;
+  List<Bills> get bills => _s.bills;
+  List<Cheque> get cheque => _s.cheque;
 
-  List<Map<String, String>> bankcashname_data = [];
+  double get totalBillAmount => _s.totalBillAmount;
+  double get roundedtotalBillAmount => _s.roundedTotalBillAmount;
+  double get totalChequeAmount => _s.totalChequeAmount;
+  double get roundedtotalChequeAmount => _s.roundedTotalChequeAmount;
 
-  List<String> paymentmode_data = [];
+  bool get isVisibleBillHeading => _s.isVisibleBillHeading;
+  bool get isVisibleChequeHeading => _s.isVisibleChequeHeading;
+  bool get isChequeVisible => _s.isChequeVisible;
+  bool get isPaymentModeVisible => _s.isPaymentModeVisible;
 
-  bool isPaymentModeVisible = false;
+  bool get _isLoading => _s.isLoading;
+  bool get _isInitialDataLoaded => _s.isInitialDataLoaded;
 
-  int decimal = 2;
+  String? get company => _s.company;
+  String? get serial_no => _s.serialNo;
+  String get currencycode => _s.currencyCode;
+  int get decimal => _s.decimal;
 
-  late List<String> partydata = [];
+  DateTime get receiptdate => _s.receiptDate;
+  String get receiptdatestring => _s.receiptDateString;
+  String get receiptdatetxt => _s.receiptDateText;
 
-  List<String> bankname_data = [
-    'Not Applicable',
-    "RAK Bank (UAE)",
-    "Mashreq Bank (UAE)",
-    "National Bank of Abu Dhabi (UAE)",
-    "ADCB (UAE)",
-    "Arab Bank (UAE)",
-    "Commercial Bank of Dubai (UAE)",
-    "Emirates NBD (UAE)",
-    "Habib Bank AG Zurich (UAE)",
-    "National Bank of Fujairah (UAE)",
-    "Standard Chartered Bank (UAE)",
-    "Bank of Baroda (UAE)",
-    "HSBC Bank (UAE)",
-    "Union National Bank (UAE)",
-    "United Arab Bank (UAE)",
-    "Al Ahli Bank of Kuwait (UAE)",
-    "Noor Islamic Bank (UAE)",
-    "Emirates Bank (UAE)",
-    "Emirates Islamic Bank (UAE)",
-    "United Bank Ltd. (UAE)",
-    "Dubai Islamic Bank (UAE)",
-    "ADIB (UAE)",
-    "Bank of Sharjah (UAE)",
-    "Blom Bank France (UAE)",
-    "First Gulf Bank (UAE)",
-    "Invest Bank (UAE)",
-    "Habib Bank Limited (UAE)",
-    "Oman Arab Bank (UAE)",
-    "NBAD(UAE)",
-    "NCB Bank(UAE)",
-    "NBQ Bank (UAE)",
-    "HBL Bank (UAE)",
-    "Al Hilal Bank(UAE)",
-    "FGB (UAE)",
-    "Sharjah Islamic Bank(UAE)",
-    "Noor Bank(UAE)",
-    "CBI - Commercial Bank International (UAE)",
-    "Janata Bank Ltd (UAE)",
-    "Ajman Bank (UAE)",
-    "Bank Melli Iran (UAE)",
-    "FAB - First Abu Dhabi Bank (UAE)",
-    "Citi Bank (UAE)",
-    "The Saudi British Bank (UAE)",
-    "BNP Paribas (UAE)",
-    "Arab African International Bank (UAE)",
-    "AL Masraf (UAE)",
-    "Banque Misr (UAE)",
-    "Samba Financial Group (UAE)",
-  ];
+  DateTime get yearStartDate => _s.yearStartDate;
+  DateTime get yearEndDate => _s.yearEndDate;
+
+  String get _selectedvchtypename => _s.selectedVchTypeName;
+  dynamic get _selectedparty => _s.selectedParty;
+  Map<String, String>? get _selectedbankcashname => _s.selectedBankCashName;
+  dynamic get _selectedpaymentmode => _s.selectedPaymentMode;
+
+  String get errorMessageVchNo => _s.errorMessageVchNo;
+  List<String> get vchnos => _s.vchNos;
+
+  bool get isSelectedBankCashInHand => _notifier.isSelectedBankCashInHand;
 
   List<String> billsdata = ['On Account', 'New Ref', 'Agst Ref'];
 
-  String user_email_fetched = "", token = '';
-
   bool isVisibleDueDate = false, isVisibleBillNo = false;
 
-  String name = "",
-      email = "",
-      receiptdatestring = '',
-      receiptdatetxt = '',
-      instdatestring = '',
-      instdatetxt = '',
-      currencycode = '',
-      billduedatestring = '',
-      billduedatetxt = '';
+  String instdatestring = '', instdatetxt = '';
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  late SharedPreferences prefs;
-
-  dynamic _selectedbill, _selectedparty;
-
-  Map<String, String>? _selectedbankcashname;
-
-  // The 'type' value comes straight from the synced Tally ledger's
-  // ledgroup column (backend entry.js), so its exact casing/spacing can
-  // vary per company (e.g. "Cash-in-hand" vs "Cash-in-Hand") even though
-  // MySQL's case-insensitive collation lets it through the same
-  // "ledgroup in (...)" filter - normalize before comparing instead of
-  // an exact string match.
-  bool get isSelectedBankCashInHand {
-    final type = _selectedbankcashname?['type']
-        ?.toString()
-        .trim()
-        .toLowerCase()
-        .replaceAll('-', ' ');
-
-    return type == 'cash in hand';
-  }
-
-  late dynamic _selectedpaymentmode = '';
+  dynamic _selectedbill;
 
   late final TextEditingController controller_totalamt =
       TextEditingController();
-
-  void updateChequeAmount() {
-    totalChequeAmount = cheque.fold(0.0, (
-      double previousAmount,
-      Cheque cheque,
-    ) {
-      return previousAmount + cheque.chequeAmount;
-    });
-    // Update formatted total amount
-    roundedtotalChequeAmount = double.parse(
-      totalChequeAmount.toStringAsFixed(decimal),
-    );
-    print('cheque amount $roundedtotalChequeAmount');
-  }
 
   String getCurrencySymbol(String currencyCode) {
     NumberFormat format;
@@ -528,23 +296,9 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     return double.tryParse(s) != null;
   }
 
-  String? hostname = "",
-      company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
-  late DateTime receiptdate;
-  late DateTime billduedate;
-  late DateTime instdate;
+  late DateTime instdate = DateTime.now();
 
   final DateFormat _dateFormat = DateFormat('yyyyMMdd');
-
-  List<Bills> bills = [];
-
-  List<Cheque> cheque = [];
 
   final TextEditingController billAmountController = TextEditingController();
   final TextEditingController _dateController = TextEditingController();
@@ -553,124 +307,28 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
   final TextEditingController instNoController = TextEditingController();
   final TextEditingController chequeAmountController = TextEditingController();
 
-  void _confirmBillDeletion(
-    BuildContext context,
-    int index,
-    String billname,
-    String billamount,
-  ) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Confirm Deletion'),
-          content: Text('Do you really want to delete $billname bill?'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(); // Dismiss the dialog
-              },
-              child: Text(
-                'No',
-                style: GoogleFonts.poppins(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurfaceVariant, // Change the text color here
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(); // Dismiss the dialog
-                _deleteBill(index);
-              },
-              child: Text(
-                'Yes',
-                style: GoogleFonts.poppins(
-                  color: app_color, // Change the text color here
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
+  /// Verbatim port of `_deleteBill`'s confirmation-free delete (the
+  /// `_confirmBillDeletion` dialog wrapper that used to exist around this
+  /// had zero call sites and was dropped - see this screen's notifier
+  /// doc-comment). The data mutation (including the cascading
+  /// cheque/payment-mode reset) now lives in
+  /// [ModifyReceiptEntryNotifier.deleteBill]; this wrapper only resets the
+  /// widget-local "Add Cheque" dialog controllers when bills end up empty,
+  /// exactly like the original's `setState` did.
   void _deleteBill(int index) {
-    setState(() {
-      bills.removeAt(index);
-      // Calculate the total price of items
-      totalBillAmount = bills.fold(0.0, (double previousAmount, Bills bill) {
-        return previousAmount + bill.billAmount;
-      });
+    _notifier.deleteBill(index);
+    controller_totalamt.text = _s.formattedTotalBillAmount;
 
-      roundedtotalBillAmount = double.parse(
-        totalBillAmount.toStringAsFixed(decimal),
-      );
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal}', 'en_US');
-      String formattedtotal = formatter.format(roundedtotalBillAmount);
-      controller_totalamt.text = formattedtotal.toString();
-
-      if (bills.isEmpty) {
-        isVisibleBillHeading = false;
-        isChequeVisible = false;
-        _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-        cheque.clear();
-        updateChequeAmount();
-        isPaymentModeVisible = false;
-        instNoController.clear();
-        selectedbankname = bankname_data.first;
-        _banknameController.text = selectedbankname;
-        chequeAmountController.clear();
-        instdate = DateTime.now();
-        instdatestring = _dateFormat.format(instdate);
-        instdatetxt = formatlastsaledate(instdatestring);
-        instDateController.text = instdatetxt;
-        isVisibleChequeHeading = false;
-      } else {
-        isVisibleBillHeading = true;
-        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
-          isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-          cheque.clear();
-          updateChequeAmount();
-
-          isVisibleChequeHeading = false;
-          isChequeVisible = false;
-        } else {
-          if (bills.isNotEmpty) {
-            if (cheque.isNotEmpty) {
-              isPaymentModeVisible = true;
-              isChequeVisible = true;
-              isVisibleChequeHeading = true;
-            } else {
-              isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-              cheque.clear();
-              updateChequeAmount();
-
-              isVisibleChequeHeading = false;
-              isChequeVisible = true;
-            }
-          } else {
-            isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-            cheque.clear();
-            updateChequeAmount();
-
-            isVisibleChequeHeading = false;
-            isChequeVisible = false;
-          }
-        }
-      }
-      if (roundedtotalBillAmount < roundedtotalChequeAmount) {
-        cheque.clear();
-        updateChequeAmount();
-
-        isVisibleChequeHeading = false;
-      }
-    });
+    if (bills.isEmpty) {
+      instNoController.clear();
+      selectedbankname = bankname_data.first;
+      _banknameController.text = selectedbankname;
+      chequeAmountController.clear();
+      instdate = DateTime.now();
+      instdatestring = _dateFormat.format(instdate);
+      instdatetxt = formatlastsaledate(instdatestring);
+      instDateController.text = instdatetxt;
+    }
   }
 
   String convertAmountToWords(num amount) {
@@ -859,8 +517,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
   }
 
   String formatAmountVoucher(String amount) {
-    int? decimal = prefs?.getInt('decimalplace') ?? 2;
-
     String amount_string = "";
     if (amount == "null" || amount.isEmpty) {
       amount = "0";
@@ -1961,6 +1617,11 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     }
   }
 
+  /// Thin wrapper around [ModifyReceiptEntryNotifier.updateEntry] - the
+  /// pre-save validation (party/bank-cash/empty-bills checks, which read
+  /// `context` via `showAppMessage`) and the trailing
+  /// `showReceiptVoucherUpdatedDialog` call on success stay here (pure UI),
+  /// exactly matching the original's structure.
   Future<void> updateEntry(String voucherEntryId) async {
     // ❌ Prevent save if party not selected
     if (_selectedparty == null || _selectedparty.toString().trim().isEmpty) {
@@ -1978,518 +1639,25 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
 
     if (bills.isEmpty) {
       showAppMessage(context, 'Atleast add 1 bill');
-    } else {
-      // tally-api's voucher-entries endpoint is masterId-keyed
-      // (voucherTypeMasterId/ledgerMasterId/currencyMasterId), unlike
-      // legacy's update endpoint which took names straight from these same
-      // dropdowns. Resolved from the maps loadData() populates - see
-      // ReceiptRegistration.dart's saveEntry() for the identical body shape
-      // (this screen sends the same shape on update, always rebuilding
-      // `ledgerEntries` wholesale rather than a partial header-only patch,
-      // since every field on this form - party, bank/cash ledger, bills,
-      // cheques - is re-editable here).
-      final int? partyLedgerMasterId =
-          _partyLedgerMasterIdByName[_selectedparty];
-      final int? bankCashLedgerMasterId =
-          _bankCashLedgerMasterIdByName[_selectedbankcashname!['name']];
-      final int? voucherTypeMasterId =
-          _voucherTypeMasterIdByName[_selectedvchtypename];
-
-      if (partyLedgerMasterId == null ||
-          bankCashLedgerMasterId == null ||
-          voucherTypeMasterId == null ||
-          _currencyMasterId == null) {
-        showAppMessage(
-          context,
-          'Master data not loaded yet - please try again',
-        );
-        return;
-      }
-
-      setState(() {
-        _isLoading = true;
-      });
-
-      final String narrationValue = controller_narration.text.trim();
-      final String vchnoValue = _vchnoController.text;
-      final String isoDate = DateFormat(
-        'yyyy-MM-dd',
-      ).format(parseCompactDate(receiptdatestring));
-
-      double roundedAmount(double amount) =>
-          double.parse(amount.toStringAsFixed(decimal));
-
-      // Get the list of non-"On Account" bills
-      final List<Map<String, dynamic>> nonOnAccountBills = bills
-          .where((bill) => bill.billName != "On Account")
-          .map((bill) {
-            final Map<String, dynamic> billData = {
-              "billType": bill.billName,
-              "billName": bill.billNo ?? '',
-              "amount": roundedAmount(bill.billAmount),
-              "date": isoDate,
-            };
-
-            // Omit entirely rather than send an empty string when there's
-            // no valid due date - see ReceiptRegistration.dart for why an
-            // empty dueDate is a plausible cause of the Tally sync's bill
-            // matching failing and falling back to New Ref.
-            if (bill.billDueDate != null && bill.billDueDate!.isNotEmpty) {
-              billData["dueDate"] = DateFormat(
-                'yyyy-MM-dd',
-              ).format(parseCompactDate(bill.billDueDate!));
-            }
-
-            return billData;
-          })
-          .toList();
-
-      // Get the list of "On Account" bills
-      final List<Map<String, dynamic>> onAccountBills = bills
-          .where((bill) => bill.billName == "On Account")
-          .map(
-            (bill) => <String, dynamic>{
-              "billType": bill.billName,
-              "billName": (bill.billNo?.isNotEmpty ?? false)
-                  ? bill.billNo!
-                  : "On Account",
-              "amount": roundedAmount(bill.billAmount),
-              "date": isoDate,
-            },
-          )
-          .toList();
-
-      // Combine the lists, placing "On Account" bills at the end
-      final List<Map<String, dynamic>> allBillAllocations = [
-        ...nonOnAccountBills,
-        ...onAccountBills,
-      ];
-
-      // Party ledger entry - credited (money received reduces what the
-      // party owes), matching ReceiptRegistration.dart's saveEntry().
-      final Map<String, dynamic> partyLedgerEntry = {
-        "ledgerMasterId": partyLedgerMasterId,
-        "amount": roundedAmount(totalBillAmount),
-        "isDebit": false,
-        "isPartyLedger": true,
-        "billAllocations": allBillAllocations,
-      };
-
-      // If the selected bank/cash type is not 'Cash-in-Hand', attach cheque
-      // details as bank allocations on the bank/cash ledger entry.
-      final List<Map<String, dynamic>> bankAllocations =
-          isSelectedBankCashInHand
-          ? const []
-          : cheque.map((c) {
-              // TRANSACTIONTYPE values match paymentmode_data 1:1
-              // (ATM/Card/Cheque-DD) onto entryBankAllocationRowSchema's
-              // bankTransactionTypeSchema enum (ATM/CARD/CHEQUE).
-              final String transactionType = switch (c.paymentMode) {
-                'ATM' => 'ATM',
-                'Card' => 'CARD',
-                _ => 'CHEQUE',
-              };
-              return <String, dynamic>{
-                "date": isoDate,
-                "instrumentDate": DateFormat('yyyy-MM-dd').format(
-                  parseCompactDate(c.instdate ?? receiptdatestring),
-                ),
-                "instrumentNumber": c.instno,
-                // The schema requires a non-empty bankName - "N/A" is sent
-                // for "Not Applicable" (ATM/Card), matching
-                // ReceiptRegistration.dart's saveEntry().
-                "bankName":
-                    (c.bankname != null && c.bankname != "Not Applicable")
-                    ? c.bankname!
-                    : "N/A",
-                "transactionType": transactionType,
-                "amount": roundedAmount(c.chequeAmount),
-                "partyLedgerMasterId": partyLedgerMasterId,
-                "favouringLedgerMasterId": partyLedgerMasterId,
-              };
-            }).toList();
-
-      // Bank/cash ledger entry - debited (asset increases), matching
-      // ReceiptRegistration.dart's saveEntry().
-      final Map<String, dynamic> bankLedgerEntry = {
-        "ledgerMasterId": bankCashLedgerMasterId,
-        "amount": roundedAmount(totalBillAmount),
-        "isDebit": true,
-        "isPartyLedger": false,
-        "bankAllocations": bankAllocations,
-      };
-
-      final Map<String, dynamic> body = {
-        "voucherTypeMasterId": voucherTypeMasterId,
-        "date": isoDate,
-        "currencyMasterId": _currencyMasterId,
-        "narration": narrationValue,
-        "voucherNumber": vchnoValue,
-        "ledgerEntries": [partyLedgerEntry, bankLedgerEntry],
-      };
-
-      try {
-        final updated = await VoucherEntryRepository.instance.update(
-          voucherEntryId,
-          body,
-        );
-        data = Map<String, dynamic>.from(updated);
-        showReceiptVoucherUpdatedDialog(context);
-      } on ApiException catch (e) {
-        showAppMessage(context, e.message);
-      } catch (e) {
-        showAppMessage(
-          context,
-          'Could not reach the server. Please try again.',
-        );
-        print(e);
-      }
+      return;
     }
-    setState(() {
-      _isLoading = false;
-    });
-  }
 
-  Future<void> loadData() async {
-    vchtypenamedata.clear();
-    partydata.clear();
-    bankcashname_data.clear();
-    bills.clear();
-    totalBillAmount = bills.fold(0.0, (double previousAmount, Bills bill) {
-      return previousAmount + bill.billAmount;
-    });
-    // Update formatted total amount
-    roundedtotalBillAmount = double.parse(
-      totalBillAmount.toStringAsFixed(decimal),
+    final error = await _notifier.updateEntry(
+      voucherEntryId,
+      narration: controller_narration.text,
+      vchno: _vchnoController.text,
     );
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal}', 'en_US');
-    String formattedtotal = formatter.format(roundedtotalBillAmount);
-    controller_totalamt.text = formattedtotal.toString();
-    cheque.clear();
-    updateChequeAmount();
 
-    billAmountController.clear();
-    chequeAmountController.clear();
-    instNoController.clear();
-    selectedbankname = bankname_data.first;
-    _banknameController.text = selectedbankname;
-    controller_totalamt.text = '0';
+    if (!mounted) return;
 
-    setState(() {
-      _isLoading = true;
-    });
-
-    // tally-api replacement for legacy's getReceiptData/:company/:serial
-    // bundle - master lists fetched individually via the shared
-    // repositories (GroupRepository/VoucherTypeRepository/
-    // CurrencyRepository/LedgerRepository), same classification approach
-    // as ReceiptRegistration.dart's loadData(), but going through those
-    // repos directly instead of raw TallyApiClient calls since they now
-    // exist. The entry being edited itself is NOT re-fetched here - it
-    // arrives via the constructor's `data` (server-shaped, same as
-    // VoucherEntryRepository.getById/listAll - see this file's top-level
-    // doc comment), matching how this screen was already navigated to
-    // without its own dedicated "load the entry" network call.
-    try {
-      final partyLedgers = await LedgerRepository.instance.listLedgers();
-
-      final groups = await GroupRepository.instance.listAll();
-      // Same reservedName set tally-api's own dashboard-reports uses to
-      // classify a ledger as "bank/cash" (see dashboard-reports.service.ts)
-      // - Tally's fixed reserved group names, not user-editable group names.
-      // tally-api's GroupReservedName enum (2026-08-21 schema-hardening
-      // migration) uses screaming-snake-case labels, not Tally's own
-      // mixed-case reservedName strings.
-      const bankCashReservedNames = {
-        'CASH',
-        'BANK',
-        'BANK_OD',
-      };
-      final groupReservedNameById = <int, String?>{
-        for (final g in groups) g['masterId'] as int: g['reservedName'] as String?,
-      };
-      final bankCashGroupIds = groupReservedNameById.entries
-          .where((e) => bankCashReservedNames.contains(e.value))
-          .map((e) => e.key)
-          .toSet();
-
-      final allLedgers = await LedgerRepository.instance.listAllLedgers();
-      final bankCashLedgers = allLedgers
-          .where((l) => bankCashGroupIds.contains(l['groupMasterId'] as int?))
-          .toList();
-
-      // Tally's own reserved voucher-type name for the Receipt family.
-      final receiptVoucherTypes = await VoucherTypeRepository.instance
-          .byReservedName('RECEIPT');
-
-      final currencies = await CurrencyRepository.instance.listAll();
-      final currencyRow = currencies.firstWhere(
-        (c) =>
-            (c['isoCurrencyCode'] as String?)?.toUpperCase() ==
-            currencycode.toUpperCase(),
-        orElse: () =>
-            currencies.isNotEmpty ? currencies.first : const <String, dynamic>{},
-      );
-
-      final List<dynamic> ledgerEntries = data['ledgerEntries'] is List
-          ? data['ledgerEntries'] as List<dynamic>
-          : const [];
-      final Map<String, dynamic>? partyLedgerEntry = _findBillLedgerEntry(
-        ledgerEntries,
-      );
-
-      String oldvchname = data['voucherTypeName']?.toString() ?? '';
-      String oldpartyledger =
-          partyLedgerEntry?['ledgerName']?.toString() ?? '';
-      String oldvchno = data['voucherNumber']?.toString() ?? '';
-      String oldnarration = data['narration']?.toString() ?? '';
-
-      setState(() {
-        _partyLedgerMasterIdByName = {
-          for (final l in partyLedgers)
-            l['name'] as String: l['masterId'] as int,
-        };
-        _bankCashLedgerMasterIdByName = {
-          for (final l in bankCashLedgers)
-            l['name'] as String: l['masterId'] as int,
-        };
-        _voucherTypeMasterIdByName = {
-          for (final vt in receiptVoucherTypes)
-            vt['name'] as String: vt['masterId'] as int,
-        };
-        _currencyMasterId = currencyRow['masterId'] as int?;
-
-        vchtypenamedata = receiptVoucherTypes
-            .map((vt) => vt['name'] as String)
-            .toList();
-
-        _selectedvchtypename =
-            oldvchname.isNotEmpty && vchtypenamedata.contains(oldvchname)
-            ? oldvchname
-            : (vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '');
-        if (_selectedvchtypename.isNotEmpty) {
-          fetchvchnos(_selectedvchtypename);
-        }
-        partydata = partyLedgers.map((l) => l['name'] as String).toList();
-        partydata.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-        _selectedparty = oldpartyledger;
-        _partyController.text = _selectedparty;
-
-        controller_narration.text = oldnarration;
-
-        _vchnoController.text = oldvchno;
-        _originalVoucherNumber = oldvchno;
-
-        bankcashname_data = bankCashLedgers.map((l) {
-          final reservedName =
-              groupReservedNameById[l['groupMasterId'] as int?];
-          return {
-            'name': l['name'] as String,
-            'type': reservedName == 'CASH' ? 'Cash-in-Hand' : 'Bank',
-          };
-        }).toList();
-
-        final bankLedgerEntry = _findBankLedgerEntry(ledgerEntries);
-        final ledgerNameToMatch = bankLedgerEntry?['ledgerName']?.toString();
-
-        Map<String, String>? selectedLedger;
-        if (ledgerNameToMatch != null && ledgerNameToMatch.isNotEmpty) {
-          try {
-            selectedLedger = bankcashname_data.firstWhere(
-              (item) => item['name'] == ledgerNameToMatch,
-            );
-          } catch (_) {
-            selectedLedger = null;
-          }
-        }
-
-        if (selectedLedger != null) {
-          _selectedbankcashname = selectedLedger;
-          _bankcashnameController.text = _selectedbankcashname!['name'] ?? "";
-        }
-
-        // Print the data from ledgerEntries
-        for (var entry in ledgerEntries) {
-          print(entry);
-        }
-
-        try {
-          final billAllocations = _entryList(
-            partyLedgerEntry?['billAllocations'],
-          );
-
-          for (final allocation in billAllocations) {
-            if (allocation is! Map) continue;
-
-            final billType = allocation['billType']?.toString() ?? 'Unknown';
-            final billAmount = _entryAmount(allocation['amount']).abs();
-
-            String? billNo;
-            String? billDueDate;
-
-            if (billType != 'On Account') {
-              billNo = allocation['billName']?.toString();
-              final dueDateIso = allocation['dueDate']?.toString();
-              if (dueDateIso != null && dueDateIso.isNotEmpty) {
-                billDueDate = DateFormat(
-                  'yyyyMMdd',
-                ).format(DateTime.parse(dueDateIso));
-              }
-            }
-
-            bills.add(
-              Bills(
-                billName: billType,
-                billAmount: billAmount,
-                billNo: billNo,
-                billDueDate: billDueDate,
-              ),
-            );
-          }
-        } catch (e) {
-          print(e);
-        }
-
-        try {
-          final bankAllocations = _entryList(
-            bankLedgerEntry?['bankAllocations'],
-          );
-          print('bank length ${bankAllocations.length}');
-
-          for (final allocation in bankAllocations) {
-            if (allocation is! Map) continue;
-
-            final instno = allocation['instrumentNumber']?.toString() ?? '';
-            final instDateIso = allocation['instrumentDate']?.toString();
-            final instdate = instDateIso != null && instDateIso.isNotEmpty
-                ? DateFormat('yyyyMMdd').format(DateTime.parse(instDateIso))
-                : null;
-            // "N/A" is what saveEntry()/updateEntry() send for "Not
-            // Applicable" (ATM/Card - see entryBankAllocationRowSchema's
-            // required bankName) - mapped back to the bankname_data option
-            // it originally came from.
-            final rawBankname = allocation['bankName']?.toString();
-            final bankname = rawBankname == 'N/A'
-                ? 'Not Applicable'
-                : rawBankname;
-            final chequeAmount = _entryAmount(allocation['amount']).abs();
-            // TRANSACTIONTYPE enum values map back onto paymentmode_data's
-            // exact strings (ATM/Card/Cheque-DD) - the reverse of
-            // updateEntry()'s own mapping.
-            final transactionType =
-                allocation['transactionType']?.toString() ?? '';
-            final paymentMode = switch (transactionType) {
-              'ATM' => 'ATM',
-              'CARD' => 'Card',
-              _ => 'Cheque/DD',
-            };
-            final dateIso = allocation['date']?.toString();
-            final date = dateIso != null && dateIso.isNotEmpty
-                ? DateFormat('yyyyMMdd').format(DateTime.parse(dateIso))
-                : receiptdatestring;
-
-            // paymentFavouring/bankPartyName are always the party ledger's
-            // own name (see the "Add Cheque" dialog handler further down,
-            // which sets both to `_selectedparty`) - the new schema stores
-            // only a `favouringLedgerMasterId`/`partyLedgerMasterId`
-            // (always the same party ledger as this receipt's own party),
-            // not a separate display name, so `_selectedparty` is used
-            // directly rather than resolving those ids back to a name.
-            cheque.add(
-              Cheque(
-                date: date,
-                paymentFavouring: _selectedparty,
-                bankPartyName: _selectedparty,
-                instno: instno,
-                instdate: instdate,
-                bankname: bankname,
-                chequeAmount: chequeAmount,
-                paymentMode: paymentMode,
-              ),
-            );
-          }
-        } catch (e) {
-          print(e);
-        }
-        int l = cheque.length;
-
-        print('cheque length $l');
-
-        if (cheque.isNotEmpty) {
-            _selectedpaymentmode = cheque.last.paymentMode;
-          } else {
-            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-            isPaymentModeVisible = false;
-          }
-
-          if (bills.isEmpty) {
-            isVisibleBillHeading = false;
-            isPaymentModeVisible = false;
-          } else {
-            isVisibleBillHeading = true;
-          }
-
-          if (_selectedbankcashname != null && isSelectedBankCashInHand) {
-            isPaymentModeVisible = false;
-            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-            cheque.clear();
-            updateChequeAmount();
-            isVisibleChequeHeading = false;
-            isChequeVisible = false;
-          } else {
-            if (bills.isNotEmpty) {
-              if (cheque.isNotEmpty) {
-                isPaymentModeVisible = true;
-                isChequeVisible = true;
-                isVisibleChequeHeading = true;
-              } else {
-                isPaymentModeVisible = true;
-                _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-                cheque.clear();
-                updateChequeAmount();
-
-                isVisibleChequeHeading = false;
-                isChequeVisible = true;
-              }
-            } else {
-              isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-              cheque.clear();
-              updateChequeAmount();
-
-              isVisibleChequeHeading = false;
-              isChequeVisible = true;
-            }
-          }
-
-          totalBillAmount = bills.fold(0.0, (
-            double previousAmount,
-            Bills bill,
-          ) {
-            return previousAmount + bill.billAmount;
-          });
-          roundedtotalBillAmount = double.parse(
-            totalBillAmount.toStringAsFixed(decimal),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal}',
-            'en_US',
-          );
-          String formattedtotal = formatter.format(roundedtotalBillAmount);
-          controller_totalamt.text = formattedtotal.toString();
-
-          updateChequeAmount();
-      });
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      /*print(e);*/
+    if (error != null) {
+      showAppMessage(context, error);
+      return;
     }
 
-    setState(() {
-      _isLoading = false;
-    });
+    showReceiptVoucherUpdatedDialog(context);
   }
+
 
   Future<void> _selectreceiptDate(BuildContext context) async {
     if (isUniGasSerial(serial_no)) {
@@ -2514,49 +1682,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       },
     );
     if (picked != null && picked != receiptdate) {
-      setState(() {
-        receiptdate = picked;
-        receiptdatestring = _dateFormat.format(receiptdate);
-        receiptdatetxt = formatlastsaledate(receiptdatestring);
-        _dateController.text = receiptdatetxt;
-
-        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
-          isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-          cheque.clear();
-          updateChequeAmount();
-          isVisibleChequeHeading = false;
-          isChequeVisible = false;
-        } else {
-          if (bills.isNotEmpty) {
-            if (cheque.isNotEmpty) {
-              isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-              cheque.clear();
-              updateChequeAmount();
-
-              isVisibleChequeHeading = false;
-              isChequeVisible = true;
-            } else {
-              isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-              cheque.clear();
-              updateChequeAmount();
-
-              isVisibleChequeHeading = false;
-              isChequeVisible = true;
-            }
-          } else {
-            isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-            cheque.clear();
-            updateChequeAmount();
-
-            isVisibleChequeHeading = false;
-            isChequeVisible = false;
-          }
-        }
-      });
+      _notifier.setReceiptDate(picked);
     }
   } // main receipt date
 
@@ -2586,362 +1712,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       });
     }
   }
-
-  /*Future<void> _selectbilldueDate(BuildContext context) async {
-
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: billduedate,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2101),
-      builder: (BuildContext context, Widget? child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme:  Theme.of(context).colorScheme.copyWith(
-              primary:  app_color,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null && picked != receiptdate)
-    {
-      setState(() {
-        billduedate = picked;
-        billduedatestring = _dateFormat.format(billduedate);
-        billduedatetxt = formatlastsaledate(billduedatestring);
-        _billduedateController.text = billduedatetxt;
-      });
-    }
-
-  }*/ // bill due date selection
-
-  /*Future<void> _showBillsDetailsPopup(BuildContext context) async {
-    setState(() {
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            titlePadding: EdgeInsets.zero,
-            title:
-            Column(
-              children: [
-                Container(
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  decoration: BoxDecoration(
-                    color: app_color,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                  ),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [Colors.white, Colors.white],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                        ),
-                        child: const Icon(Icons.receipt_long, color: app_color, size: 26),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Add Bill",
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-
-            content: SingleChildScrollView(
-              child: Form(
-                key: _billsFormkey,
-                child: Column(
-                  children: <Widget>[
-                    // 🔹 Bill Type Dropdown
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: "Bill Type",
-                        hintText: "Select Bill Type",
-                        labelStyle: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        hintStyle: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        prefixIcon: Container(
-                          margin: const EdgeInsets.all(8), // 👈 smaller margin
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Colors.indigo, Colors.cyan],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.book, color: Colors.white, size: 16), // 👈 smaller icon
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14), // 👈 slightly tighter radius
-                          borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(color: app_color, width: 1.3),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10, // 👈 tighter padding
-                        ),
-                      ),
-                      value: _selectedbill,
-                      items: billsdata.map((String value) {
-                        return DropdownMenuItem(
-                          value: value,
-                          child: Text(value, style: GoogleFonts.poppins(fontSize: 13)),
-                        );
-                      }).toList(),
-                      onChanged: (newValue) {
-                        setState(() {
-                          _selectedbill = newValue!;
-                          if (_selectedbill == 'New Ref' || _selectedbill == 'Agst Ref') {
-                            isVisibleDueDate = true;
-                            isVisibleBillNo = true;
-                          } else {
-                            isVisibleDueDate = false;
-                            isVisibleBillNo = false;
-                            billNoController.clear();
-                            _billduedateController.clear();
-                          }
-                          Navigator.of(context).pop();
-                          _billsFormkey = GlobalKey<FormState>();
-                          _showBillsDetailsPopup(context);
-                        });
-                      },
-                    ),
-
-
-                    // 🔹 Bill No
-                    Visibility(
-                      visible: isVisibleBillNo,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: TextFormField(
-                          controller: billNoController,
-                          validator: (value) => value!.isEmpty ? 'Please enter bill no' : null,
-                          decoration: InputDecoration(
-                            labelText: "Bill No",
-                            hintText: "Enter Bill No",
-                            labelStyle: GoogleFonts.poppins(
-                              fontSize: 12.5,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            hintStyle: GoogleFonts.poppins(
-                              fontSize: 12.5,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            prefixIcon: Container(
-                              margin: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [Colors.orange, Colors.deepOrangeAccent],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(Icons.confirmation_num_outlined, color: Colors.white, size: 20),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: BorderSide(color: app_color, width: 1.5),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // 🔹 Due Date
-                    Visibility(
-                      visible: isVisibleDueDate,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: TextFormField(
-                          controller: _billduedateController,
-                          validator: (value) {
-                            if (value!.isNotEmpty) {
-                              if (double.tryParse(value) == null) {
-                                return 'Invalid input, please enter a number';
-                              } else if (double.parse(value) < 0) {
-                                return 'Due date days cannot be negative';
-                              }
-                            }
-                            return null;
-                          },
-                          decoration: InputDecoration(
-                            labelText: "Due Date (days)",
-                            hintText: "Enter due date",
-                            labelStyle: GoogleFonts.poppins(
-                              fontSize: 13,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            hintStyle: GoogleFonts.poppins(
-                              fontSize: 13,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                            prefixIcon: Container(
-                              margin: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [Colors.pinkAccent, Colors.redAccent],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(Icons.calendar_today, color: Colors.white, size: 20),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: BorderSide(color: app_color, width: 1.5),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // 🔹 Amount
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: TextFormField(
-                        controller: billAmountController,
-                        keyboardType: TextInputType.number,
-                        validator: (value) {
-                          if (value!.isEmpty) return 'Please enter amount';
-                          if (!isNumeric(value)) return 'Enter valid amount';
-                          if (double.parse(value) == 0) return 'Amount should not be 0';
-                          return null;
-                        },
-                        decoration: InputDecoration(
-                          labelText: "Amount",
-                          hintText: "0",
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          hintStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          prefix: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.green, Colors.teal], // ✅ distinct from Ledger
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(8)),
-                            ),
-                            child: currencySymbolWidget(
-                              currencycode,
-                              getCurrencySymbol(currencycode),
-                              GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _selectedbill = billsdata.first;
-                  isVisibleDueDate = _selectedbill == 'New Ref' || _selectedbill == 'Agst Ref';
-                  isVisibleBillNo = isVisibleDueDate;
-                  _billduedateController.clear();
-                  billAmountController.clear();
-                },
-                child: Text('Cancel',
-                  style: GoogleFonts.poppins(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-              ),
-
-              // ✅ Premium Add Bill button
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: app_color,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
-                onPressed: () {
-                  if (_billsFormkey.currentState!.validate()) {
-                    _billsFormkey.currentState!.save();
-                    addBill();
-                  }
-                },
-                child: Text("Add Bill",
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      );
-    });
-  }*/
 
   Future<void> _showBillsDetailsPopup(BuildContext context) async {
     setState(() {
@@ -3520,365 +2290,6 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       );
     });
   }
-
-  /* Future<void> _showChequeDetailsPopup(BuildContext context) async {
-    setState(() {
-      showDialog(
-        context: context,
-          builder: (BuildContext context) {
-            return StatefulBuilder(
-              builder: (context, setStateDialog) {
-                return AlertDialog(
-            titlePadding: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-
-            title:
-
-            Column(
-              children: [
-                Container(
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  decoration: BoxDecoration(
-                    color: app_color,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                  ),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [Colors.white, Colors.white],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                        ),
-                        child: const Icon(Icons.payment, color: app_color, size: 26),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "$_selectedpaymentmode Details",
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-
-
-            content: SingleChildScrollView(
-              child: Form(
-                key: _chequedetailsFormkey,
-                child: Column(
-                  children: <Widget>[
-
-                    // 🔹 Inst No
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: TextFormField(
-                        controller: instNoController,
-                        decoration: InputDecoration(
-                          labelText: 'Inst No',
-                          hintText: 'Enter Inst No',
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10, // 👈 tighter padding
-                          ),
-                          filled: true,
-                          fillColor: Theme.of(context).inputDecorationTheme.fillColor ?? Theme.of(context).cardColor.withOpacity(0.95),
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.orange, Colors.deepOrangeAccent],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
-                            ),
-                            child: const Icon(Icons.confirmation_number_outlined, color: Colors.white, size: 20),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // 🔹 Inst Date
-                    Padding(
-                      padding:  EdgeInsets.symmetric(vertical: 4),
-                      child: TextFormField(
-                        controller: instDateController,
-                        readOnly: true,
-                        enableInteractiveSelection: false,
-                        onTap: () => _selectinstDate(context),
-                        decoration: InputDecoration(
-                          labelText: 'Inst Date',
-                          hintText: 'Select Date',
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10, // 👈 tighter padding
-                          ),
-                          filled: true,
-                          fillColor: Theme.of(context).inputDecorationTheme.fillColor ?? Theme.of(context).cardColor.withOpacity(0.95),
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.teal, Colors.cyan],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
-                            ),
-                            child: const Icon(Icons.calendar_today, color: Colors.white, size: 20),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // 🔹 Bank Name
-                    Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: TypeAheadField<String>(
-                          suggestionsCallback: (pattern) {
-                            return bankname_data.where((item) {
-                              final name = item.toString().toLowerCase();
-                              return name.contains(pattern.toLowerCase());
-                            }).toList();
-                          },
-
-                          builder: (context, controller, focusNode) {
-                            controller.text = _banknameController.text;
-
-                            return TextField(
-                              controller: controller,
-                              focusNode: focusNode,
-                              decoration: InputDecoration(
-                                labelText: "Bank",
-                                hintText: 'Search Bank',
-                                labelStyle: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                                contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                filled: true,
-                                fillColor: Theme.of(context).inputDecorationTheme.fillColor ?? Theme.of(context).cardColor.withOpacity(0.95),
-                                prefixIcon: Container(
-                                  margin: const EdgeInsets.all(8),
-                                  decoration: const BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [Colors.purple, Colors.deepPurpleAccent],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                    borderRadius: BorderRadius.all(Radius.circular(12)),
-                                  ),
-                                  child: const Icon(Icons.account_balance_outlined,
-                                      color: Colors.white, size: 20),
-                                ),
-                                suffixIcon: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (controller.text.isNotEmpty)
-                                      GestureDetector(
-                                        onTap: () {
-                                          setState(() {
-                                            controller.clear();
-                                            selectedbankname = "";
-                                          });
-                                        },
-                                        child:
-                                        Icon(Icons.close, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 20),
-                                      ),
-                                    const SizedBox(width: 4),
-                                    Icon(Icons.arrow_drop_down, color: Theme.of(context).colorScheme.onSurface),
-                                    const SizedBox(width: 8),
-                                  ],
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide:
-                                  BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide:
-                                  BorderSide(color: app_color, width: 1.5),
-                                ),
-                              ),
-                            );
-                          },
-
-                          itemBuilder: (context, String suggestion) {
-                            return ListTile(
-                              title: Text(
-                                suggestion,
-                                style: GoogleFonts.poppins(fontSize: 13),
-                              ),
-                            );
-                          },
-
-                          onSelected: (String suggestion) {
-                            setStateDialog(() {
-                              selectedbankname = suggestion;
-                              _banknameController.text = suggestion;
-                            });
-                          },
-
-
-
-
-                          // ✅ New API uses EmptyBuilder instead of noItemsFoundBuilder
-                          emptyBuilder: (context) => Padding(
-                            padding: EdgeInsets.all(8.0),
-                            child: Text(
-                              'No matching bank found',
-                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                          ),
-                        )
-
-
-
-                    ),
-
-                    // 🔹 Amount
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: TextFormField(
-                        controller: chequeAmountController,
-                        keyboardType: TextInputType.number,
-                        validator: (value) {
-                          if (value!.isEmpty) return 'Please enter amount';
-                          if (double.parse(value) == 0) return 'Amount should not be 0';
-                          return null;
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Amount',
-                          hintText: '0',
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10, // 👈 tighter padding
-                          ),
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          filled: true,
-                          fillColor: Theme.of(context).inputDecorationTheme.fillColor ?? Theme.of(context).cardColor.withOpacity(0.95),
-                          prefixIcon: Container(
-                            margin:  EdgeInsets.all(8),
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              gradient:  LinearGradient(
-                                colors: [Colors.grey, Colors.brown],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            alignment: Alignment.center,
-                            child: currencySymbolWidget(
-                              currencycode,
-                              getCurrencySymbol(currencycode),
-                              GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-
-
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor, width: 1),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // 🔹 Actions
-            actions: <Widget>[
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  setState(() {
-                    selectedbankname = bankname_data.first;
-                    _banknameController.text = selectedbankname;
-                    instNoController.clear();
-                    instdate = DateTime.now();
-                    instdatestring = _dateFormat.format(instdate);
-                    instdatetxt = formatlastsaledate(instdatestring);
-                    instDateController.text = instdatetxt;
-                    chequeAmountController.clear();
-                  });
-                },
-                child: Text('Cancel', style: GoogleFonts.poppins(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: app_color,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                ),
-                onPressed: () {
-                  if (_chequedetailsFormkey.currentState != null &&
-                      _chequedetailsFormkey.currentState!.validate()) {
-                    _chequedetailsFormkey.currentState!.save();
-                    addCheque();
-                  }
-                },
-                child: Text(
-                  'Add $_selectedpaymentmode',
-                  style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          );
-        },);}
-      );
-    });
-  }*/
 
   Future<void> _showChequeDetailsPopup(BuildContext context) async {
     setState(() {
@@ -4503,6 +2914,11 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     });
   }
 
+  /// Thin wrapper around [ModifyReceiptEntryNotifier.addBill] - resolves
+  /// the dialog's `_billduedateController` (a days-from-now offset) into a
+  /// `yyyyMMdd` due-date string exactly as the original did, then shows the
+  /// matching dialog/pops the sheet/resets the widget-local dialog fields
+  /// based on the outcome.
   void addBill() {
     final billAmount = billAmountController.text;
     final billName = _selectedbill;
@@ -4520,11 +2936,15 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
       dueDateString = DateFormat('yyyyMMdd').format(finalDate);
     }
 
-    if (billAmount.isNotEmpty) {
-      // Check if a bill with name "On Account" already exists
-      if (billName == "On Account" &&
-          bills.any((bill) => bill.billName == "On Account")) {
-        // Show message that the bill already exists
+    final outcome = _notifier.addBill(
+      billAmountText: billAmount,
+      billName: billName,
+      billNo: billNo,
+      dueDateString: dueDateString,
+    );
+
+    switch (outcome) {
+      case AddBillOutcome.duplicateOnAccount:
         showDialog(
           context: context,
           builder: (context) {
@@ -4544,101 +2964,28 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
             );
           },
         );
-        return; // Exit the function without adding the bill
-      }
-
-      // Create a new bill
-      Navigator.of(context).pop();
-      double parsedAmount = double.parse(billAmount.replaceAll(',', ''));
-      final newBill = Bills(
-        billName: billName,
-        billAmount: parsedAmount,
-        billNo: (billName == "New Ref" || billName == "Agst Ref")
-            ? billNo
-            : null,
-        billDueDate: (billName == "New Ref" || billName == "Agst Ref")
-            ? dueDateString
-            : null,
-      );
-
-      // Add the new bill to the list and update the total bill amount
-      setState(() {
-        bills.add(newBill);
-        // Update visibility of bill heading
-        isVisibleBillHeading = bills.isNotEmpty;
-        totalBillAmount = bills.fold(0.0, (double previousAmount, Bills bill) {
-          return previousAmount + bill.billAmount;
+        return;
+      case AddBillOutcome.notAdded:
+        return;
+      case AddBillOutcome.added:
+        Navigator.of(context).pop();
+        controller_totalamt.text = _s.formattedTotalBillAmount;
+        setState(() {
+          _selectedbill = billsdata.first;
+          isVisibleDueDate =
+              (_selectedbill == 'New Ref' || _selectedbill == "Agst Ref");
+          isVisibleBillNo =
+              (_selectedbill == "Agst Ref" || _selectedbill == 'New Ref');
         });
-        // Update formatted total amount
-        roundedtotalBillAmount = double.parse(
-          totalBillAmount.toStringAsFixed(decimal),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalBillAmount);
-        controller_totalamt.text = formattedtotal.toString();
-      });
-
-      // Reset selected bill and visibility of due date and bill number
-      setState(() {
-        _selectedbill = billsdata.first;
-        isVisibleDueDate =
-            (_selectedbill == 'New Ref' || _selectedbill == "Agst Ref");
-        isVisibleBillNo =
-            (_selectedbill == "Agst Ref" || _selectedbill == 'New Ref');
-        if (_selectedbankcashname != null && isSelectedBankCashInHand) {
-          isPaymentModeVisible = false;
-          _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-          cheque.clear();
-          updateChequeAmount();
-          isVisibleChequeHeading = false;
-          isChequeVisible = false;
-        } else {
-          if (bills.isNotEmpty) {
-            if (cheque.isNotEmpty) {
-              isPaymentModeVisible = true;
-              isChequeVisible = true;
-              isVisibleChequeHeading = true;
-            } else {
-              isPaymentModeVisible = true;
-              _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-              cheque.clear();
-              updateChequeAmount();
-              isVisibleChequeHeading = false;
-              isChequeVisible = true;
-            }
-          } else {
-            isPaymentModeVisible = true;
-            _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
-            cheque.clear();
-            updateChequeAmount();
-            isVisibleChequeHeading = false;
-            isChequeVisible = false;
-          }
-        }
-      });
-
-      // Clear input fields
-      billAmountController.clear();
-      _billduedateController.clear();
-
-      /*if(_selectedpaymentmode == 'Cheque/DD')
-        {
-          setState(() {
-            isChequeVisible = true;
-          });
-        }
-      else
-        {
-          setState(() {
-            isChequeVisible = false;
-          });
-        }*/
+        billAmountController.clear();
+        _billduedateController.clear();
     }
   } // add bill function
 
+  /// Thin wrapper around [ModifyReceiptEntryNotifier.addCheque] - the
+  /// notifier owns the validation/append/total-recompute; the widget keeps
+  /// the alert dialogs, the sheet pop, and resetting the Add-Cheque sheet's
+  /// own controllers back to their defaults on success.
   void addCheque() {
     final instNo = instNoController.text;
     final instDate = instdate;
@@ -4646,250 +2993,134 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
     final chequeAmount = chequeAmountController.text;
     final paymentMode = _selectedpaymentmode;
 
-    double parsedAmount = double.parse(chequeAmount.replaceAll(',', ''));
+    void showChequeAlert(String message) {
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text("Alert"),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: Text("OK", style: GoogleFonts.poppins(color: app_color)),
+              ),
+            ],
+          );
+        },
+      );
+    }
 
-    String formattedAmount = parsedAmount.toStringAsFixed(decimal);
-
-    double formattedAmountDouble = double.parse(formattedAmount);
-
-    String instDateString = DateFormat('yyyyMMdd').format(instDate);
-
-    bool hasRepeatedInstNo = isInstNoRepeated(instNo, cheque);
-
-    double remainingchequeamount =
-        roundedtotalBillAmount - roundedtotalChequeAmount;
-
-    print(
-      'before processing cheque amount $chequeAmount and roundedbillamount $roundedtotalBillAmount and roundedchequeAmount $roundedtotalChequeAmount and entered cheque amount $formattedAmountDouble and remaining cheque amount $remainingchequeamount',
+    final AddChequeOutcome outcome = _notifier.addCheque(
+      instNo: instNo,
+      instDate: instDate,
+      bankName: bankName,
+      chequeAmountText: chequeAmount,
+      paymentMode: paymentMode,
     );
 
-    if (chequeAmount.isNotEmpty &&
-        roundedtotalChequeAmount <= roundedtotalBillAmount &&
-        roundedtotalChequeAmount != roundedtotalBillAmount &&
-        !hasRepeatedInstNo &&
-        formattedAmountDouble <= roundedtotalBillAmount &&
-        formattedAmountDouble <= remainingchequeamount) {
-      Navigator.of(context).pop();
+    switch (outcome) {
+      case AddChequeOutcome.added:
+        Navigator.of(context).pop();
 
-      final newCheque = Cheque(
-        date: receiptdatestring,
-        paymentFavouring: _selectedparty,
-        bankPartyName: _selectedparty,
-
-        instno: instNo,
-        instdate: instDateString,
-        bankname: bankName,
-        chequeAmount: formattedAmountDouble,
-        paymentMode: paymentMode,
-      );
-
-      // Add the new bill to the list and update the total bill amount
-      setState(() {
-        cheque.add(newCheque);
-        // Update visibility of bill heading
-        isVisibleChequeHeading = cheque.isNotEmpty;
-        updateChequeAmount();
-      });
-      print(
-        'after processing cheque amount $chequeAmount and roundedbillamount $roundedtotalBillAmount and roundedchequeAmount $roundedtotalChequeAmount and entered cheque amount $formattedAmountDouble and remaining cheque amount $remainingchequeamount',
-      );
-
-      // Reset selected bill and visibility of due date and bill number
-      setState(() {
-        instNoController.clear();
-        instdate = DateTime.now();
-        instdatestring = _dateFormat.format(instdate);
-        instdatetxt = formatlastsaledate(instdatestring);
-        instDateController.text = instdatetxt;
-        selectedbankname = bankname_data.first;
-        _banknameController.text = selectedbankname;
-        chequeAmountController.clear();
-      });
-    } else if (formattedAmountDouble > remainingchequeamount) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text("Alert"),
-            content: Text(
-              "Entered $_selectedpaymentmode amount exceeds remaining total amount",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: Text("OK", style: GoogleFonts.poppins(color: app_color)),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    } else if (hasRepeatedInstNo) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text("Alert"),
-            content: Text(
-              "A cheque with the inst no '$instNo' already exists.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: Text("OK", style: GoogleFonts.poppins(color: app_color)),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    } else if (roundedtotalBillAmount < 0 || roundedtotalBillAmount == 0) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text("Alert"),
-            content: Text("First add bills then proceed for payment details"),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: Text("OK", style: GoogleFonts.poppins(color: app_color)),
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    } else if (roundedtotalChequeAmount == roundedtotalBillAmount) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text("Alert"),
-            content: Text("Cheques for the total amount already added"),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: Text("OK", style: GoogleFonts.poppins(color: app_color)),
-              ),
-            ],
-          );
-        },
-      );
-      return; // Exit the function without adding the bill
-    } else if (formattedAmountDouble > roundedtotalBillAmount) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: Text("Alert"),
-            content: Text(
-              "Entered $_selectedpaymentmode amount should not be greater than total amount",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: Text("OK", style: GoogleFonts.poppins(color: app_color)),
-              ),
-            ],
-          );
-        },
-      );
-      return;
+        // Reset the Add-Cheque sheet's own fields back to their defaults
+        setState(() {
+          instNoController.clear();
+          instdate = DateTime.now();
+          instdatestring = _dateFormat.format(instdate);
+          instdatetxt = formatlastsaledate(instdatestring);
+          instDateController.text = instdatetxt;
+          selectedbankname = bankname_data.first;
+          _banknameController.text = selectedbankname;
+          chequeAmountController.clear();
+        });
+      case AddChequeOutcome.exceedsRemaining:
+        showChequeAlert(
+          "Entered $_selectedpaymentmode amount exceeds remaining total amount",
+        );
+      case AddChequeOutcome.duplicateInstNo:
+        showChequeAlert("A cheque with the inst no '$instNo' already exists.");
+      case AddChequeOutcome.noBillsYet:
+        showChequeAlert("First add bills then proceed for payment details");
+      case AddChequeOutcome.chequeAlreadyFullyAllocated:
+        showChequeAlert("Cheques for the total amount already added");
+      case AddChequeOutcome.exceedsTotal:
+        showChequeAlert(
+          "Entered $_selectedpaymentmode amount should not be greater than total amount",
+        );
     }
   } // add cheque function
 
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-    setState(() {
-      hostname = prefs.getString('hostname');
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
-      currencycode = prefs.getString('currencycode') ?? 'AED';
-      bankname_data.sort((a, b) {
-        if (a == 'Not Applicable') {
-          return -1; // 'Not Applicable' comes before everything else
-        } else if (b == 'Not Applicable') {
-          return 1; // 'Not Applicable' comes before everything else
-        } else {
-          return a.compareTo(b); // Compare other elements alphabetically
-        }
-      });
+  /// One-time seeding of the widget-local controllers the moment the
+  /// notifier's initial load resolves (mirrors
+  /// `modify_sales_entry_notifier.dart`'s widget-side `_onStateChange`,
+  /// registered the same way via `ref.listenManual` in `initState`).
+  /// `_dateController` is re-synced on every state change (cheap, always
+  /// correct) since [ModifyReceiptEntryNotifier.setReceiptDate] can change
+  /// `receiptDateText` after the initial load too; `_vchnoController`/
+  /// `controller_narration`/`controller_totalamt` are seeded exactly once,
+  /// guarded on the `isInitialDataLoaded` false->true edge, so a later
+  /// unrelated state change never clobbers in-progress edits to those
+  /// fields.
+  void _onStateChange(
+    ModifyReceiptEntryState? previous,
+    ModifyReceiptEntryState next,
+  ) {
+    _dateController.text = next.receiptDateText;
 
-      decimal = prefs.getInt('decimalplace') ?? 2;
+    final bool justFinishedLoading =
+        (previous?.isInitialDataLoaded ?? false) == false &&
+        next.isInitialDataLoaded;
+    if (!justFinishedLoading) return;
 
-      paymentmode_data.add("ATM");
-      paymentmode_data.add("Card");
-      paymentmode_data.add('Cheque/DD');
-      _selectedpaymentmode = paymentmode_data.isNotEmpty ? paymentmode_data.first : '';
+    final error = _notifier.consumeInitError();
+    if (error != null && mounted) {
+      showAppMessage(context, error);
+    }
 
-      billAmountController.clear();
+    _vchnoController.text = next.initialVoucherNumber;
+    controller_narration.text = next.initialNarration;
+    controller_totalamt.text = next.formattedTotalBillAmount;
 
-      // tally-api's voucher entry stores `date` as an ISO date
-      // (YYYY-MM-DD), unlike legacy's Tally-XML DATE field - DateTime.parse
-      // accepts both.
-      receiptdate = DateTime.parse(data['date'] as String);
-      receiptdatestring = _dateFormat.format(receiptdate);
-      receiptdatetxt = formatlastsaledate(receiptdatestring);
-      _dateController.text = receiptdatetxt;
+    billAmountController.clear();
+    _billduedateController.clear();
 
-      instdate = DateTime.now();
-      instdatestring = _dateFormat.format(instdate);
-      instdatetxt = formatlastsaledate(instdatestring);
-      instDateController.text = instdatetxt;
+    instdate = DateTime.now();
+    instdatestring = _dateFormat.format(instdate);
+    instdatetxt = formatlastsaledate(instdatestring);
+    instDateController.text = instdatetxt;
 
-      _billduedateController.clear();
+    selectedbankname = next.bankNameData.isNotEmpty
+        ? next.bankNameData.first
+        : '';
+    _banknameController.text = selectedbankname;
 
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      /*print('hostname: $hostname');*/
-
-      controller_totalamt.text = 0.toString();
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-    await loadData();
-    if (mounted) {
-      setState(() {
-        _isInitialDataLoaded = true;
-      });
+    if (next.selectedBankCashName != null) {
+      _bankcashnameController.text = next.selectedBankCashName!['name'] ?? '';
+    }
+    if (next.selectedParty != null) {
+      _partyController.text = next.selectedParty.toString();
     }
   }
 
   @override
   void initState() {
     super.initState();
-    _initSharedPreferences();
+    // Trigger provider creation (and its _init()) eagerly, matching the
+    // original's initState-time kickoff rather than waiting for build().
+    _notifier;
+    ref.listenManual<ModifyReceiptEntryState>(
+      modifyReceiptEntryNotifierProvider(_args),
+      _onStateChange,
+      fireImmediately: true,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(modifyReceiptEntryNotifierProvider(_args));
     if (!_isInitialDataLoaded) {
       return Scaffold(
         bottomNavigationBar: const AppBottomNav(
@@ -5130,10 +3361,8 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                             }).toList(),
                             onChanged: (value) {
                               if (value == null) return;
-                              setState(() {
-                                _selectedvchtypename = value;
-                              });
-                              fetchvchnos(_selectedvchtypename);
+                              _notifier.setSelectedVchType(value);
+                              fetchvchnos(value);
                             },
                           ),
 
@@ -5218,10 +3447,8 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                           if (controller.text.isNotEmpty)
                                             GestureDetector(
                                               onTap: () {
-                                                setState(() {
-                                                  controller.clear();
-                                                  _selectedparty = "";
-                                                });
+                                                controller.clear();
+                                                _notifier.clearSelectedParty();
                                               },
                                               child: Icon(
                                                 Icons.close,
@@ -5288,10 +3515,8 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                   );
                                 },
                                 onSelected: (String suggestion) {
-                                  setState(() {
-                                    _selectedparty = suggestion;
-                                    _partyController.text = _selectedparty;
-                                  });
+                                  _notifier.selectParty(suggestion);
+                                  _partyController.text = suggestion;
                                 },
                                 emptyBuilder: (context) => Padding(
                                   padding: const EdgeInsets.all(8.0),
@@ -5401,14 +3626,9 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                           if (controller.text.isNotEmpty)
                                             GestureDetector(
                                               onTap: () {
-                                                setState(() {
-                                                  controller.clear();
-                                                  _selectedbankcashname = null;
-                                                  isPaymentModeVisible = false;
-                                                  isChequeVisible = false;
-                                                  cheque.clear();
-                                                  updateChequeAmount();
-                                                });
+                                                controller.clear();
+                                                _notifier
+                                                    .clearSelectedBankCashName();
                                               },
                                               child: Icon(
                                                 Icons.close,
@@ -5475,42 +3695,15 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                   );
                                 },
                                 onSelected: (String suggestion) {
-                                  setState(() {
-                                    _selectedbankcashname = bankcashname_data
-                                        .firstWhere(
-                                          (ledger) =>
-                                              '${ledger['name']} (${ledger['type']})' ==
-                                              suggestion,
-                                        );
-                                    _bankcashnameController.text =
-                                        _selectedbankcashname!['name'] ?? '';
-
-                                    if (_selectedbankcashname != null &&
-                                        isSelectedBankCashInHand) {
-                                      isPaymentModeVisible = false;
-                                      _selectedpaymentmode = paymentmode_data.isNotEmpty
-                                          ? paymentmode_data.first
-                                          : '';
-                                      cheque.clear();
-                                      updateChequeAmount();
-                                      isVisibleChequeHeading = false;
-                                      isChequeVisible = false;
-                                    } else if (bills.isNotEmpty) {
-                                      isPaymentModeVisible = true;
-                                      isChequeVisible = true;
-                                      isVisibleChequeHeading =
-                                          cheque.isNotEmpty;
-                                    } else {
-                                      isPaymentModeVisible = true;
-                                      _selectedpaymentmode = paymentmode_data.isNotEmpty
-                                          ? paymentmode_data.first
-                                          : '';
-                                      cheque.clear();
-                                      updateChequeAmount();
-                                      isVisibleChequeHeading = false;
-                                      isChequeVisible = false;
-                                    }
-                                  });
+                                  final selected = bankcashname_data
+                                      .firstWhere(
+                                        (ledger) =>
+                                            '${ledger['name']} (${ledger['type']})' ==
+                                            suggestion,
+                                      );
+                                  _notifier.selectBankCashName(selected);
+                                  _bankcashnameController.text =
+                                      selected['name'] ?? '';
                                 },
                                 emptyBuilder: (context) => Padding(
                                   padding: const EdgeInsets.all(8.0),
@@ -5761,30 +3954,30 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                 );
                               }).toList(),
                               onChanged: (value) async {
-                                setState(() {
-                                  _selectedpaymentmode = value!;
-                                });
-                                if (bills.isEmpty) {
+                                // The notifier applies the selection plus
+                                // (for the empty-bills case) the
+                                // cheque-list/visibility reset, and tells
+                                // us which branch ran; the widget keeps
+                                // the message and its own dialog-field
+                                // resets.
+                                final bool billsEmpty = _notifier
+                                    .setSelectedPaymentMode(value!);
+                                if (billsEmpty) {
                                   showAppMessage(
                                     context,
                                     'At least add 1 bill',
                                   );
-                                  isChequeVisible = false;
-                                  selectedbankname = bankname_data.first;
-                                  _banknameController.text = selectedbankname;
-                                  instNoController.clear();
-                                  instdate = DateTime.now();
-                                  instdatestring = _dateFormat.format(instdate);
-                                  instdatetxt = formatlastsaledate(
-                                    instdatestring,
-                                  );
-                                  instDateController.text = instdatetxt;
-                                  chequeAmountController.clear();
-                                  cheque.clear();
-                                  updateChequeAmount();
-                                } else {
                                   setState(() {
-                                    isChequeVisible = true;
+                                    selectedbankname = bankname_data.first;
+                                    _banknameController.text = selectedbankname;
+                                    instNoController.clear();
+                                    instdate = DateTime.now();
+                                    instdatestring = _dateFormat.format(instdate);
+                                    instdatetxt = formatlastsaledate(
+                                      instdatestring,
+                                    );
+                                    instDateController.text = instdatetxt;
+                                    chequeAmountController.clear();
                                   });
                                 }
                               },
@@ -5868,14 +4061,8 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                       size: 26,
                                     ),
                                   ),
-                                  onDismissed: (direction) {
-                                    setState(() {
-                                      cheque.removeAt(index);
-                                      updateChequeAmount();
-                                      isVisibleChequeHeading =
-                                          cheque.isNotEmpty;
-                                    });
-                                  },
+                                  onDismissed: (direction) =>
+                                      _notifier.deleteCheque(index),
                                   child: Container(
                                     margin: const EdgeInsets.symmetric(
                                       horizontal: 16,
@@ -6075,7 +4262,7 @@ class _ModifyReceiptEntryPageState extends State<ModifyReceiptEntry>
                                 if (_formKey.currentState != null &&
                                     _formKey.currentState!.validate()) {
                                   _formKey.currentState!.save();
-                                  updateEntry(voucherEntryId);
+                                  updateEntry(widget.voucherEntryId);
                                 }
                               },
                       ),
