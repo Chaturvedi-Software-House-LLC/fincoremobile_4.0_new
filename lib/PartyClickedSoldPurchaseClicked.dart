@@ -3,9 +3,9 @@ import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -13,8 +13,7 @@ import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'widgets/scroll_fab.dart';
-import 'api/voucher_drilldown_helper.dart';
-import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import 'providers/party_clicked_sold_purchase_clicked_notifier.dart';
 
 class Data {
   final String vchno;
@@ -53,7 +52,7 @@ String _stripUnitSuffix(String value) {
   }
 }
 
-class PartyClickedSoldPurchaseClicked extends StatefulWidget {
+class PartyClickedSoldPurchaseClicked extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, item, unit;
   final int? ledgerMasterId;
 
@@ -67,167 +66,36 @@ class PartyClickedSoldPurchaseClicked extends StatefulWidget {
     this.ledgerMasterId,
   });
   @override
-  _PartyClickedSoldPurchaseClickedPageState createState() =>
-      _PartyClickedSoldPurchaseClickedPageState(
-        startDateString: startdate_string,
-        endDateString: enddate_string,
-        type: type,
-        item: item,
-        ledger: ledger,
-        unit: unit,
-        ledgerMasterId: ledgerMasterId,
-      );
+  ConsumerState<PartyClickedSoldPurchaseClicked> createState() =>
+      _PartyClickedSoldPurchaseClickedPageState();
 }
 
 class _PartyClickedSoldPurchaseClickedPageState
-    extends State<PartyClickedSoldPurchaseClicked>
-    with TickerProviderStateMixin {
+    extends ConsumerState<PartyClickedSoldPurchaseClicked> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  String startDateString = "",
-      endDateString = "",
-      type = "",
-      ledger = "",
-      item = "",
-      unit = "";
-  final int? ledgerMasterId;
 
   int counter = 0;
-  double total_double = 0;
 
-  String total_main = "0";
-
-  bool isSortVisible = false;
-
-  String selectedSortOption = '';
-
-  List<Data> filteredItems =
-      []; // Initialize an empty list to hold the filtered items
-
-  _PartyClickedSoldPurchaseClickedPageState({
-    required this.startDateString,
-    required this.endDateString,
-    required this.type,
-    required this.ledger,
-    required this.item,
-    required this.unit,
-    this.ledgerMasterId,
-  });
-
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isListVisible = false,
-      _isBillsListVisible = false,
-      _isVoucherTypeListVisible = false,
-      _isCostCenterListVisible = false,
-      isVisiblePostDated = true,
-      isVisibleOptional = true;
-
-  String email = "";
-  String name = "";
-
-  late String currencysymbol = '';
-  String _currencyCode = 'AED';
-
-  late NumberFormat currencyFormat;
+  bool _isSearchViewVisible = false;
 
   final ScrollController _scrollFabController = ScrollController();
 
   TextEditingController searchController = TextEditingController();
 
-  bool isVisibleNoDataFound = false;
+  late String startdate_text, enddate_text;
 
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-  late String startdate_text = "", enddate_text = "";
-  String? datetype;
-
-  late String? startdate_pref, enddate_pref;
-
-  String? company = "", username = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-
-  List<Data> item_list = [];
-
-  final List<String> itemList = [
-    'Default',
-    'Newest to Oldest',
-    'Oldest to Newest',
-    'A->Z',
-    'Z->A',
-  ];
-
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems = List.from(item_list);
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetAtoZ() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.vchno.compareTo(b.vchno));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetZtoA() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.vchno.compareTo(a.vchno));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.vchdate.compareTo(b.vchdate));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.vchdate.compareTo(a.vchdate));
-        _scrollFabController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
+  PartyClickedSoldPurchaseClickedArgs get _args =>
+      PartyClickedSoldPurchaseClickedArgs(
+        startDateString: widget.startdate_string,
+        endDateString: widget.enddate_string,
+        type: widget.type,
+        ledger: widget.ledger,
+        item: widget.item,
+        ledgerMasterId: widget.ledgerMasterId,
+      );
 
   void _showSelectionWindow(BuildContext context) {
+    final itemList = kPartyClickedSoldPurchaseClickedSortOptions;
     final List<IconData> icons = [
       Icons.sort_rounded,
       Icons.date_range_sharp,
@@ -275,29 +143,21 @@ class _PartyClickedSoldPurchaseClickedPageState
                     // Replace this with your custom tile widget
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          selectedSortOption =
-                              itemList[index]; // Update the selected value
-                        });
-                        // Now, you can use a switch or if-else statement to check the selected value
-                        switch (selectedSortOption) {
-                          case 'Default':
-                            sortByDefault(); // Call the sorting function
-                            break;
-                          case 'Newest to Oldest':
-                            sortByDateHightoLow(); // Call the sorting function
-                            break;
-                          case 'Oldest to Newest':
-                            sortByDateLowtoHigh(); // Call the sorting function
-                            break;
-                          case 'A->Z':
-                            sortByAlphabetAtoZ(); // Call the sorting function
-                            break;
-                          case 'Z->A':
-                            sortByAlphabetZtoA(); // Call the sorting function
-                            break;
+                        final notifier = ref.read(
+                          partyClickedSoldPurchaseClickedNotifierProvider(
+                            _args,
+                          ).notifier,
+                        );
+                        final hadItems = notifier.selectSortOption(
+                          itemList[index],
+                        );
+                        if (hadItems) {
+                          _scrollFabController.animateTo(
+                            0.0,
+                            duration: Duration(milliseconds: 500),
+                            curve: Curves.easeInOut,
+                          );
                         }
-                        print('Tile $index selected');
                         Navigator.pop(
                           context,
                         ); // Close the selection window after a tile is selected
@@ -310,13 +170,29 @@ class _PartyClickedSoldPurchaseClickedPageState
                           title: Text(
                             itemList[index],
                             style: GoogleFonts.poppins(
-                              fontWeight: itemList[index] == selectedSortOption
+                              fontWeight:
+                                  itemList[index] ==
+                                      ref
+                                          .read(
+                                            partyClickedSoldPurchaseClickedNotifierProvider(
+                                              _args,
+                                            ),
+                                          )
+                                          .selectedSortOption
                                   ? FontWeight.bold
                                   : FontWeight
                                         .normal, // Apply bold style to the text if the tile is selected
                             ),
                           ),
-                          trailing: itemList[index] == selectedSortOption
+                          trailing:
+                              itemList[index] ==
+                                  ref
+                                      .read(
+                                        partyClickedSoldPurchaseClickedNotifierProvider(
+                                          _args,
+                                        ),
+                                      )
+                                      .selectedSortOption
                               ? Icon(Icons.check, color: app_color)
                               : null, // Show arrow icon if the tile is selected
                         ),
@@ -332,28 +208,28 @@ class _PartyClickedSoldPurchaseClickedPageState
     );
   }
 
-  Future<void> generateAndSharePDF_Sold() async {
+  Future<void> generateAndSharePDF_Sold(List<Data> itemList, String company) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
 
-    final companyName = company!;
+    final companyName = company;
     final reportname = 'Party Wise Sales Summary';
-    final ledgername = ledger;
-    final item_name = item;
+    final ledgername = widget.ledger;
+    final item_name = widget.item;
 
     final headersRow3 = ['Vch No', 'Last Date', 'Qty', 'Rate'];
 
     final itemsPerPage = 10;
-    final pageCount = (item_list.length / itemsPerPage).ceil();
+    final pageCount = (itemList.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
-      final endIndex = (pageNumber + 1) * itemsPerPage > item_list.length
-          ? item_list.length
+      final endIndex = (pageNumber + 1) * itemsPerPage > itemList.length
+          ? itemList.length
           : (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = item_list.sublist(startIndex, endIndex);
+      final itemsSubset = itemList.sublist(startIndex, endIndex);
 
       final tableSubsetRows = itemsSubset.map((item) {
         return [
@@ -412,14 +288,14 @@ class _PartyClickedSoldPurchaseClickedPageState
                     mainAxisAlignment: pw.MainAxisAlignment.center,
                     children: [
                       pw.Text(
-                        convertDateFormat(startDateString),
+                        convertDateFormat(widget.startdate_string),
                         style: pw.TextStyle(fontSize: 16),
                       ),
                       pw.SizedBox(width: 5),
                       pw.Text('to', style: pw.TextStyle(fontSize: 16)),
                       pw.SizedBox(width: 5),
                       pw.Text(
-                        convertDateFormat(endDateString),
+                        convertDateFormat(widget.enddate_string),
                         style: pw.TextStyle(fontSize: 16),
                       ),
                     ],
@@ -476,28 +352,28 @@ class _PartyClickedSoldPurchaseClickedPageState
     ], text: 'Sharing $reportname Report of $company');
   }
 
-  Future<void> generateAndSharePDF_Purchase() async {
+  Future<void> generateAndSharePDF_Purchase(List<Data> itemList, String company) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
     final pdf = pw.Document();
 
-    final companyName = company!;
+    final companyName = company;
     final reportname = 'Party Wise Purchase Summary';
-    final ledgername = ledger;
-    final item_name = item;
+    final ledgername = widget.ledger;
+    final item_name = widget.item;
 
     final headersRow3 = ['Vch No', 'Last Date', 'Qty', 'Rate'];
 
     final itemsPerPage = 10;
-    final pageCount = (item_list.length / itemsPerPage).ceil();
+    final pageCount = (itemList.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
-      final endIndex = (pageNumber + 1) * itemsPerPage > item_list.length
-          ? item_list.length
+      final endIndex = (pageNumber + 1) * itemsPerPage > itemList.length
+          ? itemList.length
           : (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = item_list.sublist(startIndex, endIndex);
+      final itemsSubset = itemList.sublist(startIndex, endIndex);
 
       final tableSubsetRows = itemsSubset.map((item) {
         return [
@@ -556,14 +432,14 @@ class _PartyClickedSoldPurchaseClickedPageState
                     mainAxisAlignment: pw.MainAxisAlignment.center,
                     children: [
                       pw.Text(
-                        convertDateFormat(startDateString),
+                        convertDateFormat(widget.startdate_string),
                         style: pw.TextStyle(fontSize: 16),
                       ),
                       pw.SizedBox(width: 5),
                       pw.Text('to', style: pw.TextStyle(fontSize: 16)),
                       pw.SizedBox(width: 5),
                       pw.Text(
-                        convertDateFormat(endDateString),
+                        convertDateFormat(widget.enddate_string),
                         style: pw.TextStyle(fontSize: 16),
                       ),
                     ],
@@ -620,13 +496,13 @@ class _PartyClickedSoldPurchaseClickedPageState
     ], text: 'Sharing $reportname Report of $company');
   }
 
-  Future<void> generateAndShareCSV_Sold() async {
+  Future<void> generateAndShareCSV_Sold(List<Data> itemList, String company) async {
     final List<List<dynamic>> csvData = [];
     final reportname = 'Party Wise Sales Summary';
     final headersRow = ['Vch No', 'Last Date', 'Qty', 'Rate'];
     csvData.add(headersRow);
 
-    for (final item in item_list) {
+    for (final item in itemList) {
       final rowData = [
         item.vchno,
         convertDateFormat(item.vchdate),
@@ -648,13 +524,13 @@ class _PartyClickedSoldPurchaseClickedPageState
     ], text: 'Sharing $reportname Report of $company');
   }
 
-  Future<void> generateAndShareCSV_Purchased() async {
+  Future<void> generateAndShareCSV_Purchased(List<Data> itemList, String company) async {
     final List<List<dynamic>> csvData = [];
     final reportname = 'Party Wise Purchase Summary';
     final headersRow = ['Vch No', 'Last Date', 'Qty', 'Rate'];
     csvData.add(headersRow);
 
-    for (final item in item_list) {
+    for (final item in itemList) {
       final rowData = [
         item.vchno,
         convertDateFormat(item.vchdate),
@@ -705,209 +581,11 @@ class _PartyClickedSoldPurchaseClickedPageState
     return formattedDate;
   }
 
-  Future<void> fetchData(
-    final String item,
-    final String ledger,
-    final String startdate,
-    final String enddate,
-    final String type,
-    final String select,
-    final String orderby,
-  ) async {
-    setState(() {
-      _isLoading = true;
-      _isListVisible = true;
-      isSortVisible = false;
-    });
-
-    item_list.clear();
-    filteredItems.clear();
-
-    try {
-      await _fetchDataTallyApi(item, ledger, startdate, enddate, type);
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (item_list.isEmpty) {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
-  }
-
-  /// tally-api path: filters [VoucherRepository]-backed vouchers to this
-  /// ledger + item + voucher type via [fetchDrilldownVouchers], then reads
-  /// the matching inventory entry's qty/rate straight off each voucher -
-  /// this is exactly the per-invoice history legacy's `getTotalAmount`
-  /// (`select: 'true'`) returned.
-  Future<void> _fetchDataTallyApi(
-    final String item,
-    final String ledger,
-    final String startdate,
-    final String enddate,
-    final String type,
-  ) async {
-    final from = parseCompactDate(startdate);
-    final to = parseCompactDate(enddate);
-    final vouchers = await fetchDrilldownVouchers(
-      from: from,
-      to: to,
-      partyLedgerName: ledger,
-      itemName: item,
-      voucherTypeName: type,
-    );
-
-    final rows = <Data>[];
-    for (final voucher in vouchers) {
-      final inventoryEntries =
-          (voucher['inventoryEntries'] as List?)
-              ?.cast<Map<String, dynamic>>() ??
-          const [];
-      final matching = inventoryEntries.where(
-        (e) => e['stockItemName'] == item,
-      );
-      for (final entry in matching) {
-        rows.add(
-          Data.fromJson({
-            'vchno': voucher['number'] ?? '',
-            'vchdate': voucher['date'] ?? '',
-            'rate': parseMoneyField(entry['rate']),
-            'qty': parseMoneyField(entry['quantity']),
-          }),
-        );
-      }
-    }
-
-    isVisibleNoDataFound = false;
-    item_list.addAll(rows);
-    filteredItems = item_list;
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-    });
-
-    String? currencyCode = '';
-
-    currencyCode = prefs.getString('currencycode') ?? "AED";
-
-    try {
-      if (currencyCode == 'INR' ||
-          currencyCode == 'EUR' ||
-          currencyCode == 'USD' ||
-          currencyCode == 'PKR') {
-        currencyFormat = NumberFormat('#,##0');
-        NumberFormat format = NumberFormat.simpleCurrency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-      } else {
-        NumberFormat format = NumberFormat.currency(
-          locale: 'en',
-          name: currencyCode,
-        );
-        currencysymbol = format.currencySymbol;
-        currencyFormat = NumberFormat('#,##0');
-      }
-    } catch (e) {
-      NumberFormat format = NumberFormat.currency(
-        locale: 'en',
-        name: currencyCode,
-      );
-      currencysymbol = format.currencySymbol;
-      currencyFormat = NumberFormat('#,##0');
-    }
-    _currencyCode = currencyCode;
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-
-      if (!itemList.contains(selectedSortOption)) {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    startdate_text = convertDateFormat(startDateString);
-    enddate_text = convertDateFormat(endDateString);
-
-    fetchData(
-      item,
-      ledger,
-      startDateString,
-      endDateString,
-      type,
-      "true",
-      "vchno",
-    );
-  }
-
   @override
   void initState() {
     super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
+    startdate_text = convertDateFormat(widget.startdate_string);
+    enddate_text = convertDateFormat(widget.enddate_string);
   }
 
   @override
@@ -918,6 +596,9 @@ class _PartyClickedSoldPurchaseClickedPageState
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(
+      partyClickedSoldPurchaseClickedNotifierProvider(_args),
+    );
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -943,7 +624,7 @@ class _PartyClickedSoldPurchaseClickedPageState
             children: [
               Flexible(
                 child: Text(
-                  ledger,
+                  widget.ledger,
                   style: GoogleFonts.poppins(
                     color: Colors.white,
                     fontSize: 16,
@@ -962,7 +643,13 @@ class _PartyClickedSoldPurchaseClickedPageState
                   _isSearchViewVisible = !_isSearchViewVisible;
                 });
                 searchController.clear();
-                filteredItems = item_list;
+                ref
+                    .read(
+                      partyClickedSoldPurchaseClickedNotifierProvider(
+                        _args,
+                      ).notifier,
+                    )
+                    .filter('');
               },
               icon: Icon(Icons.search, color: Colors.white, size: 22),
             ),
@@ -973,12 +660,12 @@ class _PartyClickedSoldPurchaseClickedPageState
             // (greyed out) rather than hidden when there's nothing to sort,
             // so its position doesn't jump around as data loads.
             IconButton(
-              onPressed: isSortVisible
+              onPressed: state.isSortVisible
                   ? () => _showSelectionWindow(context)
                   : null,
               icon: Icon(
                 Icons.sort_rounded,
-                color: isSortVisible ? Colors.white : Colors.white38,
+                color: state.isSortVisible ? Colors.white : Colors.white38,
                 size: 22,
               ),
             ),
@@ -1007,13 +694,19 @@ class _PartyClickedSoldPurchaseClickedPageState
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (type == 'Sales') {
-                            if (!item_list.isEmpty) {
-                              generateAndSharePDF_Sold();
+                          if (widget.type == 'Sales') {
+                            if (state.itemList.isNotEmpty) {
+                              generateAndSharePDF_Sold(
+                                state.itemList,
+                                state.company,
+                              );
                             }
-                          } else if (type == 'Purchase') {
-                            if (!item_list.isEmpty) {
-                              generateAndSharePDF_Purchase();
+                          } else if (widget.type == 'Purchase') {
+                            if (state.itemList.isNotEmpty) {
+                              generateAndSharePDF_Purchase(
+                                state.itemList,
+                                state.company,
+                              );
                             }
                           }
                         },
@@ -1044,13 +737,19 @@ class _PartyClickedSoldPurchaseClickedPageState
                         onTap: () {
                           Navigator.pop(context);
 
-                          if (type == 'Sales') {
-                            if (!item_list.isEmpty) {
-                              generateAndShareCSV_Sold();
+                          if (widget.type == 'Sales') {
+                            if (state.itemList.isNotEmpty) {
+                              generateAndShareCSV_Sold(
+                                state.itemList,
+                                state.company,
+                              );
                             }
-                          } else if (type == 'Purchase') {
-                            if (!item_list.isEmpty) {
-                              generateAndShareCSV_Purchased();
+                          } else if (widget.type == 'Purchase') {
+                            if (state.itemList.isNotEmpty) {
+                              generateAndShareCSV_Purchased(
+                                state.itemList,
+                                state.company,
+                              );
                             }
                           }
                         },
@@ -1114,7 +813,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                       children: [
                         Center(
                           child: Text(
-                            item,
+                            widget.item,
                             textAlign: TextAlign.center,
                             style: GoogleFonts.poppins(
                               color: Theme.of(
@@ -1171,7 +870,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                     ),
                   ),
                 ),
-              if (_isSearchViewVisible || isVisibleNoDataFound)
+              if (_isSearchViewVisible || state.isVisibleNoDataFound)
                 SliverToBoxAdapter(
                   child: Container(
                   margin: const EdgeInsets.only(
@@ -1210,21 +909,13 @@ class _PartyClickedSoldPurchaseClickedPageState
                             height: 46,
                             child: TextField(
                               controller: searchController,
-                              onChanged: (value) {
-                                setState(() {
-                                  filteredItems = value.isEmpty
-                                      ? item_list
-                                      : item_list
-                                            .where(
-                                              (item) => item.vchno
-                                                  .toLowerCase()
-                                                  .contains(
-                                                    value.toLowerCase(),
-                                                  ),
-                                            )
-                                            .toList();
-                                });
-                              },
+                              onChanged: (value) => ref
+                                  .read(
+                                    partyClickedSoldPurchaseClickedNotifierProvider(
+                                      _args,
+                                    ).notifier,
+                                  )
+                                  .filter(value),
                               style: GoogleFonts.poppins(
                                 fontSize: 13.5,
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -1272,7 +963,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                       ],
 
                       // No data found message
-                      if (isVisibleNoDataFound)
+                      if (state.isVisibleNoDataFound)
                         SizedBox(
                           height: MediaQuery.of(context).size.height * 0.5,
                           child: Center(
@@ -1314,13 +1005,13 @@ class _PartyClickedSoldPurchaseClickedPageState
               // previous shrinkWrap ListView.builder forced eager layout of
               // every item up front, which is what caused the same
               // scroll-hang bug already fixed on the Party list.
-              if (_isListVisible)
+              if (state.isListVisible)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
-                            final item = filteredItems[index];
-                            final curr = currencysymbol ?? ''; // ✅ fallback
+                            final item = state.filteredItems[index];
+                            final curr = state.currencySymbol;
 
                             return Container(
                               margin: const EdgeInsets.only(bottom: 14),
@@ -1538,8 +1229,8 @@ class _PartyClickedSoldPurchaseClickedPageState
                                                           ),
                                                         ),
                                                         currencySymbolSpan(
-                                                          _currencyCode,
-                                                          currencysymbol,
+                                                          state.currencyCode,
+                                                          state.currencySymbol,
                                                           GoogleFonts.poppins(
                                                             fontSize: 13.5,
                                                             fontWeight:
@@ -1575,13 +1266,13 @@ class _PartyClickedSoldPurchaseClickedPageState
                                 ),
                               ),
                             );
-                    }, childCount: filteredItems.length),
+                    }, childCount: state.filteredItems.length),
                   ),
                 ),
             ],
           ),
 
-          if (_isLoading)
+          if (state.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,

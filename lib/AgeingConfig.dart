@@ -1,29 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'providers/ageing_config_notifier.dart';
 
-class AgeingConfig extends StatefulWidget {
+class AgeingConfig extends ConsumerStatefulWidget {
   @override
-  _AgeingConfigState createState() => _AgeingConfigState();
+  ConsumerState<AgeingConfig> createState() => _AgeingConfigState();
 }
 
-class _AgeingConfigState extends State<AgeingConfig> {
-  late TextEditingController heading1txtController;
-  late TextEditingController heading2txtController;
-  late TextEditingController heading3txtController;
-  late TextEditingController heading4txtController;
-  late TextEditingController heading5txtController;
-
-  String heading1 = '';
-  String heading2 = '';
-  String heading3 = '';
-  String heading4 = '';
-  String heading5 = '';
+class _AgeingConfigState extends ConsumerState<AgeingConfig> {
+  late final TextEditingController heading1txtController;
+  late final TextEditingController heading2txtController;
+  late final TextEditingController heading3txtController;
+  late final TextEditingController heading4txtController;
+  late final TextEditingController heading5txtController;
 
   final Color _pageColor = Colors.white;
   final Color _textColor = const Color(0xFF17202A);
@@ -33,8 +28,12 @@ class _AgeingConfigState extends State<AgeingConfig> {
   @override
   void initState() {
     super.initState();
-    initializeControllers();
-    loadPreferences();
+    final initial = ref.read(ageingConfigNotifierProvider);
+    heading1txtController = TextEditingController(text: initial.heading1);
+    heading2txtController = TextEditingController(text: initial.heading2);
+    heading3txtController = TextEditingController(text: initial.heading3);
+    heading4txtController = TextEditingController(text: initial.heading4);
+    heading5txtController = TextEditingController(text: initial.heading5);
   }
 
   @override
@@ -47,32 +46,12 @@ class _AgeingConfigState extends State<AgeingConfig> {
     super.dispose();
   }
 
-  void initializeControllers() {
-    heading1txtController = TextEditingController();
-    heading2txtController = TextEditingController();
-    heading3txtController = TextEditingController();
-    heading4txtController = TextEditingController();
-    heading5txtController = TextEditingController();
-  }
-
-  void loadPreferences() async {
-    SharedPreferences ageingPref = await SharedPreferences.getInstance();
-    setState(() {
-      heading1 = ageingPref.getString('heading1') ?? '30';
-      heading2 = ageingPref.getString('heading2') ?? '60';
-      heading3 = ageingPref.getString('heading3') ?? '90';
-      heading4 = ageingPref.getString('heading4') ?? '120';
-      heading5 = ageingPref.getString('heading5') ?? '180';
-    });
-    setControllerValues();
-  }
-
-  void setControllerValues() {
-    heading1txtController.text = heading1;
-    heading2txtController.text = heading2;
-    heading3txtController.text = heading3;
-    heading4txtController.text = heading4;
-    heading5txtController.text = heading5;
+  void _syncControllers(AgeingConfigState state) {
+    heading1txtController.text = state.heading1;
+    heading2txtController.text = state.heading2;
+    heading3txtController.text = state.heading3;
+    heading4txtController.text = state.heading4;
+    heading5txtController.text = state.heading5;
   }
 
   void showToast(String message) {
@@ -80,54 +59,16 @@ class _AgeingConfigState extends State<AgeingConfig> {
     showAppMessage(context, message, isError: !isSuccess);
   }
 
-  void savePreferences() async {
-    SharedPreferences ageingPref = await SharedPreferences.getInstance();
-
-    if (heading1txtController.text.isNotEmpty &&
-        heading2txtController.text.isNotEmpty &&
-        heading3txtController.text.isNotEmpty &&
-        heading4txtController.text.isNotEmpty &&
-        heading5txtController.text.isNotEmpty) {
-      final int? heading1_int = int.tryParse(heading1);
-      final int? heading2_int = int.tryParse(heading2);
-      final int? heading3_int = int.tryParse(heading3);
-      final int? heading4_int = int.tryParse(heading4);
-      final int? heading5_int = int.tryParse(heading5);
-
-      if (heading1_int == null ||
-          heading2_int == null ||
-          heading3_int == null ||
-          heading4_int == null ||
-          heading5_int == null) {
-        showToast('Please enter valid numbers for all ageing fields');
-        return;
-      }
-
-      if (heading1_int > 0 &&
-          heading2_int > heading1_int &&
-          heading3_int > heading2_int &&
-          heading4_int > heading3_int &&
-          heading5_int > heading4_int) {
-        ageingPref
-          ..setString('heading1', heading1)
-          ..setString('heading2', heading2)
-          ..setString('heading3', heading3)
-          ..setString('heading4', heading4)
-          ..setString('heading5', heading5)
-          ..commit();
-        showToast('Ageing Configuration Saved');
-
-        print('$heading1  $heading2  $heading3  $heading4  $heading5');
-      } else {
-        showToast('Ageing Value should be greater than lower limit');
-      }
-    } else {
-      showToast('Ageing Field Cannot be Empty');
-    }
+  Future<void> savePreferences() async {
+    final message = await ref.read(ageingConfigNotifierProvider.notifier).save();
+    showToast(message);
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AgeingConfigState>(ageingConfigNotifierProvider, (_, next) {
+      _syncControllers(next);
+    });
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -304,17 +245,8 @@ class _AgeingConfigState extends State<AgeingConfig> {
             fromValue: () => '0',
             toLabel: 'To',
             controller: heading1txtController,
-            onChanged: (value) {
-              if (value.isNotEmpty) {
-                heading1 = value;
-                final base = int.tryParse(value) ?? 0;
-                heading2txtController.text = heading2 = '${base + base}';
-                heading3txtController.text = heading3 = '${base + base * 2}';
-                heading4txtController.text = heading4 = '${base + base * 3}';
-                heading5txtController.text = heading5 = '${base + base * 4}';
-                setState(() {});
-              }
-            },
+            onChanged: (value) =>
+                ref.read(ageingConfigNotifierProvider.notifier).setHeading1(value),
           ),
           _buildDivider(),
           _buildAgeingRow(
@@ -322,16 +254,8 @@ class _AgeingConfigState extends State<AgeingConfig> {
             fromValue: () => heading1txtController.text,
             toLabel: 'To',
             controller: heading2txtController,
-            onChanged: (value) {
-              if (value.isNotEmpty) {
-                heading2 = value;
-                final base = int.tryParse(value) ?? 0;
-                heading3txtController.text = heading3 = '${base + base}';
-                heading4txtController.text = heading4 = '${base + base * 2}';
-                heading5txtController.text = heading5 = '${base + base * 3}';
-                setState(() {});
-              }
-            },
+            onChanged: (value) =>
+                ref.read(ageingConfigNotifierProvider.notifier).setHeading2(value),
           ),
           _buildDivider(),
           _buildAgeingRow(
@@ -339,15 +263,8 @@ class _AgeingConfigState extends State<AgeingConfig> {
             fromValue: () => heading2txtController.text,
             toLabel: 'To',
             controller: heading3txtController,
-            onChanged: (value) {
-              if (value.isNotEmpty) {
-                heading3 = value;
-                final base = int.tryParse(value) ?? 0;
-                heading4txtController.text = heading4 = '${base + base}';
-                heading5txtController.text = heading5 = '${base + base * 2}';
-                setState(() {});
-              }
-            },
+            onChanged: (value) =>
+                ref.read(ageingConfigNotifierProvider.notifier).setHeading3(value),
           ),
           _buildDivider(),
           _buildAgeingRow(
@@ -355,14 +272,8 @@ class _AgeingConfigState extends State<AgeingConfig> {
             fromValue: () => heading3txtController.text,
             toLabel: 'To',
             controller: heading4txtController,
-            onChanged: (value) {
-              if (value.isNotEmpty) {
-                heading4 = value;
-                final base = int.tryParse(value) ?? 0;
-                heading5txtController.text = heading5 = '${base + base}';
-                setState(() {});
-              }
-            },
+            onChanged: (value) =>
+                ref.read(ageingConfigNotifierProvider.notifier).setHeading4(value),
           ),
           _buildDivider(),
           _buildAgeingRow(
@@ -370,12 +281,8 @@ class _AgeingConfigState extends State<AgeingConfig> {
             fromValue: () => heading4txtController.text,
             toLabel: 'To',
             controller: heading5txtController,
-            onChanged: (value) {
-              if (value.isNotEmpty) {
-                heading5 = value;
-                setState(() {});
-              }
-            },
+            onChanged: (value) =>
+                ref.read(ageingConfigNotifierProvider.notifier).setHeading5(value),
           ),
         ],
       ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -14,6 +15,20 @@ class TokenStore {
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
+  /// A stuck Keychain/keystore call (seen occasionally on the iOS
+  /// Simulator) would otherwise hang every caller - login, refresh, the
+  /// `x-device-id` header build - forever with no error, freezing the UI
+  /// that awaited it. Every access goes through [_read]/[_write]/[_delete]
+  /// so that's bounded everywhere, not just at the network layer.
+  static const _storageTimeout = Duration(seconds: 10);
+
+  Future<String?> _read(String key) =>
+      _storage.read(key: key).timeout(_storageTimeout);
+  Future<void> _write(String key, String value) =>
+      _storage.write(key: key, value: value).timeout(_storageTimeout);
+  Future<void> _delete(String key) =>
+      _storage.delete(key: key).timeout(_storageTimeout);
+
   static const _kUserAccessToken = 'new_user_access_token';
   static const _kUserRefreshToken = 'new_user_refresh_token';
   static const _kCompanyUserAccessToken = 'new_company_user_access_token';
@@ -26,8 +41,8 @@ class TokenStore {
     required String accessToken,
     required String refreshToken,
   }) async {
-    await _storage.write(key: _kUserAccessToken, value: accessToken);
-    await _storage.write(key: _kUserRefreshToken, value: refreshToken);
+    await _write(_kUserAccessToken, accessToken);
+    await _write(_kUserRefreshToken, refreshToken);
   }
 
   Future<void> saveCompanyUserTokens({
@@ -36,23 +51,18 @@ class TokenStore {
     required String companyGuid,
     required String licenseId,
   }) async {
-    await _storage.write(key: _kCompanyUserAccessToken, value: accessToken);
-    await _storage.write(key: _kCompanyUserRefreshToken, value: refreshToken);
-    await _storage.write(key: _kActiveCompanyGuid, value: companyGuid);
-    await _storage.write(key: _kActiveLicenseId, value: licenseId);
+    await _write(_kCompanyUserAccessToken, accessToken);
+    await _write(_kCompanyUserRefreshToken, refreshToken);
+    await _write(_kActiveCompanyGuid, companyGuid);
+    await _write(_kActiveLicenseId, licenseId);
   }
 
-  Future<String?> get userAccessToken => _storage.read(key: _kUserAccessToken);
-  Future<String?> get userRefreshToken =>
-      _storage.read(key: _kUserRefreshToken);
-  Future<String?> get companyUserAccessToken =>
-      _storage.read(key: _kCompanyUserAccessToken);
-  Future<String?> get companyUserRefreshToken =>
-      _storage.read(key: _kCompanyUserRefreshToken);
-  Future<String?> get activeCompanyGuid =>
-      _storage.read(key: _kActiveCompanyGuid);
-  Future<String?> get activeLicenseId =>
-      _storage.read(key: _kActiveLicenseId);
+  Future<String?> get userAccessToken => _read(_kUserAccessToken);
+  Future<String?> get userRefreshToken => _read(_kUserRefreshToken);
+  Future<String?> get companyUserAccessToken => _read(_kCompanyUserAccessToken);
+  Future<String?> get companyUserRefreshToken => _read(_kCompanyUserRefreshToken);
+  Future<String?> get activeCompanyGuid => _read(_kActiveCompanyGuid);
+  Future<String?> get activeLicenseId => _read(_kActiveLicenseId);
 
   /// A random id generated once per install and persisted forever after
   /// (never cleared by [clearAll]/[clearCompanyUserSession] - it identifies
@@ -62,11 +72,11 @@ class TokenStore {
   /// device, or every re-login would look like a brand new device and
   /// quickly exhaust the backend's per-account device cap.
   Future<String> get deviceId async {
-    final existing = await _storage.read(key: _kDeviceId);
+    final existing = await _read(_kDeviceId);
     if (existing != null && existing.isNotEmpty) return existing;
 
     final generated = _generateDeviceId();
-    await _storage.write(key: _kDeviceId, value: generated);
+    await _write(_kDeviceId, generated);
     return generated;
   }
 
@@ -89,20 +99,20 @@ class TokenStore {
   /// the active company/license pointers). Does not touch the legacy
   /// backend's SharedPreferences-based session.
   Future<void> clearAll() async {
-    await _storage.delete(key: _kUserAccessToken);
-    await _storage.delete(key: _kUserRefreshToken);
-    await _storage.delete(key: _kCompanyUserAccessToken);
-    await _storage.delete(key: _kCompanyUserRefreshToken);
-    await _storage.delete(key: _kActiveCompanyGuid);
-    await _storage.delete(key: _kActiveLicenseId);
+    await _delete(_kUserAccessToken);
+    await _delete(_kUserRefreshToken);
+    await _delete(_kCompanyUserAccessToken);
+    await _delete(_kCompanyUserRefreshToken);
+    await _delete(_kActiveCompanyGuid);
+    await _delete(_kActiveLicenseId);
   }
 
   /// Clears only the company-user session (kept when a user logs out of one
   /// company but stays logged in to switch to another).
   Future<void> clearCompanyUserSession() async {
-    await _storage.delete(key: _kCompanyUserAccessToken);
-    await _storage.delete(key: _kCompanyUserRefreshToken);
-    await _storage.delete(key: _kActiveCompanyGuid);
-    await _storage.delete(key: _kActiveLicenseId);
+    await _delete(_kCompanyUserAccessToken);
+    await _delete(_kCompanyUserRefreshToken);
+    await _delete(_kActiveCompanyGuid);
+    await _delete(_kActiveLicenseId);
   }
 }

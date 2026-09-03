@@ -3166,7 +3166,7 @@ class _SalesOrderRegistrationPageState
                                     Navigator.of(context).pop();
 
                                     _selectedledger = ledgerdata.isNotEmpty
-                                        ? ledgerdata[0]['name']
+                                           ? ledgerdata[0]['name']
                                         : null;
 
                                     ledgerAmountController.clear();
@@ -4475,13 +4475,10 @@ class _SalesOrderRegistrationPageState
   /// the merge-or-append + totals recompute this method used to do
   /// directly.
   void addLedger() {
-    final ledgerdata = _s.ledgerData;
-    Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
-      (ledger) => ledger['name'] == _selectedledger,
-    );
-
-    final ledgerName = specificLedger['name'] as String;
+    final ledgerName = _selectedledger as String?;
     final ledgerAmountText = ledgerAmountController.text;
+
+    if (ledgerName == null || ledgerName.isEmpty) return;
 
     if (ledgerName.isNotEmpty && ledgerAmountText.isNotEmpty) {
       Navigator.of(context).pop();
@@ -4642,6 +4639,52 @@ class _SalesOrderRegistrationPageState
           },
         ),
         body: _buildSkeletonForm(),
+      );
+    }
+
+    if (vchtypenamedata.isEmpty) {
+      return Scaffold(
+        bottomNavigationBar: const AppBottomNav(
+          activeTab: AppBottomNavTab.entries,
+          activeEntryType: AppEntryType.salesOrder,
+        ),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        key: _scaffoldKey,
+        appBar: entryAppBar(
+          context: context,
+          title: "New Sales Order Entry",
+          onBack: () {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => PendingSalesOrderEntry()),
+            );
+          },
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 48,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "This company has no Sales Order voucher type configured in Tally.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 

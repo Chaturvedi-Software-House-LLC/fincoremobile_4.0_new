@@ -3,9 +3,9 @@ import 'widgets/scroll_fab.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -14,8 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
-import 'api/voucher_drilldown_helper.dart';
-import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import 'providers/party_drill_down_notifier.dart';
 
 class _PCrumb {
   final IconData icon;
@@ -28,27 +27,27 @@ class _PCrumb {
 // Models
 // ---------------------------------------------------------------------------
 
-class _PItem {
+class PItem {
   final String item, qty;
   final double amount;
-  _PItem({required this.item, required this.qty, required this.amount});
-  factory _PItem.fromJson(Map<String, dynamic> j) => _PItem(
+  PItem({required this.item, required this.qty, required this.amount});
+  factory PItem.fromJson(Map<String, dynamic> j) => PItem(
     item: j['item'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
   );
 }
 
-class _PBill {
+class PBill {
   final String vchno, Partyledger, vchdate;
   final double amount;
-  _PBill({
+  PBill({
     required this.vchno,
     required this.Partyledger,
     required this.vchdate,
     required this.amount,
   });
-  factory _PBill.fromJson(Map<String, dynamic> j) => _PBill(
+  factory PBill.fromJson(Map<String, dynamic> j) => PBill(
     vchno: j['vchno'].toString(),
     Partyledger: j['Partyledger'].toString(),
     vchdate: j['vchdate'].toString(),
@@ -56,26 +55,26 @@ class _PBill {
   );
 }
 
-class _PVchType {
+class PVchType {
   final String vchname, qty;
   final double amount;
-  _PVchType({required this.vchname, required this.qty, required this.amount});
-  factory _PVchType.fromJson(Map<String, dynamic> j) => _PVchType(
+  PVchType({required this.vchname, required this.qty, required this.amount});
+  factory PVchType.fromJson(Map<String, dynamic> j) => PVchType(
     vchname: j['vchname'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
   );
 }
 
-class _PCostCenter {
+class PCostCenter {
   final String costcentre, qty;
   final double amount;
-  _PCostCenter({
+  PCostCenter({
     required this.costcentre,
     required this.qty,
     required this.amount,
   });
-  factory _PCostCenter.fromJson(Map<String, dynamic> j) => _PCostCenter(
+  factory PCostCenter.fromJson(Map<String, dynamic> j) => PCostCenter(
     costcentre: j['costcentre'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
@@ -93,7 +92,7 @@ class _PCostCenter {
 ///   [lockedItem]       – item filter already applied
 ///   [lockedCostcenter] – cost-centre filter already applied
 ///   [lockedVchname]    – voucher-type filter already applied
-class PartyDrillDown extends StatefulWidget {
+class PartyDrillDown extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, total;
   final int? ledgerMasterId;
   final String? lockedItem;
@@ -117,56 +116,31 @@ class PartyDrillDown extends StatefulWidget {
   });
 
   @override
-  _PartyDrillDownState createState() => _PartyDrillDownState();
+  ConsumerState<PartyDrillDown> createState() => _PartyDrillDownState();
 }
 
-class _PartyDrillDownState extends State<PartyDrillDown>
-    with TickerProviderStateMixin {
+class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scrollFabController = ScrollController();
-  late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
-
-  String? company, username;
-  String email = '', name = '';
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true;
-
-  late String _selectedgroup;
-  bool _isLoading = false,
-      _isSearchViewVisible = false,
-      isSortVisible = false,
-      showDateSort = false,
-      isVisibleNoDataFound = false;
-  String selectedSortOption = 'Default';
-  String startdate_text = '', enddate_text = '';
-
-  List<_PItem> item_list = [], filteredItems = [];
-  List<_PBill> bills_list = [], filteredBills = [];
-  List<_PVchType> vchtype_list = [], filteredVchtype = [];
-  List<_PCostCenter> costcenter_list = [], filteredCostcenter = [];
 
   final TextEditingController searchController = TextEditingController();
-  final ScrollController _scItems = ScrollController(),
-      _scBills = ScrollController(),
-      _scVchtype = ScrollController(),
-      _scCostcenter = ScrollController();
+
+  late String startdate_text, enddate_text;
+
+  PartyDrillDownArgs get _args => PartyDrillDownArgs(
+        startDateString: widget.startdate_string,
+        endDateString: widget.enddate_string,
+        type: widget.type,
+        ledger: widget.ledger,
+        ledgerMasterId: widget.ledgerMasterId,
+        lockedItem: widget.lockedItem,
+        lockedCostcenter: widget.lockedCostcenter,
+        lockedVchname: widget.lockedVchname,
+      );
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-
-  List<String> get _availableGroups {
-    final all = <String>['Items', 'Bills', 'Voucher Type', 'Cost Center'];
-    if (widget.lockedItem != null) all.remove('Items');
-    if (widget.lockedVchname != null) all.remove('Voucher Type');
-    if (widget.lockedCostcenter != null) all.remove('Cost Center');
-    return all;
-  }
 
   String _formatCostCenter(String v) => v == 'null' ? '*Not Applicable' : v;
   String _convertDate(String s) =>
@@ -174,349 +148,14 @@ class _PartyDrillDownState extends State<PartyDrillDown>
   String _formatAmount(double v) => formatAmount(v.toString());
 
   // ---------------------------------------------------------------------------
-  // Fetch
-  // ---------------------------------------------------------------------------
-
-  void _clearLists() {
-    item_list.clear();
-    filteredItems.clear();
-    bills_list.clear();
-    filteredBills.clear();
-    vchtype_list.clear();
-    filteredVchtype.clear();
-    costcenter_list.clear();
-    filteredCostcenter.clear();
-  }
-
-  Future<void> _fetchGroup(String group) async {
-    switch (group) {
-      case 'Items':
-      case 'Bills':
-      case 'Voucher Type':
-      case 'Cost Center':
-        break;
-      default:
-        return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      showDateSort = group == 'Bills';
-      if (group != 'Bills' &&
-          (selectedSortOption == 'Newest to Oldest' ||
-              selectedSortOption == 'Oldest to Newest')) {
-        selectedSortOption = 'Default';
-      }
-    });
-
-    _clearLists();
-
-    try {
-      // No legacy fallback: tally-oauth-only sessions always carry a
-      // ledgerMasterId, so a null one here means a legacy-paired session
-      // with no tally-api master id - same "not available" empty-state
-      // convention used elsewhere in this migration (see PartyClicked.dart).
-      final List<dynamic> raw = widget.ledgerMasterId != null
-          ? await _fetchGroupTallyApi(group)
-          : const [];
-      if (raw.isNotEmpty) {
-        isVisibleNoDataFound = false;
-        switch (group) {
-          case 'Items':
-            item_list.addAll(raw.map((j) => _PItem.fromJson(j)));
-            filteredItems = List.from(item_list);
-            break;
-          case 'Bills':
-            bills_list.addAll(raw.map((j) => _PBill.fromJson(j)));
-            filteredBills = List.from(bills_list);
-            break;
-          case 'Voucher Type':
-            vchtype_list.addAll(raw.map((j) => _PVchType.fromJson(j)));
-            filteredVchtype = List.from(vchtype_list);
-            break;
-          case 'Cost Center':
-            costcenter_list.addAll(raw.map((j) => _PCostCenter.fromJson(j)));
-            filteredCostcenter = List.from(costcenter_list);
-            break;
-        }
-      }
-    } catch (e) {
-      debugPrint('PartyDrillDown fetch error: $e');
-    }
-
-    setState(() {
-      _isLoading = false;
-      final empty =
-          item_list.isEmpty &&
-          bills_list.isEmpty &&
-          vchtype_list.isEmpty &&
-          costcenter_list.isEmpty;
-      isVisibleNoDataFound = empty;
-      isSortVisible = !empty;
-      _applySortOption(selectedSortOption);
-    });
-  }
-
-  /// The party ledger's own contribution to [voucher] - the amount summed
-  /// for "Bills"/"Voucher Type" groupings. When [widget.lockedItem] is set
-  /// (viewing a specific item's history), the item's inventory-entry amount
-  /// is used instead, since that's what the drill-down is actually about at
-  /// that point.
-  double _voucherAmount(Map<String, dynamic> voucher) {
-    if (widget.lockedItem != null) {
-      final inventoryEntries =
-          (voucher['inventoryEntries'] as List?)
-              ?.cast<Map<String, dynamic>>() ??
-          const [];
-      return inventoryEntries
-          .where((e) => e['stockItemName'] == widget.lockedItem)
-          .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-    }
-    final ledgerEntries =
-        (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-        const [];
-    final entry = ledgerEntries.firstWhere(
-      (e) => e['ledgerName'] == widget.ledger,
-      orElse: () => ledgerEntries.isNotEmpty ? ledgerEntries.first : const {},
-    );
-    return parseMoneyField(entry['amount']);
-  }
-
-  /// tally-api path: filters vouchers via [fetchDrilldownVouchers] to this
-  /// party/type/locked dimensions, then aggregates client-side into the
-  /// exact legacy JSON shape each `_PXxx.fromJson` factory already expects
-  /// - the rest of this screen (sorting, search, PDF/CSV export) is
-  /// untouched. `Voucher Type` grouping is a known simplification: unlike
-  /// legacy Tally, tally-api's `voucherTypeName` has no broader/narrower
-  /// hierarchy, so once [widget.type] is already fixed this almost always
-  /// yields one group rather than several.
-  Future<List<Map<String, dynamic>>> _fetchGroupTallyApi(String group) async {
-    final from = parseCompactDate(widget.startdate_string);
-    final to = parseCompactDate(widget.enddate_string);
-    final vouchers = await fetchDrilldownVouchers(
-      from: from,
-      to: to,
-      partyLedgerName: widget.ledger,
-      itemName: widget.lockedItem,
-      voucherTypeName: widget.lockedVchname ?? widget.type,
-      costCentreName: widget.lockedCostcenter,
-    );
-
-    switch (group) {
-      case 'Items':
-        final totals = <String, Map<String, double>>{};
-        for (final voucher in vouchers) {
-          final inventoryEntries =
-              (voucher['inventoryEntries'] as List?)
-                  ?.cast<Map<String, dynamic>>() ??
-              const [];
-          for (final entry in inventoryEntries) {
-            final name = (entry['stockItemName'] ?? '').toString();
-            final bucket = totals.putIfAbsent(
-              name,
-              () => {'qty': 0, 'amount': 0},
-            );
-            bucket['qty'] = bucket['qty']! + parseMoneyField(entry['quantity']);
-            bucket['amount'] =
-                bucket['amount']! + parseMoneyField(entry['amount']);
-          }
-        }
-        return [
-          for (final entry in totals.entries)
-            {
-              'item': entry.key,
-              'qty': entry.value['qty'],
-              'amount': entry.value['amount'],
-            },
-        ];
-
-      case 'Bills':
-        return [
-          for (final voucher in vouchers)
-            {
-              'vchno': voucher['number'] ?? '',
-              'Partyledger': widget.ledger,
-              'vchdate': voucher['date'] ?? '',
-              'amount': _voucherAmount(voucher),
-            },
-        ];
-
-      case 'Voucher Type':
-        final totals = <String, Map<String, num>>{};
-        for (final voucher in vouchers) {
-          final name = (voucher['voucherTypeName'] ?? '').toString();
-          final bucket = totals.putIfAbsent(
-            name,
-            () => {'count': 0, 'amount': 0.0},
-          );
-          bucket['count'] = bucket['count']! + 1;
-          bucket['amount'] = bucket['amount']! + _voucherAmount(voucher);
-        }
-        return [
-          for (final entry in totals.entries)
-            {
-              'vchname': entry.key,
-              'qty': entry.value['count'].toString(),
-              'amount': entry.value['amount'],
-            },
-        ];
-
-      case 'Cost Center':
-        final totals = <String, Map<String, num>>{};
-        for (final voucher in vouchers) {
-          final costCentreEntries =
-              (voucher['costCentreAllocations'] as List?)
-                  ?.cast<Map<String, dynamic>>() ??
-              const [];
-          if (costCentreEntries.isEmpty) {
-            final bucket = totals.putIfAbsent(
-              'null',
-              () => {'count': 0, 'amount': 0.0},
-            );
-            bucket['count'] = bucket['count']! + 1;
-            bucket['amount'] = bucket['amount']! + _voucherAmount(voucher);
-          } else {
-            for (final entry in costCentreEntries) {
-              final name = (entry['costCentreName'] ?? 'null').toString();
-              final bucket = totals.putIfAbsent(
-                name,
-                () => {'count': 0, 'amount': 0.0},
-              );
-              bucket['count'] = bucket['count']! + 1;
-              bucket['amount'] =
-                  bucket['amount']! + parseMoneyField(entry['amount']);
-            }
-          }
-        }
-        return [
-          for (final entry in totals.entries)
-            {
-              'costcentre': entry.key,
-              'qty': entry.value['count'].toString(),
-              'amount': entry.value['amount'],
-            },
-        ];
-
-      default:
-        return const [];
-    }
-  }
-
-  // ---------------------------------------------------------------------------
   // Sort
   // ---------------------------------------------------------------------------
 
-  void _applySortOption(String option) {
-    switch (option) {
-      case 'Default':
-        _sortDefault();
-        break;
-      case 'Newest to Oldest':
-        _sortDateDesc();
-        break;
-      case 'Oldest to Newest':
-        _sortDateAsc();
-        break;
-      case 'A->Z':
-        _sortAlphaAsc();
-        break;
-      case 'Z->A':
-        _sortAlphaDesc();
-        break;
-      case 'Amount High to Low':
-        _sortAmountDesc();
-        break;
-      case 'Amount Low to High':
-        _sortAmountAsc();
-        break;
-    }
-  }
-
-  void _sortDefault() => setState(() {
-    filteredItems = List.from(item_list);
-    filteredBills = List.from(bills_list);
-    filteredVchtype = List.from(vchtype_list);
-    filteredCostcenter = List.from(costcenter_list);
-  });
-
-  void _sortAlphaAsc() => setState(() {
-    filteredItems.sort((a, b) => a.item.compareTo(b.item));
-    filteredBills.sort((a, b) => a.Partyledger.compareTo(b.Partyledger));
-    filteredVchtype.sort((a, b) => a.vchname.compareTo(b.vchname));
-    filteredCostcenter.sort((a, b) => a.costcentre.compareTo(b.costcentre));
-  });
-
-  void _sortAlphaDesc() => setState(() {
-    filteredItems.sort((a, b) => b.item.compareTo(a.item));
-    filteredBills.sort((a, b) => b.Partyledger.compareTo(a.Partyledger));
-    filteredVchtype.sort((a, b) => b.vchname.compareTo(a.vchname));
-    filteredCostcenter.sort((a, b) => b.costcentre.compareTo(a.costcentre));
-  });
-
-  void _sortDateAsc() => setState(() {
-    filteredBills.sort((a, b) => a.vchdate.compareTo(b.vchdate));
-  });
-  void _sortDateDesc() => setState(() {
-    filteredBills.sort((a, b) => b.vchdate.compareTo(a.vchdate));
-  });
-
-  void _sortAmountAsc() {
-    final isSales = widget.type == 'Sales';
-    setState(() {
-      filteredItems.sort(
-        (a, b) => isSales
-            ? a.amount.compareTo(b.amount)
-            : b.amount.compareTo(a.amount),
-      );
-      filteredBills.sort(
-        (a, b) => isSales
-            ? a.amount.compareTo(b.amount)
-            : b.amount.compareTo(a.amount),
-      );
-      filteredVchtype.sort(
-        (a, b) => isSales
-            ? a.amount.compareTo(b.amount)
-            : b.amount.compareTo(a.amount),
-      );
-      filteredCostcenter.sort(
-        (a, b) => isSales
-            ? a.amount.compareTo(b.amount)
-            : b.amount.compareTo(a.amount),
-      );
-    });
-  }
-
-  void _sortAmountDesc() {
-    final isSales = widget.type == 'Sales';
-    setState(() {
-      filteredItems.sort(
-        (a, b) => isSales
-            ? b.amount.compareTo(a.amount)
-            : a.amount.compareTo(b.amount),
-      );
-      filteredBills.sort(
-        (a, b) => isSales
-            ? b.amount.compareTo(a.amount)
-            : a.amount.compareTo(b.amount),
-      );
-      filteredVchtype.sort(
-        (a, b) => isSales
-            ? b.amount.compareTo(a.amount)
-            : a.amount.compareTo(b.amount),
-      );
-      filteredCostcenter.sort(
-        (a, b) => isSales
-            ? b.amount.compareTo(a.amount)
-            : a.amount.compareTo(b.amount),
-      );
-    });
-  }
-
-  void _showSortSheet() {
+  void _showSortSheet(PartyDrillDownState state) {
     final options = [
       'Default',
-      if (showDateSort) 'Newest to Oldest',
-      if (showDateSort) 'Oldest to Newest',
+      if (state.showDateSort) 'Newest to Oldest',
+      if (state.showDateSort) 'Oldest to Newest',
       'A->Z',
       'Z->A',
       'Amount High to Low',
@@ -524,8 +163,8 @@ class _PartyDrillDownState extends State<PartyDrillDown>
     ];
     final icons = [
       Icons.sort_rounded,
-      if (showDateSort) Icons.date_range_sharp,
-      if (showDateSort) Icons.date_range_sharp,
+      if (state.showDateSort) Icons.date_range_sharp,
+      if (state.showDateSort) Icons.date_range_sharp,
       Icons.sort_by_alpha_rounded,
       Icons.sort_by_alpha_rounded,
       Icons.attach_money_outlined,
@@ -556,8 +195,9 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                 itemExtent: 50,
                 itemBuilder: (ctx, i) => GestureDetector(
                   onTap: () {
-                    setState(() => selectedSortOption = options[i]);
-                    _applySortOption(options[i]);
+                    ref
+                        .read(partyDrillDownNotifierProvider(_args).notifier)
+                        .selectSortOption(options[i]);
                     Navigator.pop(ctx);
                   },
                   child: ListTile(
@@ -565,12 +205,12 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                     title: Text(
                       options[i],
                       style: GoogleFonts.poppins(
-                        fontWeight: options[i] == selectedSortOption
+                        fontWeight: options[i] == state.selectedSortOption
                             ? FontWeight.bold
                             : FontWeight.normal,
                       ),
                     ),
-                    trailing: options[i] == selectedSortOption
+                    trailing: options[i] == state.selectedSortOption
                         ? Icon(Icons.check, color: app_color)
                         : null,
                   ),
@@ -584,58 +224,29 @@ class _PartyDrillDownState extends State<PartyDrillDown>
   }
 
   // ---------------------------------------------------------------------------
-  // Search
-  // ---------------------------------------------------------------------------
-
-  void _handleSearch(String value) {
-    final q = value.toLowerCase();
-    setState(() {
-      if (value.isEmpty) {
-        filteredItems = List.from(item_list);
-        filteredBills = List.from(bills_list);
-        filteredVchtype = List.from(vchtype_list);
-        filteredCostcenter = List.from(costcenter_list);
-      } else {
-        filteredItems = item_list
-            .where((e) => e.item.toLowerCase().contains(q))
-            .toList();
-        filteredBills = bills_list
-            .where((e) => e.vchno.toLowerCase().contains(q))
-            .toList();
-        filteredVchtype = vchtype_list
-            .where((e) => e.vchname.toLowerCase().contains(q))
-            .toList();
-        filteredCostcenter = costcenter_list
-            .where((e) => e.costcentre.toLowerCase().contains(q))
-            .toList();
-      }
-    });
-  }
-
-  // ---------------------------------------------------------------------------
   // PDF / CSV
   // ---------------------------------------------------------------------------
 
-  Future<void> _shareAsPDF() async {
+  Future<void> _shareAsPDF(PartyDrillDownState state) async {
     final font = pw.Font.ttf(
       await rootBundle.load('assets/fonts/NotoSans.ttf'),
     );
     final pdf = pw.Document();
-    final reportname = '$_selectedgroup Wise ${widget.type} Summary';
+    final reportname = '${state.selectedGroup} Wise ${widget.type} Summary';
 
     List<String> headers;
     List<List<String>> rows;
 
-    switch (_selectedgroup) {
+    switch (state.selectedGroup) {
       case 'Items':
         headers = ['Item', 'Qty', 'Amount'];
-        rows = item_list
+        rows = state.itemList
             .map((e) => [e.item, e.qty, _formatAmount(e.amount)])
             .toList();
         break;
       case 'Bills':
         headers = ['Vch Date', 'Vch No', 'Amount'];
-        rows = bills_list
+        rows = state.billsList
             .map(
               (e) => [
                 _convertDate(e.vchdate),
@@ -647,13 +258,13 @@ class _PartyDrillDownState extends State<PartyDrillDown>
         break;
       case 'Voucher Type':
         headers = ['Vch Name', 'Amount'];
-        rows = vchtype_list
+        rows = state.vchtypeList
             .map((e) => [e.vchname, _formatAmount(e.amount)])
             .toList();
         break;
       default:
         headers = ['Cost Center', 'Amount'];
-        rows = costcenter_list
+        rows = state.costcenterList
             .map(
               (e) => [_formatCostCenter(e.costcentre), _formatAmount(e.amount)],
             )
@@ -672,7 +283,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
               pw.Text(
-                company ?? '',
+                state.company,
                 style: pw.TextStyle(
                   fontSize: 20,
                   fontWeight: pw.FontWeight.bold,
@@ -720,25 +331,28 @@ class _PartyDrillDownState extends State<PartyDrillDown>
     await File(path).writeAsBytes(await pdf.save());
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing $_selectedgroup wise ${widget.type} Report of $company',
+        text:
+            'Sharing ${state.selectedGroup} wise ${widget.type} Report of ${state.company}',
         files: [XFile(path)],
       ),
     );
   }
 
-  Future<void> _shareAsCSV() async {
+  Future<void> _shareAsCSV(PartyDrillDownState state) async {
     List<List<dynamic>> csvData;
-    switch (_selectedgroup) {
+    switch (state.selectedGroup) {
       case 'Items':
         csvData = [
           ['Item', 'Qty', 'Amount'],
-          ...item_list.map((e) => [e.item, e.qty, _formatAmount(e.amount)]),
+          ...state.itemList.map(
+            (e) => [e.item, e.qty, _formatAmount(e.amount)],
+          ),
         ];
         break;
       case 'Bills':
         csvData = [
           ['Vch Date', 'Vch No', 'Amount'],
-          ...bills_list.map(
+          ...state.billsList.map(
             (e) => [_convertDate(e.vchdate), e.vchno, _formatAmount(e.amount)],
           ),
         ];
@@ -746,13 +360,15 @@ class _PartyDrillDownState extends State<PartyDrillDown>
       case 'Voucher Type':
         csvData = [
           ['Vch Name', 'Amount'],
-          ...vchtype_list.map((e) => [e.vchname, _formatAmount(e.amount)]),
+          ...state.vchtypeList.map(
+            (e) => [e.vchname, _formatAmount(e.amount)],
+          ),
         ];
         break;
       default:
         csvData = [
           ['Cost Center', 'Amount'],
-          ...costcenter_list.map(
+          ...state.costcenterList.map(
             (e) => [_formatCostCenter(e.costcentre), _formatAmount(e.amount)],
           ),
         ];
@@ -763,7 +379,8 @@ class _PartyDrillDownState extends State<PartyDrillDown>
     await File(path).writeAsString(const ListToCsvConverter().convert(csvData));
     await SharePlus.instance.share(
       ShareParams(
-        text: 'Sharing $_selectedgroup wise ${widget.type} Report of $company',
+        text:
+            'Sharing ${state.selectedGroup} wise ${widget.type} Report of ${state.company}',
         files: [XFile(path)],
       ),
     );
@@ -773,41 +390,11 @@ class _PartyDrillDownState extends State<PartyDrillDown>
   // Init
   // ---------------------------------------------------------------------------
 
-  Future<void> _initPrefs() async {
-    prefs = await SharedPreferences.getInstance();
-    setState(() {
-      company = prefs.getString('company_name');
-      username = prefs.getString('username');
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-      isRolesVisible = isUserVisible = SecuritybtnAcessHolder == 'True';
-    });
-
-    try {
-      selectedSortOption = prefs.getString('sort') ?? 'Default';
-      if (selectedSortOption == 'null') selectedSortOption = 'Default';
-    } catch (_) {
-      selectedSortOption = 'Default';
-    }
-
-    final emailNav = prefs.getString('email_nav');
-    final nameNav = prefs.getString('name_nav');
-    if (emailNav != null && nameNav != null) {
-      email = emailNav;
-      name = nameNav;
-    }
-
-    startdate_text = _convertDate(widget.startdate_string);
-    enddate_text = _convertDate(widget.enddate_string);
-
-    await _fetchGroup(_selectedgroup);
-  }
-
   @override
   void initState() {
     super.initState();
-    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _selectedgroup = _availableGroups.first;
-    _initPrefs();
+    startdate_text = _convertDate(widget.startdate_string);
+    enddate_text = _convertDate(widget.enddate_string);
   }
 
   @override
@@ -822,6 +409,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(partyDrillDownNotifierProvider(_args));
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.party),
       key: _scaffoldKey,
@@ -867,13 +455,15 @@ class _PartyDrillDownState extends State<PartyDrillDown>
           ),
           actions: [
             IconButton(
-              onPressed: () => setState(() {
-                _isSearchViewVisible = !_isSearchViewVisible;
-                if (!_isSearchViewVisible) {
+              onPressed: () {
+                final notifier = ref.read(
+                  partyDrillDownNotifierProvider(_args).notifier,
+                );
+                notifier.toggleSearchView();
+                if (state.isSearchViewVisible) {
                   searchController.clear();
-                  _handleSearch('');
                 }
-              }),
+              },
               icon: const Icon(Icons.search, color: Colors.white, size: 22),
             ),
             // Sort now lives in the app bar (standard Material/iOS
@@ -883,10 +473,12 @@ class _PartyDrillDownState extends State<PartyDrillDown>
             // (greyed out) rather than hidden when there's nothing to sort,
             // so its position doesn't jump around as data loads.
             IconButton(
-              onPressed: isSortVisible ? _showSortSheet : null,
+              onPressed: state.isSortVisible
+                  ? () => _showSortSheet(state)
+                  : null,
               icon: Icon(
                 Icons.sort_rounded,
-                color: isSortVisible ? Colors.white : Colors.white38,
+                color: state.isSortVisible ? Colors.white : Colors.white38,
                 size: 22,
               ),
             ),
@@ -909,7 +501,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          _shareAsPDF();
+                          _shareAsPDF(state);
                         },
                         child: Row(
                           children: [
@@ -934,7 +526,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          _shareAsCSV();
+                          _shareAsCSV(state);
                         },
                         child: Row(
                           children: [
@@ -1078,7 +670,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                             Expanded(
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
-                                  value: _selectedgroup,
+                                  value: state.selectedGroup,
                                   isDense: true,
                                   dropdownColor: Theme.of(
                                     context,
@@ -1100,10 +692,15 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                                   ),
                                   onChanged: (v) {
                                     if (v == null) return;
-                                    setState(() => _selectedgroup = v);
-                                    _fetchGroup(v);
+                                    ref
+                                        .read(
+                                          partyDrillDownNotifierProvider(
+                                            _args,
+                                          ).notifier,
+                                        )
+                                        .selectGroup(v);
                                   },
-                                  items: _availableGroups
+                                  items: _args.availableGroups
                                       .map(
                                         (g) => DropdownMenuItem(
                                           value: g,
@@ -1143,14 +740,20 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_isSearchViewVisible) ...[
+                      if (state.isSearchViewVisible) ...[
                         Padding(
                           padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                           child: SizedBox(
                             height: 46,
                             child: TextField(
                               controller: searchController,
-                              onChanged: _handleSearch,
+                              onChanged: (value) => ref
+                                  .read(
+                                    partyDrillDownNotifierProvider(
+                                      _args,
+                                    ).notifier,
+                                  )
+                                  .filter(value),
                               style: GoogleFonts.poppins(
                                 fontSize: 13.5,
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -1200,11 +803,11 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                   ),
                 ),
               ),
-              _buildListSection(),
+              _buildListSection(state),
             ],
           ),
 
-          if (_isLoading)
+          if (state.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
@@ -1462,15 +1065,15 @@ class _PartyDrillDownState extends State<PartyDrillDown>
     );
   }
 
-  Widget _buildListSection() {
-    if (isVisibleNoDataFound) return _buildEmptyState();
-    switch (_selectedgroup) {
+  Widget _buildListSection(PartyDrillDownState state) {
+    if (state.isVisibleNoDataFound) return _buildEmptyState();
+    switch (state.selectedGroup) {
       case 'Items':
         return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((_, i) {
-              final item = filteredItems[i];
+              final item = state.filteredItems[i];
               return _buildCard(
                 title: item.item,
                 amount: item.amount,
@@ -1497,7 +1100,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                   ),
                 ),
               );
-            }, childCount: filteredItems.length),
+            }, childCount: state.filteredItems.length),
           ),
         );
 
@@ -1506,14 +1109,14 @@ class _PartyDrillDownState extends State<PartyDrillDown>
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((_, i) {
-              final item = filteredBills[i];
+              final item = state.filteredBills[i];
               return _buildCard(
                 title: item.vchno,
                 amount: item.amount,
                 date: item.vchdate,
                 listType: 'Bills',
               );
-            }, childCount: filteredBills.length),
+            }, childCount: state.filteredBills.length),
           ),
         );
 
@@ -1522,7 +1125,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((_, i) {
-              final item = filteredVchtype[i];
+              final item = state.filteredVchtype[i];
               return _buildCard(
                 title: item.vchname,
                 amount: item.amount,
@@ -1548,7 +1151,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                   ),
                 ),
               );
-            }, childCount: filteredVchtype.length),
+            }, childCount: state.filteredVchtype.length),
           ),
         );
 
@@ -1557,7 +1160,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((_, i) {
-              final item = filteredCostcenter[i];
+              final item = state.filteredCostcenter[i];
               return _buildCard(
                 title: _formatCostCenter(item.costcentre),
                 amount: item.amount,
@@ -1588,7 +1191,7 @@ class _PartyDrillDownState extends State<PartyDrillDown>
                   ),
                 ),
               );
-            }, childCount: filteredCostcenter.length),
+            }, childCount: state.filteredCostcenter.length),
           ),
         );
 

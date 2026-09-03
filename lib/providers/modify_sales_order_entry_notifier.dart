@@ -6,10 +6,9 @@ import '../Items.dart' show formatlastsaledate;
 import '../ModifySalesOrderEntry.dart';
 import '../api/api_exception.dart';
 import '../api/godown_repository.dart';
-import '../api/group_repository.dart';
-import '../api/ledger_repository.dart';
 import '../api/monthly_bucket_helper.dart' show parseMoneyField;
 import '../api/stock_repository.dart';
+import '../api/voucher_entry_dropdowns_repository.dart';
 import '../api/voucher_entry_repository.dart';
 import '../api/voucher_type_repository.dart';
 
@@ -84,20 +83,15 @@ import '../api/voucher_type_repository.dart';
 ///   `TextEditingController`s from immediately after `loadData()`
 ///   resolves: [ModifySalesOrderEntryState.narration] and
 ///   [ModifySalesOrderEntryState.referenceNo].
-/// - `addLedger(String ledgerName, String ledgerAmountText)` preserves a pre-existing
-///   bug found while porting, left as-is per the migration's own rule
-///   against fixing out-of-scope pre-existing bugs (confirmed via
-///   `git show HEAD:lib/ModifySalesOrderEntry.dart` - not something
-///   introduced by this migration): it reads
-///   `specificLedger['vatapplicable']` (all-lowercase) into a non-nullable
-///   `int`, but `ledgerData` rows only ever carry the camelCase
-///   `vatApplicable` bool key (see `loadData()` below) - so this lookup is
-///   always `null`, and assigning it to `int vatApplicable` throws a
-///   runtime `TypeError` the first time a user actually adds a ledger on
-///   this screen. `SalesOrderRegistration.dart`'s own `addLedger()` does
-///   not have this bug (it already reads camelCase `vatApplicable` as a
-///   bool directly) - this divergence is specific to
-///   `ModifySalesOrderEntry.dart` and predates this Riverpod migration.
+/// - `addLedger(String ledgerName, String ledgerAmountText)` originally
+///   preserved a pre-existing bug found while porting (confirmed via
+///   `git show HEAD:lib/ModifySalesOrderEntry.dart` - it predated this
+///   migration): it read `specificLedger['vatapplicable']` (all-lowercase)
+///   into a non-nullable `int`, but `ledgerData` rows only ever carry the
+///   camelCase `vatApplicable` bool key (see `loadData()` below) - always
+///   `null`, throwing a runtime `TypeError` the first time a user actually
+///   added a ledger. Fixed to read the real `vatApplicable` bool directly,
+///   matching `SalesOrderRegistration.dart`'s own `addLedger()`.
 /// - Dialog-composition-only fields that stay widget-local (unmigrated,
 ///   same treatment as `TextEditingController`s), matching the sibling's
 ///   own list: `_selectedledger`, `_selecteditem`, `_selectedunit`,
@@ -581,22 +575,18 @@ class ModifySalesOrderEntryNotifier
   /// dialog-local `_selectedledger`/`ledgerAmountController` before
   /// calling.
   ///
-  /// Preserves a pre-existing bug (see this file's own doc-comment above):
-  /// reads `specificLedger['vatapplicable']` (all-lowercase) into a
-  /// non-nullable `int`, which is always `null` since `ledgerdata` rows
-  /// only carry the camelCase `vatApplicable` bool - this throws a runtime
-  /// `TypeError` the first time it actually runs. Confirmed pre-existing
-  /// via `git show HEAD:lib/ModifySalesOrderEntry.dart` and left
-  /// unfixed, per this migration's rule against fixing out-of-scope
-  /// pre-existing bugs.
   void addLedger(String ledgerName, String ledgerAmountText) {
     _commit(() {
       Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
         (ledger) => ledger['name'] == ledgerName,
       );
 
-      final int vatApplicable = specificLedger['vatapplicable'];
-      final vatApp = vatApplicable == 1 ? true : false;
+      // tally-api's `/ledgers` returns this as a camelCase boolean
+      // (`vatApplicable`), not legacy's lowercase 1/0 `vatapplicable` -
+      // fixed to actually read the real field (this used to crash with a
+      // TypeError the first time it ran, since assigning the always-null
+      // lowercase lookup to a non-nullable int throws immediately).
+      final bool vatApp = specificLedger['vatApplicable'] == true;
 
       if (ledgerName.isNotEmpty && ledgerAmountText.isNotEmpty) {
         double parsedAmount = double.parse(ledgerAmountText.replaceAll(',', ''));
@@ -759,28 +749,38 @@ class ModifySalesOrderEntryNotifier
     try {
       final results = await Future.wait([
         StockRepository.instance.listStockItems(),
-        LedgerRepository.instance.listAllLedgers(),
-        LedgerRepository.instance.listLedgers(),
-        GroupRepository.instance.listAll(),
+        VoucherEntryDropdownsRepository.instance.salesData(type: 'salesOrder'),
         GodownRepository.instance.listAll(),
         VoucherTypeRepository.instance.listAll(),
       ]);
 
-      final stockItems = results[0];
-      final allLedgers = results[1];
-      final partyLedgers = results[2];
-      final groups = results[3];
-      final godowns = results[4];
-      final voucherTypes = results[5];
+      final stockItems = results[0] as List<Map<String, dynamic>>;
+      final salesData = results[1] as Map<String, dynamic>;
+      final godowns = results[2] as List<Map<String, dynamic>>;
+      final voucherTypes = results[3] as List<Map<String, dynamic>>;
 
-      // masterIds of every group with tally-api's `'SALES'` GroupReservedName
-      // enum label - used to classify "sales ledgers" the same way
-      // tally-api's own reports classify sales activity.
-      final salesAccountGroupIds = groups
-          .where((g) => g['reservedName'] == 'SALES')
-          .map((g) => g['masterId'] as int)
-          .toSet();
+      // Same server-side classification `SalesOrderRegistration.dart` now
+      // uses (via `VoucherEntryDropdownsRepository.salesData()`), not this
+      // screen's own former client-side re-derivation - that ad hoc logic
+      // (`LedgerRepository.listLedgers()` for "party ledgers",
+      // group-masterId matching for "sales ledgers") disagreed with the
+      // server's actual classification, producing a different ledger set
+      // than the create-flow screen for the same company.
+      final partyLedgers = (salesData['partyLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final salesLedgers = (salesData['salesLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final vatLedgers = (salesData['vatLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final otherLedgersRaw = (salesData['otherLedgers'] as List)
+          .cast<Map<String, dynamic>>();
 
+      final allLedgers = [
+        ...partyLedgers,
+        ...salesLedgers,
+        ...vatLedgers,
+        ...otherLedgersRaw,
+      ];
       for (final l in allLedgers) {
         _ledgerMasterIdByName[l['name'] as String] = l['masterId'] as int;
       }
@@ -802,33 +802,15 @@ class ModifySalesOrderEntryNotifier
         partyledgerdata = partyLedgers.map((l) => l['name'] as String).toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-        // "Sales ledgers" - every ledger under a 'Sales Accounts' group.
-        salesledger_data = allLedgers
-            .where((l) => salesAccountGroupIds.contains(l['groupMasterId']))
-            .map((l) => l['name'] as String)
-            .toList();
+        salesledger_data = salesLedgers.map((l) => l['name'] as String).toList();
 
-        // "Other ledgers" (the free-pick "Add Ledger" dropdown) - every
-        // ledger not already offered via the Party or Sales Ledger
-        // dropdowns above.
-        final partyNames = partyledgerdata.toSet();
-        final salesNames = salesledger_data.toSet();
-        ledgerdata = allLedgers
-            .where(
-              (l) =>
-                  !partyNames.contains(l['name']) &&
-                  !salesNames.contains(l['name']),
-            )
-            .toList();
+        ledgerdata = [
+          for (final l in otherLedgersRaw)
+            {'name': l['name'], 'vatApplicable': l['vatApplicable']},
+        ];
 
-        // VAT ledgers - tally-api exposes a direct `vatApplicable` flag per
-        // ledger.
         vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll(
-          allLedgers
-              .where((l) => l['vatApplicable'] == true)
-              .map((l) => l['name'] as String),
-        );
+        vatledgerdata.addAll(vatLedgers.map((l) => l['name'] as String));
 
         // Reshapes tally-api's stock-item row into the `name`/`saleprice`/
         // `standardprice`/`unit` shape `_updateUnitDropdown`/

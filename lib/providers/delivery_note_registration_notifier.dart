@@ -9,6 +9,7 @@ import '../api/monthly_bucket_helper.dart' show parseCompactDate;
 import '../api/pagination_helper.dart';
 import '../api/stock_repository.dart';
 import '../api/tally_api_client.dart';
+import '../api/voucher_entry_dropdowns_repository.dart';
 import '../api/voucher_entry_repository.dart';
 import '../constants.dart' show vanSalesSerialNo, isUniGasSerial;
 
@@ -60,17 +61,14 @@ import '../constants.dart' show vanSalesSerialNo, isUniGasSerial;
 ///   those need `itemdata`/dialog-local `TextEditingController`s, then hands
 ///   plain values to the notifier, exactly mirroring
 ///   `sales_registration_notifier.dart`'s `BulkAddEntry`/`addSelectedItemsInBulk`.
-/// - `addOrMergeLedger` preserves a genuine pre-existing bug verbatim rather
-///   than fixing it (out of scope per this migration's rules): this screen's
-///   own `ledgerdata` rows are built by `loadData()` as bare `{'name': ...}`
-///   maps with **no** `'vatapplicable'` key at all (unlike
-///   `sales_registration_notifier.dart`'s `ledgerdata`, which does carry
-///   one) - so `ledgerRow['vatapplicable']` is always `null`, and assigning
-///   that to the non-nullable `int vatApplicable` throws a runtime
-///   `TypeError` the moment a ledger is actually added. This was true of the
-///   pre-migration widget code too (`int vatApplicable =
-///   specificLedger['vatapplicable'];` with no key ever populated) - kept
-///   byte-for-byte here, not patched.
+/// - `addOrMergeLedger` originally preserved a genuine pre-existing bug
+///   verbatim: this screen's own `ledgerdata` rows were built by
+///   `loadData()` as bare `{'name': ...}` maps with no `vatApplicable` key
+///   at all, and the lowercase `'vatapplicable'` lookup was always `null`
+///   regardless - throwing a runtime `TypeError` the moment a ledger was
+///   actually added. Fixed: `loadData()` now carries `vatApplicable`
+///   through into `ledgerdata`, and `addOrMergeLedger` reads the real
+///   camelCase bool (tally-api's `/ledgers` response field).
 /// - `loadLedgerData` returns a [DnLedgerLookupResult] (or `null` on
 ///   "ledger not found") instead of calling `showDeliveryNoteDialog(context,
 ///   ...)` itself - that's pure UI (needs `context`), so the widget's own
@@ -695,18 +693,19 @@ class DeliveryNoteRegistrationNotifier
   }
 
   /// Verbatim port of `addLedger()`'s data-mutation half (merge-by-name or
-  /// append). Preserves a genuine pre-existing bug verbatim - see this
-  /// file's doc-comment: `ledgerdata` rows never carry a `'vatapplicable'`
-  /// key, so this throws a runtime `TypeError` the moment it actually runs,
-  /// exactly as the pre-migration widget code did.
+  /// append).
   void addOrMergeLedger(String ledgerName, double amount) {
     _commit(() {
       final specificLedger = ledgerdata.firstWhere(
         (ledger) => ledger['name'] == ledgerName,
       );
 
-      final int vatApplicable = specificLedger['vatapplicable'];
-      final bool vatApp = vatApplicable == 1;
+      // tally-api's `/ledgers` returns this as a camelCase boolean
+      // (`vatApplicable`), not legacy's lowercase 1/0 `vatapplicable` -
+      // fixed to actually read the real field (`loadData()` now carries
+      // it through into `ledgerdata` too; this used to crash with a
+      // TypeError the moment a manual ledger was added).
+      final bool vatApp = specificLedger['vatApplicable'] == true;
 
       int existingIndex = ledgerEntries.indexWhere(
         (entry) => entry.ledgerName == ledgerName,
@@ -988,41 +987,36 @@ class DeliveryNoteRegistrationNotifier
             '/currencies?page=$page&limit=100',
           ),
         ),
+        VoucherEntryDropdownsRepository.instance.salesData(
+          type: 'deliveryNote',
+        ),
       ]);
 
-      _stockItemsRaw = results[0];
-      _ledgersRaw = results[1];
-      _groupsRaw = results[2];
-      _unitsRaw = results[3];
-      _godownsRaw = results[4];
-      _voucherTypesRaw = results[5];
-      _currenciesRaw = results[6];
-
-      final Set<int> partyGroupIds = _groupsRaw
-          .where(
-            (g) =>
-                const {'SUNDRY_DEBTORS', 'SUNDRY_CREDITORS'}.contains(
-                  g['reservedName']?.toString(),
-                ) ||
-                const {
-                  'sundry debtors',
-                  'sundry creditors',
-                  'customers',
-                  'suppliers',
-                  'creditors',
-                  'debtors',
-                }.contains((g['name']?.toString() ?? '').trim().toLowerCase()),
-          )
-          .map((g) => g['masterId'] as int)
-          .toSet();
-      final Set<int> salesGroupIds = _groupsRaw
-          .where((g) => g['reservedName']?.toString() == 'SALES')
-          .map((g) => g['masterId'] as int)
-          .toSet();
-      final Set<int> vatGroupIds = _groupsRaw
-          .where((g) => g['reservedName']?.toString() == 'DUTIES')
-          .map((g) => g['masterId'] as int)
-          .toSet();
+      _stockItemsRaw = results[0] as List<Map<String, dynamic>>;
+      _ledgersRaw = results[1] as List<Map<String, dynamic>>;
+      _groupsRaw = results[2] as List<Map<String, dynamic>>;
+      _unitsRaw = results[3] as List<Map<String, dynamic>>;
+      _godownsRaw = results[4] as List<Map<String, dynamic>>;
+      _voucherTypesRaw = results[5] as List<Map<String, dynamic>>;
+      _currenciesRaw = results[6] as List<Map<String, dynamic>>;
+      // Same server-side classification `SalesRegistration.dart`/
+      // `SalesOrderRegistration.dart` use (via
+      // `VoucherEntryDropdownsRepository.salesData()`) - replaces this
+      // screen's own client-side re-derivation below (`partyGroupIds`/
+      // `salesGroupIds`/`vatGroupIds`), which disagreed with the server's
+      // actual classification (party ledgers excluded Bank/Cash/Branches
+      // that the server's form includes; VAT ledgers happened to already
+      // match here, but for consistency with the other two screens the
+      // whole ledger dropdown set now comes from the same endpoint).
+      final salesData = results[7] as Map<String, dynamic>;
+      final partyLedgers = (salesData['partyLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final salesLedgers = (salesData['salesLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final vatLedgers = (salesData['vatLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final otherLedgersRaw = (salesData['otherLedgers'] as List)
+          .cast<Map<String, dynamic>>();
 
       String? voucherTypeToFetch;
 
@@ -1050,10 +1044,7 @@ class DeliveryNoteRegistrationNotifier
         partyledgerdata.clear();
         partyLedgerPriceLevelMap.clear();
 
-        for (final ledger in _ledgersRaw) {
-          if (!partyGroupIds.contains(ledger['groupMasterId'] as int?)) {
-            continue;
-          }
+        for (final ledger in partyLedgers) {
           final String ledgerName = ledger['name']?.toString().trim() ?? '';
           if (ledgerName.isEmpty) continue;
           if (!partyledgerdata.contains(ledgerName)) {
@@ -1071,10 +1062,7 @@ class DeliveryNoteRegistrationNotifier
           (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
         );
 
-        salesledger_data = _ledgersRaw
-            .where((l) => salesGroupIds.contains(l['groupMasterId'] as int?))
-            .map((l) => l['name'].toString())
-            .toList();
+        salesledger_data = salesLedgers.map((l) => l['name'].toString()).toList();
 
         final List<String> distinctSalesLedgerNames = salesledger_data
             .toSet()
@@ -1088,22 +1076,15 @@ class DeliveryNoteRegistrationNotifier
         }
         isSalesLedgerLocked = false;
 
-        ledgerdata = _ledgersRaw
-            .where(
-              (l) =>
-                  !partyGroupIds.contains(l['groupMasterId'] as int?) &&
-                  !salesGroupIds.contains(l['groupMasterId'] as int?) &&
-                  !vatGroupIds.contains(l['groupMasterId'] as int?),
-            )
-            .map((l) => {'name': l['name'].toString()})
+        ledgerdata = otherLedgersRaw
+            .map((l) => {
+                  'name': l['name'].toString(),
+                  'vatApplicable': l['vatApplicable'],
+                })
             .toList();
 
         vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll(
-          _ledgersRaw
-              .where((l) => vatGroupIds.contains(l['groupMasterId'] as int?))
-              .map((l) => l['name'].toString()),
-        );
+        vatledgerdata.addAll(vatLedgers.map((l) => l['name'].toString()));
 
         _selectedvatledger = _defaultVatLedger();
 

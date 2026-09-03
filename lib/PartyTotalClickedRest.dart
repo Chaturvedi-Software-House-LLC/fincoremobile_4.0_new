@@ -2,9 +2,9 @@ import 'widgets/scroll_fab.dart';
 import 'package:FincoreGo/currencyFormat.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -14,8 +14,7 @@ import 'dart:io';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
-import 'api/voucher_drilldown_helper.dart';
-import 'api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import 'providers/party_total_clicked_rest_notifier.dart';
 
 class Data {
   final String vchno;
@@ -43,7 +42,7 @@ class Data {
   }
 }
 
-class PartyTotalClickedRest extends StatefulWidget {
+class PartyTotalClickedRest extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, total;
   final int? ledgerMasterId;
 
@@ -56,92 +55,39 @@ class PartyTotalClickedRest extends StatefulWidget {
     this.ledgerMasterId,
   });
   @override
-  _PartyTotalClickedRestPageState createState() =>
-      _PartyTotalClickedRestPageState(
-        startDateString: startdate_string,
-        endDateString: enddate_string,
-        type: type,
-        total: total,
-        ledger: ledger,
-        ledgerMasterId: ledgerMasterId,
-      );
+  ConsumerState<PartyTotalClickedRest> createState() =>
+      _PartyTotalClickedRestPageState();
 }
 
-class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
-    with TickerProviderStateMixin {
+class _PartyTotalClickedRestPageState
+    extends ConsumerState<PartyTotalClickedRest> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scrollFabController = ScrollController();
-  String startDateString = "",
-      endDateString = "",
-      type = "",
-      ledger = "",
-      total = "";
-  final int? ledgerMasterId;
 
   int counter = 0;
 
-  double total_double = 0;
-
-  String total_main = "0";
-
-  List<Data> filteredItems =
-      []; // Initialize an empty list to hold the filtered items
-
-  _PartyTotalClickedRestPageState({
-    required this.startDateString,
-    required this.endDateString,
-    required this.type,
-    required this.ledger,
-    required this.total,
-    this.ledgerMasterId,
-  });
-
-  String? SecuritybtnAcessHolder;
-  bool isDashEnable = true,
-      isRolesEnable = true,
-      isUserEnable = true,
-      isRolesVisible = true,
-      isUserVisible = true,
-      _isSearchViewVisible = false,
-      _isListVisible = false,
-      isVisiblePostDated = true,
-      isVisibleOptional = true;
-
-  String email = "";
-  String name = "";
+  bool _isSearchViewVisible = false;
+  final bool isVisiblePostDated = true;
+  final bool isVisibleOptional = true;
 
   TextEditingController searchController = TextEditingController();
 
-  bool isVisibleNoDataFound = false;
-
-  String selectedSortOption = '';
-
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
   late String startdate_text = "", enddate_text = "";
-  String? datetype;
-
-  String? company = "";
-  List<dynamic> myData = [];
-  bool _isLoading = false;
-
-  bool isSortVisible = false;
-
-  final List<String> itemList = [
-    'Default',
-    'Newest to Oldest',
-    'Oldest to Newest',
-    'A->Z',
-    'Z->A',
-    'Amount High to Low',
-    'Amount Low to High',
-  ];
 
   ScrollController _scrollController = ScrollController();
 
-  List<Data> item_list = [];
+  PartyTotalClickedRestArgs get _args => PartyTotalClickedRestArgs(
+        startDateString: widget.startdate_string,
+        endDateString: widget.enddate_string,
+        type: widget.type,
+        ledger: widget.ledger,
+        total: widget.total,
+        ledgerMasterId: widget.ledgerMasterId,
+      );
 
   void _showSelectionWindow(BuildContext context) {
+    final itemList = kPartyTotalClickedRestSortOptions;
     final List<IconData> icons = [
       Icons.sort_rounded,
       Icons.date_range_sharp,
@@ -191,34 +137,21 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                     // Replace this with your custom tile widget
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          selectedSortOption =
-                              itemList[index]; // Update the selected index
-                        });
-                        switch (selectedSortOption) {
-                          case 'Default':
-                            sortByDefault(); // Call the sorting function
-                            break;
-                          case 'Newest to Oldest':
-                            sortByDateHightoLow(); // Call the sorting function
-                            break;
-                          case 'Oldest to Newest':
-                            sortByDateLowtoHigh(); // Call the sorting function
-                            break;
-                          case 'A->Z':
-                            sortByAlphabetAtoZ(); // Call the sorting function
-                            break;
-                          case 'Z->A':
-                            sortByAlphabetZtoA(); // Call the sorting function
-                            break;
-                          case 'Amount High to Low':
-                            sortByAmountHightoLow(); // Call the sorting function
-                            break;
-                          case 'Amount Low to High':
-                            sortByAmountLowtoHigh(); // Call the sorting function
-                            break;
+                        final notifier = ref.read(
+                          partyTotalClickedRestNotifierProvider(
+                            _args,
+                          ).notifier,
+                        );
+                        final hadItems = notifier.selectSortOption(
+                          itemList[index],
+                        );
+                        if (hadItems) {
+                          _scrollController.animateTo(
+                            0.0,
+                            duration: Duration(milliseconds: 500),
+                            curve: Curves.easeInOut,
+                          );
                         }
-                        print('Tile $index selected');
                         Navigator.pop(
                           context,
                         ); // Close the selection window after a tile is selected
@@ -231,13 +164,29 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                           title: Text(
                             itemList[index],
                             style: GoogleFonts.poppins(
-                              fontWeight: itemList[index] == selectedSortOption
+                              fontWeight:
+                                  itemList[index] ==
+                                      ref
+                                          .read(
+                                            partyTotalClickedRestNotifierProvider(
+                                              _args,
+                                            ),
+                                          )
+                                          .selectedSortOption
                                   ? FontWeight.bold
                                   : FontWeight
                                         .normal, // Apply bold style to the text if the tile is selected
                             ),
                           ),
-                          trailing: itemList[index] == selectedSortOption
+                          trailing:
+                              itemList[index] ==
+                                  ref
+                                      .read(
+                                        partyTotalClickedRestNotifierProvider(
+                                          _args,
+                                        ),
+                                      )
+                                      .selectedSortOption
                               ? Icon(Icons.check, color: Color(0xFF30D5C8))
                               : null, // Show arrow icon if the tile is selected
                         ),
@@ -253,97 +202,6 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     );
   }
 
-  void sortByDefault() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems = List.from(item_list);
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetAtoZ() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.vchno.compareTo(b.vchno));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAlphabetZtoA() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.vchno.compareTo(a.vchno));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.vchdate.compareTo(b.vchdate));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByDateHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.vchdate.compareTo(a.vchdate));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountLowtoHigh() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => a.amount.compareTo(b.amount));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
-  void sortByAmountHightoLow() {
-    setState(() {
-      if (filteredItems.isNotEmpty) {
-        filteredItems.sort((a, b) => b.amount.compareTo(a.amount));
-        _scrollController.animateTo(
-          0.0,
-          duration: Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
-  }
-
   String formatCostCenter(String costcenter) {
     String costcenter_string = "";
     if (costcenter == 'null') {
@@ -355,16 +213,19 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     return costcenter_string;
   }
 
-  Future<void> generateAndSharePDF_Rest() async {
+  Future<void> generateAndSharePDF_Rest(
+    List<Data> itemList,
+    String company,
+  ) async {
     final font = pw.Font.ttf(
       await rootBundle.load("assets/fonts/NotoSans.ttf"),
     );
 
     final pdf = pw.Document();
 
-    final companyName = company!;
-    final reportname = '$type Summary';
-    final partyname = ledger;
+    final companyName = company;
+    final reportname = '${widget.type} Summary';
+    final partyname = widget.ledger;
 
     final headersRow3 = [
       'Vch No',
@@ -375,14 +236,14 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     ];
 
     final itemsPerPage = 10;
-    final pageCount = (item_list.length / itemsPerPage).ceil();
+    final pageCount = (itemList.length / itemsPerPage).ceil();
 
     for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
       final startIndex = pageNumber * itemsPerPage;
       final endIndex = (pageNumber + 1) * itemsPerPage;
-      final itemsSubset = item_list.sublist(
+      final itemsSubset = itemList.sublist(
         startIndex,
-        endIndex > item_list.length ? item_list.length : endIndex,
+        endIndex > itemList.length ? itemList.length : endIndex,
       );
 
       final tableSubsetRows = itemsSubset.map((item) {
@@ -460,14 +321,14 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                   mainAxisAlignment: pw.MainAxisAlignment.center,
                   children: [
                     pw.Text(
-                      convertDateFormat(startDateString),
+                      convertDateFormat(widget.startdate_string),
                       style: pw.TextStyle(fontSize: 16),
                     ),
                     pw.SizedBox(width: 5),
                     pw.Text('to', style: pw.TextStyle(fontSize: 16)),
                     pw.SizedBox(width: 5),
                     pw.Text(
-                      convertDateFormat(endDateString),
+                      convertDateFormat(widget.enddate_string),
                       style: pw.TextStyle(fontSize: 16),
                     ),
                   ],
@@ -485,16 +346,19 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     final pdfData = await pdf.save();
 
     final tempDir = await getTemporaryDirectory();
-    final tempFilePath = '${tempDir.path}/$type.pdf';
+    final tempFilePath = '${tempDir.path}/${widget.type}.pdf';
     final file = File(tempFilePath);
     await file.writeAsBytes(pdfData);
 
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing $type Report of $company');
+    ], text: 'Sharing ${widget.type} Report of $company');
   }
 
-  Future<void> generateAndShareCSV_Rest() async {
+  Future<void> generateAndShareCSV_Rest(
+    List<Data> itemList,
+    String company,
+  ) async {
     final List<List<dynamic>> csvData = [];
     final headersRow = [
       'Vch No',
@@ -505,7 +369,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     ];
     csvData.add(headersRow);
 
-    for (final item in item_list) {
+    for (final item in itemList) {
       final rowData = [
         item.vchno,
         convertDateFormat(item.vchdate),
@@ -519,13 +383,13 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     final csvString = const ListToCsvConverter().convert(csvData);
 
     final tempDir = await Directory.systemTemp.createTemp();
-    final tempFilePath = '${tempDir.path}/$type.csv';
+    final tempFilePath = '${tempDir.path}/${widget.type}.csv';
     final file = File(tempFilePath);
     await file.writeAsString(csvString);
 
     await Share.shareXFiles([
       XFile(tempFilePath),
-    ], text: 'Sharing $type Report of $company');
+    ], text: 'Sharing ${widget.type} Report of $company');
   }
 
   String formatVchNo(String vchno) {
@@ -546,172 +410,12 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
     return formattedDate;
   }
 
-  Future<void> fetchData(
-    final String ledger,
-    final String startdate,
-    final String enddate,
-    final String vchtype,
-  ) async {
-    if (ledgerMasterId == null) {
-      setState(() {
-        _isLoading = false;
-        isVisibleNoDataFound = true;
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _isListVisible = true;
-      isSortVisible = false;
-    });
-
-    item_list.clear();
-    filteredItems.clear();
-
-    try {
-      await _fetchDataTallyApi(startdate, enddate, vchtype);
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      print(e);
-    }
-
-    setState(() {
-      if (item_list.isEmpty) {
-        isVisibleNoDataFound = true;
-        isSortVisible = false;
-      } else {
-        isSortVisible = true;
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault(); // Call the sorting function
-            break;
-          case 'Newest to Oldest':
-            sortByDateHightoLow(); // Call the sorting function
-            break;
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh(); // Call the sorting function
-            break;
-          case 'A->Z':
-            sortByAlphabetAtoZ(); // Call the sorting function
-            break;
-          case 'Z->A':
-            sortByAlphabetZtoA(); // Call the sorting function
-            break;
-          case 'Amount High to Low':
-            sortByAmountHightoLow(); // Call the sorting function
-            break;
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh(); // Call the sorting function
-            break;
-        }
-      }
-      _isLoading = false;
-    });
-  }
-
-  /// tally-api path: filters [VoucherRepository]-backed vouchers to this
-  /// ledger + voucher type via [fetchDrilldownVouchers], then maps directly
-  /// into the same JSON shape `Data.fromJson` already expects - amount is
-  /// this ledger's own entry in the voucher (falls back to the first entry
-  /// if this ledger's name isn't found, same simplification used elsewhere
-  /// in this migration).
-  Future<void> _fetchDataTallyApi(
-    final String startdate,
-    final String enddate,
-    final String vchtype,
-  ) async {
-    final from = parseCompactDate(startdate);
-    final to = parseCompactDate(enddate);
-    final vouchers = await fetchDrilldownVouchers(
-      from: from,
-      to: to,
-      partyLedgerName: ledger,
-      voucherTypeName: vchtype,
-    );
-
-    final rows = vouchers.map((voucher) {
-      final entries =
-          (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-          const [];
-      final ledgerEntry = entries.firstWhere(
-        (e) => e['ledgerName'] == ledger,
-        orElse: () => entries.isNotEmpty ? entries.first : const {},
-      );
-      return Data.fromJson({
-        'vchno': voucher['number'] ?? '',
-        'vchdate': voucher['date'] ?? '',
-        'amount': parseMoneyField(ledgerEntry['amount']),
-        'ispostdated': voucher['isPostDated'] ?? false,
-        'isoptional': voucher['isOptional'] ?? false,
-      });
-    }).toList();
-
-    isVisibleNoDataFound = false;
-    item_list.addAll(rows);
-    filteredItems = item_list;
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-    });
-
-    try {
-      selectedSortOption = prefs.getString('sort')!;
-      if (selectedSortOption == null || selectedSortOption == 'null') {
-        selectedSortOption = 'Default';
-      }
-      if (!itemList.contains(selectedSortOption)) {
-        selectedSortOption = 'Default';
-      }
-    } catch (e) {
-      selectedSortOption = 'Default';
-    }
-
-    SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-    String? email_nav = prefs.getString('email_nav');
-    String? name_nav = prefs.getString('name_nav');
-
-    if (email_nav != null && name_nav != null) {
-      name = name_nav;
-      email = email_nav;
-    } else {
-      String val = "";
-      if (SecuritybtnAcessHolder == "True") {
-        val = SecuritybtnAcessHolder!;
-      } else if (SecuritybtnAcessHolder == "False") {
-        val = "";
-      }
-    }
-    if (SecuritybtnAcessHolder == "True") {
-      isRolesVisible = true;
-      isUserVisible = true;
-    } else {
-      isRolesVisible = false;
-      isUserVisible = false;
-    }
-
-    startdate_text = convertDateFormat(startDateString);
-    enddate_text = convertDateFormat(endDateString);
-
-    fetchData(ledger, startDateString, endDateString, type);
-  }
-
   @override
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-    _initSharedPreferences();
+    startdate_text = convertDateFormat(widget.startdate_string);
+    enddate_text = convertDateFormat(widget.enddate_string);
   }
 
   @override
@@ -722,6 +426,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(partyTotalClickedRestNotifierProvider(_args));
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(activeTab: AppBottomNavTab.party),
       key: _scaffoldKey,
@@ -748,7 +453,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                ledger,
+                widget.ledger,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.poppins(
@@ -758,7 +463,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                 ),
               ),
               Text(
-                type,
+                widget.type,
                 maxLines: 1,
                 style: GoogleFonts.poppins(
                   color: Colors.white70,
@@ -789,12 +494,12 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
             // placement - see PartyDrillDown.dart's identical fix for why
             // the floating pill it replaces was a poor pattern.
             IconButton(
-              onPressed: isSortVisible
+              onPressed: state.isSortVisible
                   ? () => _showSelectionWindow(context)
                   : null,
               icon: Icon(
                 Icons.sort_rounded,
-                color: isSortVisible ? Colors.white : Colors.white38,
+                color: state.isSortVisible ? Colors.white : Colors.white38,
                 size: 22,
               ),
             ),
@@ -823,8 +528,11 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                       child: GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
-                          if (!item_list.isEmpty) {
-                            generateAndSharePDF_Rest();
+                          if (state.itemList.isNotEmpty) {
+                            generateAndSharePDF_Rest(
+                              state.itemList,
+                              state.company,
+                            );
                           }
                         },
                         child: Row(
@@ -853,8 +561,11 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                         onTap: () {
                           Navigator.pop(context);
 
-                          if (!item_list.isEmpty) {
-                            generateAndShareCSV_Rest();
+                          if (state.itemList.isNotEmpty) {
+                            generateAndShareCSV_Rest(
+                              state.itemList,
+                              state.company,
+                            );
                           }
                         },
 
@@ -917,7 +628,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                       // Total Value
                       Center(
                         child: formatAmountRich(
-                          total,
+                          widget.total,
                           style: GoogleFonts.poppins(
                             fontSize: 20,
                             fontWeight: FontWeight.w800,
@@ -1015,20 +726,13 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                             child: TextField(
                               controller: searchController,
                               onChanged: (value) {
-                                if (value.isEmpty) {
-                                  setState(() {
-                                    filteredItems = item_list;
-                                  });
-                                } else {
-                                  setState(() {
-                                    filteredItems = item_list.where((item) {
-                                      final query = value.toLowerCase();
-                                      return item.vchno.toLowerCase().contains(
-                                        query,
-                                      );
-                                    }).toList();
-                                  });
-                                }
+                                ref
+                                    .read(
+                                      partyTotalClickedRestNotifierProvider(
+                                        _args,
+                                      ).notifier,
+                                    )
+                                    .filter(value);
                               },
                               style: GoogleFonts.poppins(
                                 fontSize: 15,
@@ -1074,7 +778,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                       ],
 
                       // No data found
-                      if (isVisibleNoDataFound)
+                      if (state.isVisibleNoDataFound)
                         SizedBox(
                           height: MediaQuery.of(context).size.height * 0.5,
                           child: Center(
@@ -1114,7 +818,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
               // shrinkWrap ListView.builder forced eager layout of every
               // item up front, which is what caused the same scroll-hang
               // bug already fixed on the Party list.
-              if (_isListVisible)
+              if (state.isListVisible)
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1122,7 +826,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                   ),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
-                            final card = filteredItems[index];
+                            final card = state.filteredItems[index];
 
                             return Container(
                               margin: const EdgeInsets.only(bottom: 14),
@@ -1333,7 +1037,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
                                 ),
                               ),
                             );
-                    }, childCount: filteredItems.length),
+                    }, childCount: state.filteredItems.length),
                   ),
                 ),
             ],
@@ -1341,7 +1045,7 @@ class _PartyTotalClickedRestPageState extends State<PartyTotalClickedRest>
 
 
           // Loading Indicator
-          if (_isLoading)
+          if (state.isLoading)
             Positioned.fill(
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,

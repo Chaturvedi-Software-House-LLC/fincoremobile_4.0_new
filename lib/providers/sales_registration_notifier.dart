@@ -591,8 +591,11 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
       final specificLedger = ledgerdata.firstWhere(
         (ledger) => ledger['name'] == ledgerName,
       );
-      final int vatApplicable = specificLedger['vatapplicable'] ?? 0;
-      final bool vatApp = vatApplicable == 1;
+      // tally-api's `/ledgers` returns this as a camelCase boolean
+      // (`vatApplicable`), not legacy's lowercase 1/0 `vatapplicable` -
+      // fixed to actually read the real field instead of always
+      // defaulting to "not VAT applicable".
+      final bool vatApp = specificLedger['vatApplicable'] == true;
 
       int existingIndex = ledgerEntries.indexWhere(
         (entry) => entry.ledgerName == ledgerName,
@@ -962,7 +965,8 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
         vatledgerdata.addAll([for (final l in vatLedgers) l['name'] as String]);
 
         ledgerdata = [
-          for (final l in otherLedgersRaw) {'name': l['name']},
+          for (final l in otherLedgersRaw)
+            {'name': l['name'], 'vatApplicable': l['vatApplicable']},
         ];
 
         _selectedvatledger = _defaultVatLedger();

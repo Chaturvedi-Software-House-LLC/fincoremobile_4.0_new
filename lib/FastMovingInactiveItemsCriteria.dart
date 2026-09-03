@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
+import 'providers/fast_moving_inactive_items_criteria_notifier.dart';
 
-class FastMovingInactiveItemsCriteria extends StatefulWidget {
+class FastMovingInactiveItemsCriteria extends ConsumerStatefulWidget {
   final bool fastmoving_visible, slowmoving_visible, inactive_visible;
 
   const FastMovingInactiveItemsCriteria({
@@ -18,50 +19,43 @@ class FastMovingInactiveItemsCriteria extends StatefulWidget {
   });
 
   @override
-  _FastMovingInactiveItemsState createState() => _FastMovingInactiveItemsState(
-    fastmoving_visible: fastmoving_visible,
-    slowmoving_visible: slowmoving_visible,
-    inactive_visible: inactive_visible,
-  );
+  ConsumerState<FastMovingInactiveItemsCriteria> createState() =>
+      _FastMovingInactiveItemsState();
 }
 
 class _FastMovingInactiveItemsState
-    extends State<FastMovingInactiveItemsCriteria> {
-  late TextEditingController fastmovingitemsdayscontroller;
-  late TextEditingController inactiveitemsdayscontroller;
-  late TextEditingController fastmovingitemsqtycontroller;
-  late TextEditingController fastmovingitemsvaluecontroller;
-  late TextEditingController slowmovingitemsqtycontroller;
-  late TextEditingController slowmovingitemsvaluecontroller;
-  late TextEditingController slowmovingitemsdayscontroller;
-
-  bool fastmoving_visible, slowmoving_visible, inactive_visible;
-
-  String fastmovingitems = '';
-  String slowmovingitems = '';
-
-  String inactiveitems = '';
-  String fastmovingqtyitems = '';
-  String fastmovingvalueitems = '';
-  String slowmovingvalueitems = '';
-  String slowmovingqtyitems = '';
+    extends ConsumerState<FastMovingInactiveItemsCriteria> {
+  late final TextEditingController fastmovingitemsdayscontroller;
+  late final TextEditingController inactiveitemsdayscontroller;
+  late final TextEditingController fastmovingitemsqtycontroller;
+  late final TextEditingController fastmovingitemsvaluecontroller;
+  late final TextEditingController slowmovingitemsqtycontroller;
+  late final TextEditingController slowmovingitemsvaluecontroller;
+  late final TextEditingController slowmovingitemsdayscontroller;
 
   final Color _pageColor = Colors.white;
   final Color _textColor = const Color(0xFF17202A);
   final Color _mutedTextColor = const Color(0xFF6B7280);
   final Color _borderColor = const Color(0xFFE7EAF0);
 
-  _FastMovingInactiveItemsState({
-    required this.fastmoving_visible,
-    required this.slowmoving_visible,
-    required this.inactive_visible,
-  });
-
   @override
   void initState() {
     super.initState();
-    initializeControllers();
-    loadPreferences();
+    final initial = ref.read(fastMovingInactiveItemsCriteriaNotifierProvider);
+    fastmovingitemsdayscontroller =
+        TextEditingController(text: initial.fastMovingDays);
+    fastmovingitemsqtycontroller =
+        TextEditingController(text: initial.fastMovingQty);
+    fastmovingitemsvaluecontroller =
+        TextEditingController(text: initial.fastMovingValue);
+    slowmovingitemsdayscontroller =
+        TextEditingController(text: initial.slowMovingDays);
+    slowmovingitemsqtycontroller =
+        TextEditingController(text: initial.slowMovingQty);
+    slowmovingitemsvaluecontroller =
+        TextEditingController(text: initial.slowMovingValue);
+    inactiveitemsdayscontroller =
+        TextEditingController(text: initial.inactiveDays);
   }
 
   @override
@@ -76,42 +70,14 @@ class _FastMovingInactiveItemsState
     super.dispose();
   }
 
-  void initializeControllers() {
-    fastmovingitemsdayscontroller = TextEditingController();
-    fastmovingitemsqtycontroller = TextEditingController();
-    inactiveitemsdayscontroller = TextEditingController();
-    fastmovingitemsvaluecontroller = TextEditingController();
-    slowmovingitemsqtycontroller = TextEditingController();
-    slowmovingitemsvaluecontroller = TextEditingController();
-    slowmovingitemsdayscontroller = TextEditingController();
-  }
-
-  void loadPreferences() async {
-    SharedPreferences criteria = await SharedPreferences.getInstance();
-    setState(() {
-      fastmovingitems = criteria.getString('fastmovingdays') ?? '180';
-      fastmovingqtyitems = criteria.getString('fastmovingqty') ?? '1000';
-      fastmovingvalueitems = criteria.getString('fastmovingvalue') ?? '10000';
-
-      slowmovingitems = criteria.getString('slowmovingdays') ?? '181';
-      slowmovingqtyitems = criteria.getString('slowmovingqty') ?? '1000';
-      slowmovingvalueitems = criteria.getString('slowmovingvalue') ?? '10000';
-
-      inactiveitems = criteria.getString('inactivedays') ?? '182';
-    });
-    setControllerValues();
-  }
-
-  void setControllerValues() {
-    fastmovingitemsdayscontroller.text = fastmovingitems;
-    fastmovingitemsqtycontroller.text = fastmovingqtyitems;
-    fastmovingitemsvaluecontroller.text = fastmovingvalueitems;
-
-    slowmovingitemsvaluecontroller.text = slowmovingvalueitems;
-    slowmovingitemsqtycontroller.text = slowmovingqtyitems;
-    slowmovingitemsdayscontroller.text = slowmovingitems;
-
-    inactiveitemsdayscontroller.text = inactiveitems;
+  void _syncControllers(FastMovingInactiveItemsCriteriaState state) {
+    fastmovingitemsdayscontroller.text = state.fastMovingDays;
+    fastmovingitemsqtycontroller.text = state.fastMovingQty;
+    fastmovingitemsvaluecontroller.text = state.fastMovingValue;
+    slowmovingitemsdayscontroller.text = state.slowMovingDays;
+    slowmovingitemsqtycontroller.text = state.slowMovingQty;
+    slowmovingitemsvaluecontroller.text = state.slowMovingValue;
+    inactiveitemsdayscontroller.text = state.inactiveDays;
   }
 
   void showToast(String message) {
@@ -119,74 +85,27 @@ class _FastMovingInactiveItemsState
     showAppMessage(context, message, isError: !isSuccess);
   }
 
-  void savePreferences() async {
-    SharedPreferences criteria = await SharedPreferences.getInstance();
-    if (fastmovingitemsdayscontroller.text.isNotEmpty &&
-        fastmovingitemsqtycontroller.text.isNotEmpty &&
-        fastmovingitemsvaluecontroller.text.isNotEmpty &&
-        slowmovingitemsdayscontroller.text.isNotEmpty &&
-        slowmovingitemsqtycontroller.text.isNotEmpty &&
-        slowmovingitemsvaluecontroller.text.isNotEmpty &&
-        inactiveitemsdayscontroller.text.isNotEmpty) {
-      final int? fastmovingdays = int.tryParse(
-        fastmovingitemsdayscontroller.text,
-      );
-      final int? slowmovingdays = int.tryParse(
-        slowmovingitemsdayscontroller.text,
-      );
-      final int? inactivedays = int.tryParse(
-        inactiveitemsdayscontroller.text,
-      );
-
-      if (fastmovingdays == null ||
-          slowmovingdays == null ||
-          inactivedays == null) {
-        showToast('Please enter valid numbers for the day fields');
-        return;
-      }
-
-      if (inactivedays <= slowmovingdays || inactivedays <= fastmovingdays) {
-        showToast('Inactive days must be greater than fast/slow moving days');
-      } else {
-        String fastmovingitemsdays = fastmovingitemsdayscontroller.text;
-        String fastmovingitemsqty = fastmovingitemsqtycontroller.text;
-        String fastmovingitemsvalue = fastmovingitemsvaluecontroller.text;
-        String slowmovingitemsvalue = slowmovingitemsvaluecontroller.text;
-        String slowmovingitemsdays = slowmovingitemsdayscontroller.text;
-        String slowmovingitemsqty = slowmovingitemsqtycontroller.text;
-        String inactiveitemsdays = inactiveitemsdayscontroller.text;
-
-        criteria
-          ..setString('fastmovingdays', fastmovingitemsdays)
-          ..setString('fastmovingqty', fastmovingitemsqty)
-          ..setString('fastmovingvalue', fastmovingitemsvalue)
-          ..setString('slowmovingdays', slowmovingitemsdays)
-          ..setString('slowmovingqty', slowmovingitemsqty)
-          ..setString('slowmovingvalue', slowmovingitemsvalue)
-          ..setString('inactivedays', inactiveitemsdays)
-          ..commit();
-
-        print(
-          '$fastmovingitemsdays  $fastmovingitemsqty  $fastmovingitemsvalue  $slowmovingitemsdays  $slowmovingitemsqty  $slowmovingitemsvalue  $inactiveitemsdays',
-        );
-
-        showToast('Criteria Saved');
-      }
-    } else {
-      showToast('Fields cannot be empty');
-    }
+  Future<void> savePreferences() async {
+    final message = await ref
+        .read(fastMovingInactiveItemsCriteriaNotifierProvider.notifier)
+        .save();
+    showToast(message);
   }
 
   int get _visibleSectionCount {
     return [
-      fastmoving_visible,
-      slowmoving_visible,
-      inactive_visible,
+      widget.fastmoving_visible,
+      widget.slowmoving_visible,
+      widget.inactive_visible,
     ].where((visible) => visible).length;
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<FastMovingInactiveItemsCriteriaState>(
+      fastMovingInactiveItemsCriteriaNotifierProvider,
+      (_, next) => _syncControllers(next),
+    );
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -244,7 +163,7 @@ class _FastMovingInactiveItemsState
                   //const SizedBox(height: 18),
                   const SizedBox(height: 9),
                   _buildSectionLabel('Criteria Rules'),
-                  if (fastmoving_visible)
+                  if (widget.fastmoving_visible)
                     _buildCriteriaCard(
                       title: 'Fast Moving Criteria',
                       subtitle:
@@ -259,9 +178,12 @@ class _FastMovingInactiveItemsState
                           errorText: fastmovingitemsdayscontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            fastmovingitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setFastMovingDays(val),
                         ),
                         _buildValidatedField(
                           label: 'Min Qty',
@@ -269,9 +191,12 @@ class _FastMovingInactiveItemsState
                           errorText: fastmovingitemsqtycontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            fastmovingqtyitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setFastMovingQty(val),
                         ),
                         _buildValidatedField(
                           label: 'Min Value',
@@ -279,13 +204,16 @@ class _FastMovingInactiveItemsState
                           errorText: fastmovingitemsvaluecontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            fastmovingvalueitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setFastMovingValue(val),
                         ),
                       ],
                     ),
-                  if (slowmoving_visible)
+                  if (widget.slowmoving_visible)
                     _buildCriteriaCard(
                       title: 'Slow Moving Criteria',
                       subtitle: 'Items with lower quantity or value movement.',
@@ -299,9 +227,12 @@ class _FastMovingInactiveItemsState
                           errorText: slowmovingitemsdayscontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            slowmovingitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setSlowMovingDays(val),
                         ),
                         _buildValidatedField(
                           label: 'Max Qty',
@@ -309,9 +240,12 @@ class _FastMovingInactiveItemsState
                           errorText: slowmovingitemsqtycontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            slowmovingqtyitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setSlowMovingQty(val),
                         ),
                         _buildValidatedField(
                           label: 'Max Value',
@@ -319,13 +253,16 @@ class _FastMovingInactiveItemsState
                           errorText: slowmovingitemsvaluecontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            slowmovingvalueitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setSlowMovingValue(val),
                         ),
                       ],
                     ),
-                  if (inactive_visible)
+                  if (widget.inactive_visible)
                     _buildCriteriaCard(
                       title: 'Inactive Criteria',
                       subtitle: 'Items older than active movement limits.',
@@ -339,9 +276,12 @@ class _FastMovingInactiveItemsState
                           errorText: inactiveitemsdayscontroller.text.isEmpty
                               ? 'Required'
                               : null,
-                          onChanged: (val) {
-                            inactiveitems = val;
-                          },
+                          onChanged: (val) => ref
+                              .read(
+                                fastMovingInactiveItemsCriteriaNotifierProvider
+                                    .notifier,
+                              )
+                              .setInactiveDays(val),
                         ),
                       ],
                     ),
@@ -349,10 +289,7 @@ class _FastMovingInactiveItemsState
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        setState(() {});
-                        savePreferences();
-                      },
+                      onPressed: savePreferences,
                       icon: const Icon(Icons.save_alt_rounded),
                       label: Text(
                         'Save Criteria',

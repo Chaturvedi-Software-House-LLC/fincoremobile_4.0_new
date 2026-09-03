@@ -5857,8 +5857,7 @@ class _DeliverynoteregistrationPageState
   /// Thin wrapper: the guard/`Navigator.pop`/dialog-local resets stay here
   /// (need `context`/`_selectedledger`/`ledgerAmountController`, all
   /// widget-local); the actual `ledgerEntries` mutation + totals recompute
-  /// is `_notifier.addOrMergeLedger` - see that method's doc-comment for the
-  /// pre-existing `vatapplicable` crash this preserves verbatim.
+  /// is `_notifier.addOrMergeLedger`.
   void addLedger() {
     Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
       (ledger) => ledger['name'] == _selectedledger,

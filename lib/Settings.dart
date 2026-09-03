@@ -3,44 +3,24 @@ import 'package:FincoreGo/l10n/app_localizations.dart';
 import 'package:FincoreGo/widgets/entry_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'AgeingConfig.dart';
 import 'constants.dart';
 import 'Dashboard.dart';
 import 'theme_controller.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
-import 'services/biometric_auth_service.dart';
-import 'widgets/entry_widgets.dart';
+import 'providers/settings_notifier.dart';
 
-class Settings extends StatefulWidget {
+class Settings extends ConsumerStatefulWidget {
   Settings({Key? key}) : super(key: key);
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  ConsumerState<Settings> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
-  String groupvalue = 'AED';
-  double vatValue = 0.0;
-  int inactiveparties_days = 0;
-  String dateRangeOption = 'Today';
-  DateTime? customStartDate;
-  DateTime? customEndDate;
-  int? decimal = 1;
-  String sort = 'Default';
-  bool _canCurrency = true,
-      _canAmtDecimals = true,
-      _canVatPerc = true,
-      _canInactivePDays = true,
-      _canSortType = true,
-      _canDefDateRange = true,
-      _canAgeingConfig = true,
-      _canFastSlowInactiveItem = true;
-  bool _biometricAvailable = false;
-  bool _biometricEnabled = false;
-  String _biometricLabel = 'Biometric';
+class _MyHomePageState extends ConsumerState<Settings> {
   final TextEditingController vatController = TextEditingController();
   final TextEditingController inactivedaysController = TextEditingController();
 
@@ -48,7 +28,6 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
   final GlobalKey<FormState> _inactivepartydaysFormkey = GlobalKey<FormState>();
 
   late GlobalKey<ScaffoldState> _scaffoldMessengerKey;
-  late SharedPreferences prefs;
 
   bool get _isDarkMode => Theme.of(context).brightness == Brightness.dark;
   Color get _pageColor => _isDarkMode ? const Color(0xFF0F172A) : Colors.white;
@@ -65,127 +44,39 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
   Color get _inputFillColor =>
       _isDarkMode ? const Color(0xFF1F2937) : const Color(0xFFF7F9FC);
 
-  Future<void> _initSharedPreferences() async {
-    prefs = await SharedPreferences.getInstance();
-    vatValue = prefs.getDouble('vatperc') ?? 5;
-    inactiveparties_days = prefs.getInt('inactiveparties_days') ?? 30;
-
-    vatController.text = vatValue.toString();
-    inactivedaysController.text = inactiveparties_days.toString();
-    dateRangeOption = prefs.getString('dateRangeOption') ?? 'Today';
-
-    String? start = prefs.getString('startdate');
-    String? end = prefs.getString('enddate');
-    if (start != null && end != null) {
-      customStartDate = DateTime.tryParse(start);
-      customEndDate = DateTime.tryParse(end);
-    }
-
-    try {
-      groupvalue = prefs.getString('currencycode')!;
-      if (groupvalue == 'null') {
-        groupvalue = 'AED';
-      }
-    } catch (e) {
-      groupvalue = 'AED';
-    }
-
-    try {
-      sort = prefs.getString('sort')!;
-      if (sort == 'null') {
-        sort = 'Default';
-      }
-    } catch (e) {
-      sort = 'Default';
-    }
-
-    try {
-      decimal = prefs.getInt('decimalplace');
-      if (decimal == null || decimal == 'null') {
-        decimal = 2;
-      }
-    } catch (e) {
-      decimal = 2;
-    }
-
-    final bool isAdmin = (prefs.getString('secbtnaccess') ?? 'False') == 'True';
-    _canCurrency =
-        isAdmin || (prefs.getString('settings_currency') ?? 'False') == 'True';
-    _canAmtDecimals =
-        isAdmin ||
-        (prefs.getString('settings_amtdecimals') ?? 'False') == 'True';
-    _canVatPerc =
-        isAdmin || (prefs.getString('settings_vatperc') ?? 'False') == 'True';
-    _canInactivePDays =
-        isAdmin ||
-        (prefs.getString('settings_inactivepdays') ?? 'False') == 'True';
-    _canSortType =
-        isAdmin || (prefs.getString('settings_sorttype') ?? 'False') == 'True';
-    _canDefDateRange =
-        isAdmin ||
-        (prefs.getString('settings_defdaterange') ?? 'False') == 'True';
-    _canAgeingConfig =
-        isAdmin ||
-        (prefs.getString('settings_ageingconfig') ?? 'False') == 'True';
-    _canFastSlowInactiveItem =
-        isAdmin ||
-        (prefs.getString('settings_fastslowinactiveitem') ?? 'False') == 'True';
-
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
   @override
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldState>();
     themeController.addListener(_handleThemeChanged);
-    _initSharedPreferences();
-    _initBiometricSettings();
+    final initial = ref.read(settingsNotifierProvider);
+    vatController.text = initial.vatValue.toString();
+    inactivedaysController.text = initial.inactivePartiesDays.toString();
   }
 
-  Future<void> _initBiometricSettings() async {
-    final available = await BiometricAuthService.instance.isDeviceSupported();
-    final enabled = await BiometricAuthService.instance.isEnabled();
-    final label = await BiometricAuthService.instance.biometricLabel();
-    if (!mounted) return;
-    setState(() {
-      _biometricAvailable = available;
-      _biometricEnabled = enabled;
-      _biometricLabel = label;
-    });
+  void _syncControllers(SettingsState state) {
+    vatController.text = state.vatValue.toString();
+    inactivedaysController.text = state.inactivePartiesDays.toString();
   }
 
   Future<void> _toggleBiometric(bool enable) async {
-    if (enable) {
-      final storedUser = prefs.getString('username_remember');
-      final storedPass = prefs.getString('password_remember');
-      if (storedUser == null || storedPass == null) {
-        showAppMessage(
-          context,
-          AppLocalizations.of(
-            context,
-          ).biometricRememberMeRequired(_biometricLabel),
-        );
-        return;
-      }
-      final confirmed = await BiometricAuthService.instance.authenticate(
-        reason: AppLocalizations.of(
-          context,
-        ).biometricConfirmToEnable(_biometricLabel),
-      );
-      if (!confirmed) return;
-      await BiometricAuthService.instance.setEnabled(true);
-      await prefs.setString('biometric_username', storedUser);
-      await prefs.setString('biometric_password', storedPass);
-    } else {
-      await BiometricAuthService.instance.setEnabled(false);
-      await prefs.remove('biometric_username');
-      await prefs.remove('biometric_password');
-    }
+    final notifier = ref.read(settingsNotifierProvider.notifier);
+    final state = ref.read(settingsNotifierProvider);
+    final result = await notifier.setBiometricEnabled(
+      enable,
+      confirmReason: AppLocalizations.of(
+        context,
+      ).biometricConfirmToEnable(state.biometricLabel),
+    );
     if (!mounted) return;
-    setState(() => _biometricEnabled = enable);
+    if (result == BiometricToggleResult.missingCredentials) {
+      showAppMessage(
+        context,
+        AppLocalizations.of(
+          context,
+        ).biometricRememberMeRequired(state.biometricLabel),
+      );
+    }
   }
 
   @override
@@ -231,25 +122,18 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     }
   }
 
-  String _decimalLabel([BuildContext? context]) {
-    final value = decimal ?? 2;
-    if (context != null) {
-      return AppLocalizations.of(context).decimalOption(value);
-    }
-    return '$value Decimal${value == 1 ? '' : 's'}';
+  String _decimalLabel(BuildContext context, SettingsState state) {
+    return AppLocalizations.of(context).decimalOption(state.decimalPlaces);
   }
 
-  String _dateRangeLabel([BuildContext? context]) {
-    if (dateRangeOption == 'Custom Date' &&
-        customStartDate != null &&
-        customEndDate != null) {
+  String _dateRangeLabel(BuildContext context, SettingsState state) {
+    if (state.dateRangeOption == 'Custom Date' &&
+        state.customStartDate != null &&
+        state.customEndDate != null) {
       final formatter = DateFormat('dd MMM yyyy');
-      return '${formatter.format(customStartDate!)} - ${formatter.format(customEndDate!)}';
+      return '${formatter.format(state.customStartDate!)} - ${formatter.format(state.customEndDate!)}';
     }
-    if (context != null) {
-      return _dateRangeOptionLabel(context, dateRangeOption);
-    }
-    return dateRangeOption;
+    return _dateRangeOptionLabel(context, state.dateRangeOption);
   }
 
   String _themeModeLabel([BuildContext? context]) {
@@ -276,6 +160,10 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(settingsNotifierProvider);
+    ref.listen<SettingsState>(settingsNotifierProvider, (_, next) {
+      _syncControllers(next);
+    });
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -352,61 +240,61 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             ),
 
             // ── Security ─────────────────────────────────────────────────
-            if (_biometricAvailable) const SizedBox(height: 18),
-            if (_biometricAvailable)
+            if (state.biometricAvailable) const SizedBox(height: 18),
+            if (state.biometricAvailable)
               _buildSectionLabel(
                 AppLocalizations.of(context).settingsSectionSecurity,
               ),
-            if (_biometricAvailable)
+            if (state.biometricAvailable)
               _buildSettingsGroup(
                 children: [
                   _buildSwitchTile(
-                    icon: _biometricLabel == 'Face ID'
+                    icon: state.biometricLabel == 'Face ID'
                         ? Icons.face_retouching_natural
                         : Icons.fingerprint,
                     title: AppLocalizations.of(
                       context,
-                    ).settingsBiometricLogin(_biometricLabel),
+                    ).settingsBiometricLogin(state.biometricLabel),
                     subtitle: AppLocalizations.of(
                       context,
-                    ).settingsBiometricLoginSubtitle(_biometricLabel),
-                    value: _biometricEnabled,
+                    ).settingsBiometricLoginSubtitle(state.biometricLabel),
+                    value: state.biometricEnabled,
                     onChanged: _toggleBiometric,
                   ),
                 ],
               ),
 
             // ── General ──────────────────────────────────────────────────
-            if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
+            if ([state.canCurrency, state.canAmtDecimals, state.canVatPerc].any((v) => v))
               const SizedBox(height: 18),
-            if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
+            if ([state.canCurrency, state.canAmtDecimals, state.canVatPerc].any((v) => v))
               _buildSectionLabel(
                 AppLocalizations.of(context).settingsSectionGeneral,
               ),
-            if ([_canCurrency, _canAmtDecimals, _canVatPerc].any((v) => v))
+            if ([state.canCurrency, state.canAmtDecimals, state.canVatPerc].any((v) => v))
               _buildSettingsGroup(
                 children: [
-                  if (_canCurrency)
+                  if (state.canCurrency)
                     _buildTile(
                       icon: Icons.attach_money_rounded,
                       title: AppLocalizations.of(context).settingsCurrency,
                       subtitle: AppLocalizations.of(
                         context,
                       ).settingsCurrencySubtitle,
-                      value: groupvalue,
-                      onTap: () => _showCurrencyDialog(context),
+                      value: state.currencyCode,
+                      onTap: () => _showCurrencyDialog(context, state),
                     ),
-                  if (_canAmtDecimals)
+                  if (state.canAmtDecimals)
                     _buildTile(
                       icon: Icons.numbers_rounded,
                       title: AppLocalizations.of(context).settingsDecimals,
                       subtitle: AppLocalizations.of(
                         context,
                       ).settingsDecimalsSubtitle,
-                      value: _decimalLabel(context),
-                      onTap: () => _showDecimalDialog(context),
+                      value: _decimalLabel(context, state),
+                      onTap: () => _showDecimalDialog(context, state),
                     ),
-                  if (_canVatPerc)
+                  if (state.canVatPerc)
                     _buildTile(
                       icon: Icons.percent_rounded,
                       title: AppLocalizations.of(context).settingsVat,
@@ -421,27 +309,27 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
 
             // ── Defaults ─────────────────────────────────────────────────
             if ([
-              _canInactivePDays,
-              _canSortType,
-              _canDefDateRange,
+              state.canInactivePDays,
+              state.canSortType,
+              state.canDefDateRange,
             ].any((v) => v))
               const SizedBox(height: 18),
             if ([
-              _canInactivePDays,
-              _canSortType,
-              _canDefDateRange,
+              state.canInactivePDays,
+              state.canSortType,
+              state.canDefDateRange,
             ].any((v) => v))
               _buildSectionLabel(
                 AppLocalizations.of(context).settingsSectionDefaults,
               ),
             if ([
-              _canInactivePDays,
-              _canSortType,
-              _canDefDateRange,
+              state.canInactivePDays,
+              state.canSortType,
+              state.canDefDateRange,
             ].any((v) => v))
               _buildSettingsGroup(
                 children: [
-                  if (_canInactivePDays)
+                  if (state.canInactivePDays)
                     _buildTile(
                       icon: Icons.calendar_today_outlined,
                       title: AppLocalizations.of(
@@ -453,17 +341,17 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                       value: '${inactivedaysController.text} days',
                       onTap: () => _showInactivedaysInputDialog(context),
                     ),
-                  if (_canSortType)
+                  if (state.canSortType)
                     _buildTile(
                       icon: Icons.sort_rounded,
                       title: AppLocalizations.of(context).settingsSortType,
                       subtitle: AppLocalizations.of(
                         context,
                       ).settingsSortTypeSubtitle,
-                      value: _sortOptionLabel(context, sort),
-                      onTap: () => _showSortDialog(context),
+                      value: _sortOptionLabel(context, state.sortOption),
+                      onTap: () => _showSortDialog(context, state),
                     ),
-                  if (_canDefDateRange)
+                  if (state.canDefDateRange)
                     _buildTile(
                       icon: Icons.date_range_rounded,
                       title: AppLocalizations.of(
@@ -472,23 +360,23 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                       subtitle: AppLocalizations.of(
                         context,
                       ).settingsDefaultDateRangeSubtitle,
-                      value: _dateRangeLabel(context),
-                      onTap: () => _showDateRangeDialog(context),
+                      value: _dateRangeLabel(context, state),
+                      onTap: () => _showDateRangeDialog(context, state),
                     ),
                 ],
               ),
 
             // ── Configurations ───────────────────────────────────────────
-            if ([_canAgeingConfig, _canFastSlowInactiveItem].any((v) => v))
+            if ([state.canAgeingConfig, state.canFastSlowInactiveItem].any((v) => v))
               const SizedBox(height: 18),
-            if ([_canAgeingConfig, _canFastSlowInactiveItem].any((v) => v))
+            if ([state.canAgeingConfig, state.canFastSlowInactiveItem].any((v) => v))
               _buildSectionLabel(
                 AppLocalizations.of(context).settingsSectionConfigurations,
               ),
-            if ([_canAgeingConfig, _canFastSlowInactiveItem].any((v) => v))
+            if ([state.canAgeingConfig, state.canFastSlowInactiveItem].any((v) => v))
               _buildSettingsGroup(
                 children: [
-                  if (_canAgeingConfig)
+                  if (state.canAgeingConfig)
                     _buildTile(
                       icon: Icons.access_time_rounded,
                       title: AppLocalizations.of(
@@ -502,7 +390,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                         MaterialPageRoute(builder: (_) => AgeingConfig()),
                       ),
                     ),
-                  if (_canFastSlowInactiveItem)
+                  if (state.canFastSlowInactiveItem)
                     _buildTile(
                       icon: Icons.stacked_bar_chart_rounded,
                       title: AppLocalizations.of(
@@ -1042,11 +930,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                       if (_vatFormkey.currentState?.validate() ?? false) {
                         _vatFormkey.currentState!.save();
                         double vat = double.tryParse(vatController.text) ?? 0.0;
-                        prefs.setDouble('vatperc', vat);
-                        setState(() {
-                          vatValue = vat;
-                        });
-                        print('VAT: $vat%');
+                        ref.read(settingsNotifierProvider.notifier).setVat(vat);
                         Navigator.of(context).pop();
                       }
                     },
@@ -1134,12 +1018,9 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
 
                         int days =
                             int.tryParse(inactivedaysController.text) ?? 30;
-                        prefs.setInt('inactiveparties_days', days);
-                        setState(() {
-                          inactiveparties_days = days;
-                        });
-
-                        print('Inactive Days: $days');
+                        ref
+                            .read(settingsNotifierProvider.notifier)
+                            .setInactiveDays(days);
                         Navigator.of(context).pop();
                       }
                     },
@@ -1197,7 +1078,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     }
   }
 
-  void _showDateRangeDialog(BuildContext context) {
+  void _showDateRangeDialog(BuildContext context, SettingsState state) {
     final options = [
       'Today',
       'Yesterday',
@@ -1225,7 +1106,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                 icon: Icons.date_range_rounded,
                 title: AppLocalizations.of(context).dateRangeDialogTitle,
                 subtitle: AppLocalizations.of(context).dialogSelected(
-                  _dateRangeOptionLabel(context, dateRangeOption),
+                  _dateRangeOptionLabel(context, state.dateRangeOption),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1235,20 +1116,17 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                   children: options.map((option) {
                     return _optionTile<String>(
                       value: option,
-                      groupValue: dateRangeOption,
+                      groupValue: state.dateRangeOption,
                       title: _dateRangeOptionLabel(context, option),
                       onChanged: (val) async {
                         Navigator.pop(context);
 
                         if (val == 'Custom Date') {
-                          await _showCustomDatePicker(context);
+                          await _showCustomDatePicker(context, state);
                         } else {
-                          setState(() {
-                            dateRangeOption = val!;
-                          });
-                          prefs.setString('dateRangeOption', dateRangeOption);
-                          prefs.remove('startdate');
-                          prefs.remove('enddate');
+                          ref
+                              .read(settingsNotifierProvider.notifier)
+                              .setDateRangeOption(val!);
                         }
                       },
                     );
@@ -1262,13 +1140,16 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _showCustomDatePicker(BuildContext context) async {
+  Future<void> _showCustomDatePicker(
+    BuildContext context,
+    SettingsState state,
+  ) async {
     DateTimeRange? picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDateRange: customStartDate != null && customEndDate != null
-          ? DateTimeRange(start: customStartDate!, end: customEndDate!)
+      initialDateRange: state.customStartDate != null && state.customEndDate != null
+          ? DateTimeRange(start: state.customStartDate!, end: state.customEndDate!)
           : null,
       builder: (BuildContext context, Widget? child) {
         return Theme(
@@ -1296,18 +1177,13 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     );
 
     if (picked != null) {
-      setState(() {
-        dateRangeOption = 'Custom Date';
-        customStartDate = picked.start;
-        customEndDate = picked.end;
-      });
-      prefs.setString('dateRangeOption', 'Custom Date');
-      prefs.setString('startdate', picked.start.toIso8601String());
-      prefs.setString('enddate', picked.end.toIso8601String());
+      await ref
+          .read(settingsNotifierProvider.notifier)
+          .setCustomDateRange(picked.start, picked.end);
     }
   }
 
-  void _showCurrencyDialog(BuildContext context) {
+  void _showCurrencyDialog(BuildContext context, SettingsState state) {
     showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -1324,7 +1200,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
               _dialogHeader(
                 icon: Icons.attach_money_rounded,
                 title: AppLocalizations.of(context).settingsCurrency,
-                subtitle: AppLocalizations.of(context).dialogSelected(groupvalue),
+                subtitle: AppLocalizations.of(context).dialogSelected(state.currencyCode),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1337,62 +1213,74 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     children: [
                       _buildCurrencyOption(
                         context,
+                        state,
                         'USD',
                         '${AppLocalizations.of(context).currencyUSD} (\$)',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'AED',
                         '${AppLocalizations.of(context).currencyAED} (${getCurrencySymbol('AED')})',
                         namePrefix: AppLocalizations.of(context).currencyAED,
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'INR',
                         '${AppLocalizations.of(context).currencyINR} (${getCurrencySymbol('INR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'PKR',
                         '${AppLocalizations.of(context).currencyPKR} (${getCurrencySymbol('PKR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'EUR',
                         '${AppLocalizations.of(context).currencyEUR} (${getCurrencySymbol('EUR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'LKR',
                         '${AppLocalizations.of(context).currencyLKR} (${getCurrencySymbol('LKR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'SAR',
                         '${AppLocalizations.of(context).currencySAR} (${getCurrencySymbol('SAR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'OMR',
                         '${AppLocalizations.of(context).currencyOMR} (${getCurrencySymbol('OMR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'BHD',
                         '${AppLocalizations.of(context).currencyBHD} (${getCurrencySymbol('BHD')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'QAR',
                         '${AppLocalizations.of(context).currencyQAR} (${getCurrencySymbol('QAR')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'KWD',
                         '${AppLocalizations.of(context).currencyKWD} (${getCurrencySymbol('KWD')})',
                       ),
                       _buildCurrencyOption(
                         context,
+                        state,
                         'SLE',
                         '${AppLocalizations.of(context).currencySLE} (${getCurrencySymbol('SLE')})',
                       ),
@@ -1409,14 +1297,15 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
 
   Widget _buildCurrencyOption(
     BuildContext context,
+    SettingsState state,
     String value,
     String label, {
     String? namePrefix,
   }) {
-    final bool selected = groupvalue == value;
+    final bool selected = state.currencyCode == value;
     return _optionTile<String>(
       value: value,
-      groupValue: groupvalue,
+      groupValue: state.currencyCode,
       title: label,
       // AED's "symbol" is the new Dirham glyph, not plain text - render it
       // in its own span (like everywhere else in the app) instead of the
@@ -1446,16 +1335,13 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
             )
           : null,
       onChanged: (selected) {
-        setState(() {
-          groupvalue = selected!;
-        });
-        prefs.setString('currencycode', groupvalue);
+        ref.read(settingsNotifierProvider.notifier).setCurrency(selected!);
         Navigator.pop(context);
       },
     );
   }
 
-  void _showDecimalDialog(BuildContext context) {
+  void _showDecimalDialog(BuildContext context, SettingsState state) {
     showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -1474,7 +1360,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                 title: AppLocalizations.of(context).settingsDecimals,
                 subtitle: AppLocalizations.of(
                   context,
-                ).dialogSelected(_decimalLabel(context)),
+                ).dialogSelected(_decimalLabel(context, state)),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1484,13 +1370,12 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                     int value = index + 1;
                     return _optionTile<int>(
                       value: value,
-                      groupValue: decimal,
+                      groupValue: state.decimalPlaces,
                       title: AppLocalizations.of(context).decimalOption(value),
                       onChanged: (val) {
-                        setState(() {
-                          decimal = val!;
-                        });
-                        prefs.setInt('decimalplace', decimal!);
+                        ref
+                            .read(settingsNotifierProvider.notifier)
+                            .setDecimalPlaces(val!);
                         Navigator.pop(context);
                       },
                     );
@@ -1504,7 +1389,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
     );
   }
 
-  void _showSortDialog(BuildContext context) {
+  void _showSortDialog(BuildContext context, SettingsState state) {
     final options = [
       'Default',
       'Newest to Oldest',
@@ -1533,7 +1418,7 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                 title: AppLocalizations.of(context).sortDialogTitle,
                 subtitle: AppLocalizations.of(
                   context,
-                ).dialogSelected(_sortOptionLabel(context, sort)),
+                ).dialogSelected(_sortOptionLabel(context, state.sortOption)),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1542,13 +1427,12 @@ class _MyHomePageState extends State<Settings> with TickerProviderStateMixin {
                   children: options.map((s) {
                     return _optionTile<String>(
                       value: s,
-                      groupValue: sort,
+                      groupValue: state.sortOption,
                       title: _sortOptionLabel(context, s),
                       onChanged: (val) {
-                        setState(() {
-                          sort = val!;
-                        });
-                        prefs.setString('sort', sort);
+                        ref
+                            .read(settingsNotifierProvider.notifier)
+                            .setSortOption(val!);
                         Navigator.pop(context);
                       },
                     );

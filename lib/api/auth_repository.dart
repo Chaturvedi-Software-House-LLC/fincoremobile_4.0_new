@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -8,6 +9,10 @@ import 'api_exception.dart';
 import 'base_api_client.dart';
 import 'tally_oauth_client.dart';
 import 'token_store.dart';
+
+/// Same reasoning as `BaseApiClient._requestTimeout` - the raw `http` calls
+/// in this file bypass that client, so they need their own bound.
+const _requestTimeout = Duration(seconds: 20);
 
 /// Thrown by [AuthRepository.selectCompany] when the chosen legacy
 /// `(serialNo, companyName)` doesn't match any company/license pair
@@ -35,6 +40,18 @@ class AuthRepository {
 
   final TallyOauthClient _oauth = TallyOauthClient();
 
+  /// The `companies` array from the most recent `POST /auth/user/login`
+  /// response - includes companies reached via `company_users` membership
+  /// (e.g. a driver/employee role), not just companies under a license the
+  /// account owns. [listLicenses]/[listCompanies] only ever see owned
+  /// licenses (`GET /license/user`/`GET /company` are both filtered by
+  /// `license.userId`), so an account with no owned license - only
+  /// `company_users` rows - gets nothing from either; this is the only
+  /// place that data reaches the app. In-memory only (not persisted),
+  /// which is fine since login always happens earlier in the same app
+  /// session as company selection.
+  List<Map<String, dynamic>> _lastLoginCompanies = const [];
+
   /// `POST /auth/user/login`. Callers should treat a failure here as fatal
   /// to login even if the legacy `/api/login/getusers` call succeeds - most
   /// of the app now depends on this session, so proceeding with a
@@ -54,6 +71,11 @@ class AuthRepository {
       accessToken: token['accessToken'] as String,
       refreshToken: token['refreshToken'] as String,
     );
+
+    final companiesRaw = data['companies'];
+    _lastLoginCompanies = companiesRaw is List
+        ? companiesRaw.cast<Map<String, dynamic>>()
+        : const [];
 
     // Phase 6 (making tally-oauth the sole login driver) dropped the
     // legacy socket flow that used to be the only thing writing the
@@ -122,6 +144,34 @@ class AuthRepository {
     return (result.data as List).cast<Map<String, dynamic>>();
   }
 
+  /// Companies reached via `company_users` membership under someone else's
+  /// license (e.g. a driver/employee role) - captured off the login
+  /// response since there's no endpoint that lists these directly yet. See
+  /// [_lastLoginCompanies].
+  List<Map<String, dynamic>> get companiesFromLastLogin => _lastLoginCompanies;
+
+  /// One synthetic "license" per distinct `licenseId` in
+  /// [companiesFromLastLogin] - lets [companiesFromLastLogin]'s entries
+  /// slot into the same license-then-company picker
+  /// ([CompanySelectNotifier.loadData]/[CompanySelectState.companiesFor])
+  /// built around [listLicenses]'s owned-license shape, for an account
+  /// that has none of its own. tally-oauth's login `companies[].license`
+  /// sub-object doesn't expose `tallySerialNumber` yet (only
+  /// `GET /license/user` does) - left blank here, which
+  /// [CompanySelectNotifier.licenseLabel] already falls back from to the
+  /// license name.
+  List<Map<String, dynamic>> licensesFromLastLoginCompanies() {
+    final seenLicenseIds = <String>{};
+    final result = <Map<String, dynamic>>[];
+    for (final company in _lastLoginCompanies) {
+      final licenseId = company['licenseId'] as String?;
+      if (licenseId == null || !seenLicenseIds.add(licenseId)) continue;
+      final license = company['license'] as Map<String, dynamic>? ?? const {};
+      result.add({'id': licenseId, 'tallySerialNumber': '', ...license});
+    }
+    return result;
+  }
+
   /// Same checks tally-oauth itself enforces server-side at company-user
   /// login (active, not suspended, not past `validUntil`) - kept here as
   /// the single source of truth so [CompanySelectTallyOauth] and the
@@ -183,7 +233,13 @@ class AuthRepository {
   /// still runs its own check too (defense-in-depth against the rare race
   /// of a license expiring between this call and company selection).
   Future<(String title, String message)?> checkAnyLicenseUsable() async {
-    final licenses = await listLicenses();
+    final ownedLicenses = await listLicenses();
+    final ownedLicenseIds = ownedLicenses.map((l) => l['id']).toSet();
+    final licenses = [
+      ...ownedLicenses,
+      ...licensesFromLastLoginCompanies()
+          .where((l) => !ownedLicenseIds.contains(l['id'])),
+    ];
     if (licenses.isEmpty) {
       return ('No License Found', 'No license was found for this account.');
     }
@@ -356,15 +412,27 @@ class AuthRepository {
     Map<String, dynamic> body, {
     String? bearerToken,
   }) async {
-    final response = await http.post(
-      Uri.parse('$tallyOauthApiRoot$path'),
-      headers: {
-        'Content-Type': 'application/json',
-        if (bearerToken != null) 'Authorization': 'Bearer $bearerToken',
-        'x-device-id': await TokenStore.instance.deviceId,
-      },
-      body: jsonEncode(body),
-    );
+    final deviceId = await TokenStore.instance.deviceId.timeout(_requestTimeout);
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            Uri.parse('$tallyOauthApiRoot$path'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (bearerToken != null) 'Authorization': 'Bearer $bearerToken',
+              'x-device-id': deviceId,
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_requestTimeout);
+    } on TimeoutException {
+      throw ApiException(
+        statusCode: 0,
+        code: 'TIMEOUT',
+        message: 'The request timed out. Please check your connection and try again.',
+      );
+    }
 
     final decoded = response.body.isEmpty
         ? <String, dynamic>{}
@@ -396,14 +464,16 @@ class AuthRepository {
     final refreshToken = await TokenStore.instance.userRefreshToken;
     if (refreshToken != null) {
       try {
-        await http.post(
-          Uri.parse('$tallyOauthApiRoot/auth/user/logout'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $refreshToken',
-            'x-device-id': await TokenStore.instance.deviceId,
-          },
-        );
+        await http
+            .post(
+              Uri.parse('$tallyOauthApiRoot/auth/user/logout'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $refreshToken',
+                'x-device-id': await TokenStore.instance.deviceId,
+              },
+            )
+            .timeout(_requestTimeout);
       } catch (_) {
         // Best-effort - still clear local tokens even if the revoke call
         // fails (e.g. already expired, or offline), so the app never gets

@@ -7,10 +7,9 @@ import '../ModifySalesEntry.dart';
 import '../api/api_exception.dart';
 import '../api/currency_repository.dart';
 import '../api/godown_repository.dart';
-import '../api/group_repository.dart';
-import '../api/ledger_repository.dart';
 import '../api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 import '../api/stock_repository.dart';
+import '../api/voucher_entry_dropdowns_repository.dart';
 import '../api/voucher_entry_repository.dart';
 import '../api/voucher_type_repository.dart';
 
@@ -91,15 +90,16 @@ class ModifySalesEntryArgs {
 ///   whose "edit" button `onPressed` is a no-op in the pre-migration code -
 ///   kept exactly that way, not fixed) - `loadData()` seeds it once from
 ///   `data['voucherNumber']` and it's otherwise left alone.
-/// - `addOrMergeLedger` preserves a genuine pre-existing bug verbatim
-///   (out of scope for this migration, matching the identical situation
-///   already documented in `delivery_note_registration_notifier.dart`):
-///   this screen's own `ledgerdata` rows are built by `loadData()` as bare
-///   `{'name': ...}` maps with **no** `'vatapplicable'` key - so
-///   `ledgerRow['vatapplicable']` is always `null`, and assigning that to
-///   the non-nullable `int vatApplicable` throws a runtime `TypeError` the
-///   moment a manual ledger is actually added via `addLedger()`. This was
-///   true of the pre-migration widget code too - kept byte-for-byte here.
+/// - `addOrMergeLedger` originally preserved a genuine pre-existing bug
+///   verbatim (matching the identical situation already documented in
+///   `delivery_note_registration_notifier.dart`): this screen's own
+///   `ledgerdata` rows were built by `loadData()` as bare `{'name': ...}`
+///   maps with no `vatApplicable` key, and the lowercase
+///   `'vatapplicable'` lookup was always `null` regardless - throwing a
+///   runtime `TypeError` the moment a manual ledger was added via
+///   `addLedger()`. Fixed: `loadData()` now carries `vatApplicable`
+///   through into `ledgerdata`, and `addOrMergeLedger` reads the real
+///   camelCase bool.
 /// - `generateInvoicePDF`/`formatAmountInvoice`/`convertAmountToWords`/etc.
 ///   stay entirely widget-local (pure PDF/text-formatting UI with no
 ///   `setState` of their own) - `formatAmountInvoice` read `decimal` via a
@@ -681,22 +681,22 @@ class ModifySalesEntryNotifier extends StateNotifier<ModifySalesEntryState> {
   }
 
   /// Verbatim port of `addLedger()`'s data-mutation half (merge-by-name or
-  /// append). Preserves a genuine pre-existing bug verbatim - see this
-  /// file's doc-comment: `ledgerdata` rows never carry a `'vatapplicable'`
-  /// key, so this throws a runtime `TypeError` the moment it actually runs,
-  /// exactly as the pre-migration widget code did. The widget's own
-  /// `addLedger()` wrapper validates `ledgerName`/`ledgerAmount` are
-  /// non-empty and pops the dialog before calling this, matching the
-  /// original's `if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty)`
-  /// guard order.
+  /// append). The widget's own `addLedger()` wrapper validates
+  /// `ledgerName`/`ledgerAmount` are non-empty and pops the dialog before
+  /// calling this, matching the original's
+  /// `if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty)` guard order.
   void addOrMergeLedger(String ledgerName, double amount) {
     _commit(() {
       final specificLedger = ledgerdata.firstWhere(
         (ledger) => ledger['name'] == ledgerName,
       );
 
-      final int vatApplicable = specificLedger['vatapplicable'];
-      final bool vatApp = vatApplicable == 1;
+      // tally-api's `/ledgers` returns this as a camelCase boolean
+      // (`vatApplicable`), not legacy's lowercase 1/0 `vatapplicable` -
+      // fixed to actually read the real field (`loadData()` now carries
+      // it through into `ledgerdata` too; this used to crash with a
+      // TypeError the moment a manual ledger was added).
+      final bool vatApp = specificLedger['vatApplicable'] == true;
 
       int existingIndex = ledgerEntries.indexWhere(
         (entry) => entry.ledgerName == ledgerName,
@@ -898,29 +898,34 @@ class ModifySalesEntryNotifier extends StateNotifier<ModifySalesEntryState> {
     try {
       final results = await Future.wait([
         StockRepository.instance.listStockItems(),
-        LedgerRepository.instance.listLedgers(),
-        LedgerRepository.instance.listAllLedgers(),
-        GroupRepository.instance.listAll(),
+        VoucherEntryDropdownsRepository.instance.salesData(type: 'sales'),
         VoucherTypeRepository.instance.listAll(),
         GodownRepository.instance.listAll(),
         CurrencyRepository.instance.listAll(),
       ]);
 
-      final stockItems = results[0];
-      final partyLedgers = results[1];
-      final allLedgers = results[2];
-      final groups = results[3];
-      final voucherTypes = results[4];
-      final godowns = results[5];
-      final currencies = results[6];
+      final stockItems = results[0] as List<Map<String, dynamic>>;
+      final salesData = results[1] as Map<String, dynamic>;
+      final voucherTypes = results[2] as List<Map<String, dynamic>>;
+      final godowns = results[3] as List<Map<String, dynamic>>;
+      final currencies = results[4] as List<Map<String, dynamic>>;
 
-      final groupReservedNameByMasterId = <int, String?>{
-        for (final g in groups)
-          g['masterId'] as int: g['reservedName'] as String?,
-      };
-      final partyLedgerMasterIds = partyLedgers
-          .map((l) => l['masterId'] as int)
-          .toSet();
+      // Same server-side classification `SalesRegistration.dart` uses (via
+      // `VoucherEntryDropdownsRepository.salesData()`), not this screen's
+      // own former client-side re-derivation - that ad hoc logic
+      // (`LedgerRepository.listLedgers()`'s party-like-group heuristic
+      // included Sundry Creditors alongside Debtors and excluded Bank/Cash/
+      // Branches that the server's actual "sales-data" party-ledger set
+      // includes) disagreed with the server, producing a different ledger
+      // set than the create-flow screen for the same company.
+      final partyLedgers = (salesData['partyLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final salesLedgers = (salesData['salesLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final vatLedgers = (salesData['vatLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final otherLedgersRaw = (salesData['otherLedgers'] as List)
+          .cast<Map<String, dynamic>>();
 
       _commit(() {
         // tally-api's VoucherReservedName enum (2026-08-21 schema-hardening
@@ -938,8 +943,13 @@ class ModifySalesEntryNotifier extends StateNotifier<ModifySalesEntryState> {
                 vt['name'] as String: vt['masterId'] as int,
           });
 
-        _allLedgersCache = allLedgers;
-        for (final ledger in allLedgers) {
+        _allLedgersCache = [
+          ...partyLedgers,
+          ...salesLedgers,
+          ...vatLedgers,
+          ...otherLedgersRaw,
+        ];
+        for (final ledger in _allLedgersCache) {
           _ledgerMasterIdByName[ledger['name'] as String] =
               ledger['masterId'] as int;
         }
@@ -947,29 +957,15 @@ class ModifySalesEntryNotifier extends StateNotifier<ModifySalesEntryState> {
         partyledgerdata = [for (final l in partyLedgers) (l['name'] as String)]
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-        salesledger_data = [
-          for (final l in allLedgers)
-            if (groupReservedNameByMasterId[l['groupMasterId']] == 'SALES')
-              l['name'] as String,
-        ];
+        salesledger_data = [for (final l in salesLedgers) l['name'] as String];
 
         vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll([
-          for (final l in allLedgers)
-            if (groupReservedNameByMasterId[l['groupMasterId']] == 'DUTIES')
-              l['name'] as String,
-        ]);
+        vatledgerdata.addAll([for (final l in vatLedgers) l['name'] as String]);
         final vatLedgerNames = vatledgerdata.toSet();
 
-        // "Other ledgers" (the manual Ledger Entry add list) - every ledger
-        // not already surfaced as a party/sales/VAT ledger above.
-        final salesLedgerNames = salesledger_data.toSet();
         ledgerdata = [
-          for (final l in allLedgers)
-            if (!partyLedgerMasterIds.contains(l['masterId']) &&
-                !salesLedgerNames.contains(l['name']) &&
-                !vatLedgerNames.contains(l['name']))
-              {'name': l['name']},
+          for (final l in otherLedgersRaw)
+            {'name': l['name'], 'vatApplicable': l['vatApplicable']},
         ];
 
         itemdata = [

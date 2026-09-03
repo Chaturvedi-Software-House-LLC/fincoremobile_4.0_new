@@ -22,11 +22,17 @@ class VoucherEntryDropdownsRepository {
   final TallyApiClient _client = TallyApiClient();
 
   /// `{vchTypes, partyLedgers, salesLedgers, vatLedgers, otherLedgers,
-  /// items, godowns}` - everything needed to build a Sales/Sales-Order
-  /// voucher-entry form. No `currencies` - fetch that separately.
-  Future<Map<String, dynamic>> salesData() async {
+  /// items, godowns}` - everything needed to build a Sales/Sales-Order/
+  /// Delivery-Note voucher-entry form. No `currencies` - fetch that
+  /// separately. [type] selects which `VoucherReservedName`(s) `vchTypes`
+  /// is filtered to server-side (`'sales' | 'salesOrder' | 'deliveryNote'`,
+  /// defaults to `'sales'`) - the other fields (`partyLedgers`/
+  /// `salesLedgers`/`vatLedgers`/`otherLedgers`/`items`/`godowns`) are not
+  /// type-dependent.
+  Future<Map<String, dynamic>> salesData({String? type}) async {
+    final query = type != null ? '?type=$type' : '';
     final result = await _client.getForCompany(
-      '/voucher-entry-dropdowns/sales-data',
+      '/voucher-entry-dropdowns/sales-data$query',
     );
     return result.data as Map<String, dynamic>;
   }

@@ -564,14 +564,36 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
     });
   }
 
+  // Mirrors tally-oauth's actual `POST /company-user` Zod schema (confirmed
+  // live against the running server, not guessed): `userName` >= 8 chars,
+  // `firstName`/`lastName`/`email` <= their DB column widths (VarChar(100)/
+  // VarChar(100)/VarChar(320)), `phone` E.164 (`+` then up to 15 digits) if
+  // given. Password has no confirmed server-side complexity/length rule
+  // beyond bcrypt's 72-byte input cap, so this only enforces a conservative
+  // minimum (8, matching userName) rather than inventing rules that could
+  // reject a password the server would actually accept.
+  static final RegExp _phoneE164 = RegExp(r'^\+[1-9]\d{1,14}$');
+
   void _submitForm() {
     final name = controller_name.text.trim();
     final username = controller_username.text.trim();
     final roleId =
         ref.read(createUserNotifierProvider).selectedRole?["id"] as String?;
 
-    if (name.isEmpty || username.isEmpty || roleId == null) {
-      showAppMessage(context, "Please fill all required fields.");
+    if (name.isEmpty) {
+      showAppMessage(context, "Please enter the user's full name");
+      return;
+    }
+    if (name.length > 100) {
+      showAppMessage(context, "Full name must be 100 characters or fewer");
+      return;
+    }
+    if (username.isEmpty) {
+      showAppMessage(context, "Please enter a username or email");
+      return;
+    }
+    if (roleId == null) {
+      showAppMessage(context, "Please select a role");
       return;
     }
 
@@ -579,10 +601,23 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
 
     // EMAIL USER
     if (isEmail(username)) {
+      if (username.length > 320) {
+        showAppMessage(context, "Email must be 320 characters or fewer");
+        return;
+      }
       finalPassword = _generateRandomPassword();
     }
     // USERNAME USER
     else {
+      if (username.length < 8) {
+        showAppMessage(context, "Username must be at least 8 characters");
+        return;
+      }
+      if (username.length > 100) {
+        showAppMessage(context, "Username must be 100 characters or fewer");
+        return;
+      }
+
       finalPassword = controller_password.text.trim();
 
       if (finalPassword.isEmpty) {
@@ -590,8 +625,12 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
         return;
       }
 
-      if (finalPassword.length < 4) {
-        showAppMessage(context, "Password too short");
+      if (finalPassword.length < 8) {
+        showAppMessage(context, "Password must be at least 8 characters");
+        return;
+      }
+      if (finalPassword.length > 72) {
+        showAppMessage(context, "Password must be 72 characters or fewer");
         return;
       }
     }

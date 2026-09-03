@@ -3988,7 +3988,8 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
   /// re-classified them here.
   ///  - vchTypes/partyLedgers/salesLedgers/vatLedgers/otherLedgers/godowns ->
   ///    used as-is (`{masterId, name}` rows, `otherLedgers` also carries
-  ///    `vatApplicable`, not currently read here).
+  ///    `vatApplicable`, which `SalesRegistrationNotifier.loadData()` carries
+  ///    through into its own `ledgerdata` for `addOrMergeLedger` to read).
   ///  - items -> stock items, already shaped close to what this screen's
   ///    item-picker/unit-dropdown/bulk-add code reads; reshaped one more
   ///    step by `_shapeStockItemForLegacyItemdata` into the exact legacy key

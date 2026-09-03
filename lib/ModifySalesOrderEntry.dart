@@ -4815,16 +4815,12 @@ class _ModifySalesOrderEntryPageState
   /// Thin wrapper: resolves `_selectedledger`/`ledgerAmountController` (both
   /// dialog-local) then hands off to the notifier's `addLedger`, which does
   /// the merge-or-append + totals recompute this method used to do
-  /// directly. See `modify_sales_order_entry_notifier.dart`'s doc-comment
-  /// for a pre-existing bug preserved in that method (`vatapplicable`
-  /// lowercase-key lookup).
+  /// directly.
   void addLedger() {
-    Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
-      (ledger) => ledger['name'] == _selectedledger,
-    );
-
-    final ledgerName = specificLedger['name'] as String;
+    final ledgerName = _selectedledger as String?;
     final ledgerAmount = ledgerAmountController.text;
+
+    if (ledgerName == null || ledgerName.isEmpty) return;
 
     if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
       Navigator.of(context).pop();
@@ -4896,6 +4892,15 @@ class _ModifySalesOrderEntryPageState
 
   @override
   Widget build(BuildContext context) {
+    // Subscribes this widget to the notifier's state so Flutter actually
+    // rebuilds it on every `_commit` - without this, every read below goes
+    // through `_s`/`_isLoading`/etc.'s `ref.read` (a one-time snapshot, not
+    // a subscription), so the screen only visually reflected a state change
+    // when something else happened to force a rebuild (e.g. an imperative
+    // TextEditingController write). Matches
+    // `SalesOrderRegistration.dart`'s own `ref.watch(...)` at the top of
+    // its `build()`, which this screen was missing.
+    ref.watch(modifySalesOrderEntryNotifierProvider(_args));
     if (!_isInitialDataLoaded) {
       return Scaffold(
         bottomNavigationBar: const AppBottomNav(

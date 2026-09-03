@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:FincoreGo/viewVanAllocations.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'constants.dart';
@@ -9,6 +10,7 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'van_allocation_data.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
+import 'providers/van_allocation_notifier.dart';
 
 /// Van Allocation ("Spectra") - vehicle/voucher-type assignment screen.
 ///
@@ -26,140 +28,34 @@ import 'widgets/searchable_selector.dart';
 /// customer/party ledger from that user elsewhere in the app). The
 /// registration screens now derive a sales/cash ledger default themselves,
 /// company-wide, from Group.reservedName - see `SalesRegistration.dart`.
-class VanAllocationScreen extends StatefulWidget {
+class VanAllocationScreen extends ConsumerStatefulWidget {
   const VanAllocationScreen({super.key});
 
   @override
-  State<VanAllocationScreen> createState() => _VanAllocationScreenState();
+  ConsumerState<VanAllocationScreen> createState() =>
+      _VanAllocationScreenState();
 }
 
-class _VanAllocationScreenState extends State<VanAllocationScreen> {
+class _VanAllocationScreenState extends ConsumerState<VanAllocationScreen> {
   final Color primaryColor = app_color;
   final Color textColor = const Color(0xFF1F2937);
 
-  CompanyUserOption? selectedUser;
-  MasterOption? selectedLocation;
-  MasterOption? selectedDeliveryNoteVchType;
-  MasterOption? selectedSalesVchType;
-  MasterOption? selectedReceiptVchType;
-
-  List<CompanyUserOption> users = [];
-  List<MasterOption> locations = [];
-  List<MasterOption> deliveryNoteVchTypes = [];
-  List<MasterOption> salesVchTypes = [];
-  List<MasterOption> receiptVchTypes = [];
-
-  bool isSaving = false;
-  bool isLoading = true;
-  // Kept as a local-only, unsaved UI control: master-restrictions has no
-  // backend field for "is_bulk" (that concept - is_bulk/meter-reading - is
-  // out of scope for this data-layer migration and still driven by the
-  // legacy "spectra_allocations" SharedPreferences cache read at login,
-  // untouched by this screen). Toggling it here does nothing.
-  bool isBulkAllocation = false;
-  int formResetKey = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    fetchInitialData();
-  }
-
-  Future<void> fetchInitialData() async {
-    setState(() => isLoading = true);
-    try {
-      final results = await Future.wait([
-        VanAllocationData.listCompanyUsers(),
-        VanAllocationData.listAllGodowns(),
-        VanAllocationData.listVoucherTypesByReservedName('DELIVERY_NOTE'),
-        VanAllocationData.listVoucherTypesByReservedName('SALES'),
-        VanAllocationData.listVoucherTypesByReservedName('RECEIPT'),
-      ]);
-      final allUsers = results[0] as List<CompanyUserOption>;
-      locations = results[1] as List<MasterOption>;
-      deliveryNoteVchTypes = results[2] as List<MasterOption>;
-      salesVchTypes = results[3] as List<MasterOption>;
-      receiptVchTypes = results[4] as List<MasterOption>;
-
-      // Only offer company-users who don't already have a vehicle (GODOWN
-      // restriction) assigned - mirrors the legacy screen's "already
-      // allocated" exclusion from the user picker.
-      final unallocated = <CompanyUserOption>[];
-      for (final user in allUsers) {
-        final existing = await VanAllocationData.currentGodownMasterId(user.id);
-        if (existing == null) unallocated.add(user);
-      }
-      users = unallocated;
-      if (users.isEmpty) selectedUser = null;
-    } catch (e) {
-      debugPrint('Van Allocation fetchInitialData error: $e');
-    } finally {
-      setState(() => isLoading = false);
-    }
-  }
-
-  bool get isFormValid =>
-      selectedUser != null &&
-      selectedLocation != null &&
-      selectedDeliveryNoteVchType != null &&
-      selectedSalesVchType != null &&
-      selectedReceiptVchType != null;
-
   void _resetForm() {
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() {
-      selectedUser = null;
-      selectedLocation = null;
-      selectedDeliveryNoteVchType = null;
-      selectedSalesVchType = null;
-      selectedReceiptVchType = null;
-      isBulkAllocation = false;
-      formResetKey++;
-      if (users.isEmpty) selectedUser = null;
-    });
+    ref.read(vanAllocationNotifierProvider.notifier).resetForm();
   }
 
   Future<void> _saveAllocation() async {
-    if (!isFormValid) {
-      showAppMessage(context, 'Please fill all fields');
-      return;
-    }
-
-    setState(() => isSaving = true);
-    try {
-      final alreadyTaken = await VanAllocationData.isGodownAlreadyAllocated(
-        selectedLocation!.masterId,
-      );
-      if (alreadyTaken) {
-        showAppMessage(
-          context,
-          'This vehicle/location is already allocated to another user',
-        );
-        return;
-      }
-
-      await VanAllocationData.saveAllocation(
-        companyUserId: selectedUser!.id,
-        godownMasterId: selectedLocation!.masterId,
-        voucherTypeMasterIds: [
-          selectedDeliveryNoteVchType!.masterId,
-          selectedSalesVchType!.masterId,
-          selectedReceiptVchType!.masterId,
-        ],
-      );
-
-      await fetchInitialData();
-      _resetForm();
-    } catch (e) {
-      debugPrint('SAVE ALLOCATION ERROR: $e');
-      showAppMessage(context, 'Error: $e');
-    } finally {
-      setState(() => isSaving = false);
-    }
+    final error = await ref
+        .read(vanAllocationNotifierProvider.notifier)
+        .saveAllocation();
+    if (error != null) showAppMessage(context, error);
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(vanAllocationNotifierProvider);
+    final notifier = ref.read(vanAllocationNotifierProvider.notifier);
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -212,7 +108,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
           ],
         ),
       ),
-      body: isLoading
+      body: state.isLoading
           ? _buildSkeletonForm()
           : LayoutBuilder(
               builder: (context, constraints) {
@@ -228,7 +124,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _buildAllocationForm(isMobile),
+                                _buildAllocationForm(isMobile, state, notifier),
                                 const SizedBox(height: 30),
                               ],
                             ),
@@ -277,7 +173,11 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
     );
   }
 
-  Widget _buildAllocationForm(bool isMobile) {
+  Widget _buildAllocationForm(
+    bool isMobile,
+    VanAllocationState state,
+    VanAllocationNotifier notifier,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: _cardDecoration(),
@@ -290,59 +190,79 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
             isMobile: isMobile,
             children: [
               SearchableSelectorField<CompanyUserOption>(
-                key: ValueKey('user_$formResetKey'),
-                value: selectedUser,
-                items: users,
+                key: ValueKey('user_${state.formResetKey}'),
+                value: state.selectedUser,
+                items: state.users,
                 itemLabel: (u) => u.username.isNotEmpty ? '${u.name} (${u.username})' : u.name,
                 label: 'User Name',
                 icon: Icons.person_search_outlined,
-                hintText: users.isEmpty ? 'No user available' : 'Search and select user',
-                onChanged: (val) => setState(() => selectedUser = val),
+                hintText: state.users.isEmpty ? 'No user available' : 'Search and select user',
+                onChanged: notifier.selectUser,
               ),
               SearchableSelectorField<MasterOption>(
-                key: ValueKey('location_$formResetKey'),
-                value: selectedLocation,
-                items: locations,
+                key: ValueKey('location_${state.formResetKey}'),
+                value: state.selectedLocation,
+                items: state.locations,
                 itemLabel: (v) => v.name,
                 label: 'Location',
                 icon: Icons.location_on_outlined,
                 hintText: 'Search and select location',
-                onChanged: (val) => setState(() => selectedLocation = val),
+                onChanged: notifier.selectLocation,
               ),
               SearchableSelectorField<MasterOption>(
-                key: ValueKey('dn_$formResetKey'),
-                value: selectedDeliveryNoteVchType,
-                items: deliveryNoteVchTypes,
+                key: ValueKey('dn_${state.formResetKey}'),
+                value: state.selectedDeliveryNoteVchType,
+                items: state.deliveryNoteVchTypes,
                 itemLabel: (v) => v.name,
                 label: 'Delivery Note Voucher Type',
                 icon: Icons.receipt_long_outlined,
                 hintText: 'Search and select delivery note voucher type',
-                onChanged: (val) => setState(() => selectedDeliveryNoteVchType = val),
+                onChanged: notifier.selectDeliveryNoteVchType,
               ),
               SearchableSelectorField<MasterOption>(
-                key: ValueKey('sales_$formResetKey'),
-                value: selectedSalesVchType,
-                items: salesVchTypes,
+                key: ValueKey('sales_${state.formResetKey}'),
+                value: state.selectedSalesVchType,
+                items: state.salesVchTypes,
                 itemLabel: (v) => v.name,
                 label: 'Sales Voucher Type',
                 icon: Icons.point_of_sale_outlined,
                 hintText: 'Search and select sales voucher type',
-                onChanged: (val) => setState(() => selectedSalesVchType = val),
+                onChanged: notifier.selectSalesVchType,
               ),
               SearchableSelectorField<MasterOption>(
-                key: ValueKey('receipt_$formResetKey'),
-                value: selectedReceiptVchType,
-                items: receiptVchTypes,
+                key: ValueKey('receipt_${state.formResetKey}'),
+                value: state.selectedReceiptVchType,
+                items: state.receiptVchTypes,
                 itemLabel: (v) => v.name,
                 label: 'Receipt Voucher Type',
                 icon: Icons.payments_outlined,
                 hintText: 'Search and select receipt voucher type',
-                onChanged: (val) => setState(() => selectedReceiptVchType = val),
+                onChanged: notifier.selectReceiptVchType,
+              ),
+              SearchableSelectorField<MasterOption>(
+                key: ValueKey('sales_ledger_${state.formResetKey}'),
+                value: state.selectedSalesLedger,
+                items: state.salesLedgers,
+                itemLabel: (v) => v.name,
+                label: 'Sales Ledger',
+                icon: Icons.sell_outlined,
+                hintText: 'Search and select sales ledger',
+                onChanged: notifier.selectSalesLedger,
+              ),
+              SearchableSelectorField<MasterOption>(
+                key: ValueKey('cash_ledger_${state.formResetKey}'),
+                value: state.selectedCashLedger,
+                items: state.cashLedgers,
+                itemLabel: (v) => v.name,
+                label: 'Cash Ledger',
+                icon: Icons.account_balance_wallet_outlined,
+                hintText: 'Search and select cash ledger',
+                onChanged: notifier.selectCashLedger,
               ),
             ],
           ),
           const SizedBox(height: 18),
-          _bulkAllocationToggle(),
+          _bulkAllocationToggle(state, notifier),
           const SizedBox(height: 24),
           Row(
             children: [
@@ -361,14 +281,14 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed: isSaving ? null : _saveAllocation,
+                  onPressed: state.isSaving ? null : _saveAllocation,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryColor,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: isSaving
+                  child: state.isSaving
                       ? Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -416,7 +336,11 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
     );
   }
 
-  Widget _bulkAllocationToggle() {
+  Widget _bulkAllocationToggle(
+    VanAllocationState state,
+    VanAllocationNotifier notifier,
+  ) {
+    final bool isBulkAllocation = state.isBulkAllocation;
     final Color stateColor = isBulkAllocation ? primaryColor : Colors.grey;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -431,7 +355,7 @@ class _VanAllocationScreenState extends State<VanAllocationScreen> {
         inactiveThumbColor: Colors.grey.shade500,
         inactiveTrackColor: Colors.grey.shade300,
         value: isBulkAllocation,
-        onChanged: (val) => setState(() => isBulkAllocation = val),
+        onChanged: notifier.setBulkAllocation,
         title: Row(
           children: [
             Text('Bulk (Tanker) Delivery', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14)),

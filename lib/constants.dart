@@ -11,7 +11,7 @@ const String prodServer = "https://fincorego.duckdns.org";
 const String devServer = "http://192.168.2.185";
 
 // Production Environment
-const String BASE_URL_config = "$prodServer/main";
+// const String BASE_URL_config = "$prodServer/main";
 
 // uni gas serial number
 const String uniGasSerialNumber = '772976358';
@@ -32,16 +32,14 @@ bool parseBoolFlag(dynamic value) {
 
 // Dev Environment
 // const String BASE_URL_config = "$devServer:5000";
-const String authTokenBase =
-    'KSgqL2FzZGFzZGlvQ0VEQUZfX19fIUBBUyQlYXMxOTI4MzdfX18=';
+// const String authTokenBase ='KSgqL2FzZGFzZGlvQ0VEQUZfX19fIUBBUyQlYXMxOTI4MzdfX18=';
 
 // production socket url
-const String SOCKET_URL = prodServer;
+// const String SOCKET_URL = prodServer;
 // development socket url
 // const String SOCKET_URL = devServer;
 
-const String serialNumbersConfigUrl =
-    'https://mobile.chaturvedigroup.com/serial_no/serial_numbers.json';
+const String serialNumbersConfigUrl = 'https://mobile.chaturvedigroup.com/serial_no/serial_numbers.json';
 
 /// Default/fallback serial numbers.
 /// If internet/API fails, app will still use these values.

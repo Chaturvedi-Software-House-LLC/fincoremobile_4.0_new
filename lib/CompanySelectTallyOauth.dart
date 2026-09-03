@@ -83,6 +83,17 @@ class _CompanySelectTallyOauthState
   CompanySelectState get _s => ref.read(companySelectNotifierProvider);
 
   @override
+  void initState() {
+    super.initState();
+    // loadData() completes the entire auto-select flow itself (network
+    // calls included) for an account with exactly one valid license and
+    // one company - so its result must be observed here to navigate, or
+    // that case would fully sign the session in and then never leave this
+    // screen. See company_select_notifier.dart's constructor comment.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+  }
+
+  @override
   void dispose() {
     _serialSearchController.dispose();
     _companySearchController.dispose();
@@ -90,7 +101,8 @@ class _CompanySelectTallyOauthState
   }
 
   Future<void> _loadData() async {
-    await _notifier.loadData();
+    final result = await _notifier.loadData();
+    if (result.success && mounted) _goToDashboard();
   }
 
   Future<void> _proceedWithLicense(Map<String, dynamic> license) async {

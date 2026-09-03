@@ -5,11 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../Items.dart' show formatlastsaledate;
 import '../SalesOrderRegistration.dart';
 import '../api/api_exception.dart';
-import '../api/ledger_repository.dart';
 import '../api/monthly_bucket_helper.dart' show parseMoneyField;
 import '../api/pagination_helper.dart';
 import '../api/stock_repository.dart';
 import '../api/tally_api_client.dart';
+import '../api/voucher_entry_dropdowns_repository.dart';
 import '../api/voucher_entry_repository.dart';
 import '../constants.dart' show uniGasSerialNumber;
 
@@ -699,22 +699,42 @@ class SalesOrderRegistrationNotifier
     try {
       final results = await Future.wait([
         StockRepository.instance.listStockItems(),
-        _fetchAllLedgersUnfiltered(),
-        LedgerRepository.instance.listLedgers(),
-        _fetchSalesAccountGroupIds(),
+        VoucherEntryDropdownsRepository.instance.salesData(type: 'salesOrder'),
         _fetchGodowns(),
         _fetchVoucherTypes(),
         _fetchCurrencyMasterId(currencycode),
       ]);
 
       final stockItems = results[0] as List<Map<String, dynamic>>;
-      final allLedgers = results[1] as List<Map<String, dynamic>>;
-      final partyLedgers = results[2] as List<Map<String, dynamic>>;
-      final salesAccountGroupIds = results[3] as Set<int>;
-      final godowns = results[4] as List<Map<String, dynamic>>;
-      final voucherTypes = results[5] as List<Map<String, dynamic>>;
-      _currencyMasterId = results[6] as int?;
+      final salesData = results[1] as Map<String, dynamic>;
+      final godowns = results[2] as List<Map<String, dynamic>>;
+      final voucherTypes = results[3] as List<Map<String, dynamic>>;
+      _currencyMasterId = results[4] as int?;
 
+      // Same server-side classification `SalesRegistration.dart` uses (via
+      // `VoucherEntryDropdownsRepository.salesData()`), not this screen's
+      // own now-removed client-side re-derivation - that ad hoc logic
+      // (raw `/ledgers` + `/groups` fetch, `LedgerRepository.listLedgers()`
+      // for "party ledgers") disagreed with the server's actual
+      // classification (party ledgers included Sundry Creditors alongside
+      // Debtors; VAT ledgers included every VAT-applicable ledger company-
+      // wide instead of just the DUTIES group), producing different
+      // dropdown contents than the Sales screen for the same company.
+      final partyLedgers = (salesData['partyLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final salesLedgers = (salesData['salesLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final vatLedgers = (salesData['vatLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+      final otherLedgersRaw = (salesData['otherLedgers'] as List)
+          .cast<Map<String, dynamic>>();
+
+      final allLedgers = [
+        ...partyLedgers,
+        ...salesLedgers,
+        ...vatLedgers,
+        ...otherLedgersRaw,
+      ];
       for (final l in allLedgers) {
         _ledgerMasterIdByName[l['name'] as String] = l['masterId'] as int;
       }
@@ -736,28 +756,16 @@ class SalesOrderRegistrationNotifier
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
         _selectedpartyledger = (partyledgerdata.isNotEmpty ? partyledgerdata[0] : null);
 
-        salesledger_data = allLedgers
-            .where((l) => salesAccountGroupIds.contains(l['groupMasterId']))
-            .map((l) => l['name'] as String)
-            .toList();
+        salesledger_data = salesLedgers.map((l) => l['name'] as String).toList();
         _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
 
-        final partyNames = partyledgerdata.toSet();
-        final salesNames = salesledger_data.toSet();
-        ledgerdata = allLedgers
-            .where(
-              (l) =>
-                  !partyNames.contains(l['name']) &&
-                  !salesNames.contains(l['name']),
-            )
-            .toList();
+        ledgerdata = [
+          for (final l in otherLedgersRaw)
+            {'name': l['name'], 'vatApplicable': l['vatApplicable']},
+        ];
 
         vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll(
-          allLedgers
-              .where((l) => l['vatApplicable'] == true)
-              .map((l) => l['name'] as String),
-        );
+        vatledgerdata.addAll(vatLedgers.map((l) => l['name'] as String));
         _selectedvatledger = (vatledgerdata.isNotEmpty ? vatledgerdata[0] : null);
 
         itemdata = stockItems.map((item) {
@@ -802,20 +810,6 @@ class SalesOrderRegistrationNotifier
 
     _commit(() => _isLoading = false);
     return error;
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchAllLedgersUnfiltered() => fetchAllPages(
-    (page) => _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
-  );
-
-  Future<Set<int>> _fetchSalesAccountGroupIds() async {
-    final groups = await fetchAllPages(
-      (page) => _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
-    );
-    return groups
-        .where((g) => g['reservedName'] == 'SALES')
-        .map((g) => g['masterId'] as int)
-        .toSet();
   }
 
   Future<List<Map<String, dynamic>>> _fetchGodowns() => fetchAllPages(

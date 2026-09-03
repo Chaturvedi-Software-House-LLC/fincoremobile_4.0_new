@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -28,6 +29,13 @@ abstract class BaseApiClient {
 
   final String apiRoot;
   final http.Client _http;
+
+  /// Every request (and the device-id/token lookups in [_headers]) is
+  /// bounded by this - without it, a stalled connection or a hung
+  /// secure-storage/keychain read leaves the caller's `await` (and with it
+  /// the whole UI, since these are all awaited from button handlers) stuck
+  /// forever with no error and no way to recover short of killing the app.
+  static const _requestTimeout = Duration(seconds: 20);
 
   /// `POST {apiRoot}/auth/user/refresh` (or the company-user equivalent),
   /// implemented per-scope by the subclass since the endpoint and stored
@@ -118,28 +126,42 @@ abstract class BaseApiClient {
     bool isRetry = false,
   }) async {
     final uri = Uri.parse('$apiRoot$path');
-    final headers = await _headers(scope);
+    final headers = await _headers(scope).timeout(_requestTimeout);
     final encodedBody = body == null ? null : jsonEncode(body);
 
     late final http.Response response;
-    switch (method) {
-      case 'GET':
-        response = await _http.get(uri, headers: headers);
-        break;
-      case 'POST':
-        response = await _http.post(uri, headers: headers, body: encodedBody);
-        break;
-      case 'PATCH':
-        response = await _http.patch(uri, headers: headers, body: encodedBody);
-        break;
-      case 'PUT':
-        response = await _http.put(uri, headers: headers, body: encodedBody);
-        break;
-      case 'DELETE':
-        response = await _http.delete(uri, headers: headers);
-        break;
-      default:
-        throw ArgumentError('Unsupported method: $method');
+    try {
+      switch (method) {
+        case 'GET':
+          response = await _http.get(uri, headers: headers).timeout(_requestTimeout);
+          break;
+        case 'POST':
+          response = await _http
+              .post(uri, headers: headers, body: encodedBody)
+              .timeout(_requestTimeout);
+          break;
+        case 'PATCH':
+          response = await _http
+              .patch(uri, headers: headers, body: encodedBody)
+              .timeout(_requestTimeout);
+          break;
+        case 'PUT':
+          response = await _http
+              .put(uri, headers: headers, body: encodedBody)
+              .timeout(_requestTimeout);
+          break;
+        case 'DELETE':
+          response = await _http.delete(uri, headers: headers).timeout(_requestTimeout);
+          break;
+        default:
+          throw ArgumentError('Unsupported method: $method');
+      }
+    } on TimeoutException {
+      throw ApiException(
+        statusCode: 0,
+        code: 'TIMEOUT',
+        message: 'The request timed out. Please check your connection and try again.',
+      );
     }
 
     if (response.statusCode == 401 && scope != TokenScope.none && !isRetry) {
@@ -181,7 +203,7 @@ abstract class BaseApiClient {
       throw ApiException(
         statusCode: (decoded['statusCode'] as int?) ?? response.statusCode,
         code: (error['code'] as String?) ?? 'UNKNOWN',
-        message: (error['message'] as String?) ?? 'Request failed',
+        message: _detailedMessage(error) ?? (error['message'] as String?) ?? 'Request failed',
       );
     }
 
@@ -189,6 +211,26 @@ abstract class BaseApiClient {
       decoded['data'],
       decoded['meta'] as Map<String, dynamic>?,
     );
+  }
+
+  /// Builds a specific error message from `error.details` (tally-api's own
+  /// convention) or `error.errors`/`error.aggregateErrors` (nestjs-zod's raw
+  /// shape, seen coming straight through from tally-oauth for at least one
+  /// endpoint) when present, joining every field's own message - e.g.
+  /// "Username must be at least 8 characters" - instead of just the
+  /// generic top-level "Validation failed" a Zod validation error's
+  /// `message` field carries on its own. Returns null (falls back to that
+  /// generic message) when no such per-field list is present or usable.
+  static String? _detailedMessage(Map<String, dynamic> error) {
+    final raw = error['details'] ?? error['errors'] ?? error['aggregateErrors'];
+    if (raw is! List || raw.isEmpty) return null;
+    final messages = <String>[];
+    for (final item in raw) {
+      if (item is Map && item['message'] is String) {
+        messages.add(item['message'] as String);
+      }
+    }
+    return messages.isEmpty ? null : messages.join('; ');
   }
 }
 

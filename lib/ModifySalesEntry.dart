@@ -4228,16 +4228,12 @@ class _ModifySalesEntryPageState extends ConsumerState<ModifySalesEntry>
 
   /// Thin wrapper around [ModifySalesEntryNotifier.addOrMergeLedger] -
   /// validates ledgerName/ledgerAmount are non-empty and pops the dialog
-  /// first, matching the original's guard/pop order exactly (including the
-  /// pre-existing `vatapplicable` `TypeError` bug documented in the
-  /// notifier - see that file's doc-comment).
+  /// first, matching the original's guard/pop order exactly.
   void addLedger() {
-    Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
-      (ledger) => ledger['name'] == _selectedledger,
-    );
-
-    final ledgerName = specificLedger['name'];
+    final ledgerName = _selectedledger as String?;
     final ledgerAmount = ledgerAmountController.text;
+
+    if (ledgerName == null || ledgerName.isEmpty) return;
 
     if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
       Navigator.of(context).pop();

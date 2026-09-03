@@ -1,14 +1,20 @@
+import 'api_exception.dart';
 import 'base_api_client.dart';
 import 'tally_oauth_client.dart';
+import 'token_store.dart';
 
 /// Wraps tally-oauth's company-scoped identity endpoints - roles,
 /// permissions, and company-users - used by the AddRole/ModifyRole/
 /// RolesView and CreateUser/ModifyUser/UserView screens. All calls use
-/// [TokenScope.companyUser]: every one of these endpoints derives its
+/// [TokenScope.companyUser]: most of these endpoints derive their
 /// `companyId` from that token server-side (see company-role.controller.ts/
 /// company-user.controller.ts), so a company-user session (established via
 /// [AuthRepository.selectCompany]/[AuthRepository.selectCompanyById]) must
-/// already exist before calling anything here.
+/// already exist before calling anything here. [createCompanyUser] is the
+/// one exception - its Zod body schema requires `companyId` explicitly
+/// (confirmed live: omitting it 400s with "Invalid input: expected string,
+/// received undefined" at `path: ["companyId"]"`), so it reads
+/// [TokenStore.activeCompanyGuid] itself rather than relying on the token.
 class IdentityRepository {
   IdentityRepository._();
   static final IdentityRepository instance = IdentityRepository._();
@@ -87,7 +93,16 @@ class IdentityRepository {
     String? phone,
     String? email,
   }) async {
+    final companyGuid = await TokenStore.instance.activeCompanyGuid;
+    if (companyGuid == null) {
+      throw ApiException(
+        statusCode: 0,
+        code: 'NO_ACTIVE_COMPANY',
+        message: 'No company selected - call selectCompany() first.',
+      );
+    }
     final body = <String, dynamic>{
+      'companyId': companyGuid,
       'userName': userName,
       'firstName': firstName,
       'lastName': lastName,

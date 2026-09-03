@@ -3,16 +3,17 @@ import 'dart:math';
 import 'package:FincoreGo/utils/number_formatter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'currencyFormat.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
+import 'providers/dashboard_analytics_notifier.dart';
 
-class AnalyticsScreen extends StatefulWidget {
+class AnalyticsScreen extends ConsumerStatefulWidget {
   final List<Map<String, dynamic>> lineChartData;
   final List<String> months;
   final Map<int, Color> yearColors;
@@ -51,20 +52,10 @@ class AnalyticsScreen extends StatefulWidget {
   });
 
   @override
-  State<AnalyticsScreen> createState() => _AnalyticsScreenState();
+  ConsumerState<AnalyticsScreen> createState() => _AnalyticsScreenState();
 }
 
-class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  late NumberScale selectedScale;
-  bool showPercentage = false;
-
-  String? company = "";
-  String? companyLowercase = "";
-  String? serialNo = "";
-  String? username = "";
-  String? securityButtonAccessHolder = "";
-  SharedPreferences? prefs;
-
+class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   static final List<Color> _chartPalette = [
     app_color,
     const Color(0xFFFF8A3D),
@@ -78,31 +69,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     const Color(0xFF455A64),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    selectedScale = widget.selectedScale;
-    _initSharedPreferences();
-  }
-
-  Future<void> _initSharedPreferences() async {
-    debugPrint("pieSalesList => ${widget.pieSalesList}");
-    debugPrint("lineChartData => ${widget.lineChartData}");
-    debugPrint("salesDataList => ${widget.salesDataList}");
-    final loadedPrefs = await SharedPreferences.getInstance();
-    final scale = loadedPrefs.getString("number_scale");
-
-    if (!mounted) return;
-    setState(() {
-      prefs = loadedPrefs;
-      company = loadedPrefs.getString('company_name') ?? "";
-      companyLowercase = company!.replaceAll(' ', '').toLowerCase();
-      serialNo = loadedPrefs.getString('serial_no') ?? "";
-      username = loadedPrefs.getString('username') ?? "";
-      securityButtonAccessHolder = loadedPrefs.getString('secbtnaccess') ?? "";
-      selectedScale = _numberScaleFromString(scale) ?? widget.selectedScale;
-    });
-  }
+  DashboardAnalyticsArgs get _args =>
+      DashboardAnalyticsArgs(initialScale: widget.selectedScale);
 
   Widget _buildPieSalesRawData() {
     final data = _cleanPieData(widget.pieSalesList);
@@ -169,21 +137,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         }),
       ],
     );
-  }
-
-  NumberScale? _numberScaleFromString(String? value) {
-    switch (value) {
-      case "thousand":
-        return NumberScale.thousand;
-      case "million":
-        return NumberScale.million;
-      case "billion":
-        return NumberScale.billion;
-      case "full":
-        return NumberScale.full;
-      default:
-        return null;
-    }
   }
 
   List<_MonthBarEntry> get _barEntries {
@@ -313,10 +266,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  String _formatCompact(double value) {
+  String _formatCompact(double value, NumberScale scale) {
     return formatNumberAbbreviation(
       value,
-      scale: selectedScale,
+      scale: scale,
       decimalPlaces: widget.decimalPlaces,
       showSuffix: false,
     );
@@ -324,6 +277,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(dashboardAnalyticsNotifierProvider(_args));
     final theme = Theme.of(context);
     final barEntries = _barEntries;
     final lineMonths = _lineMonths;
@@ -428,7 +382,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                   height: 250,
                                   child: BarChartWidget(
                                     entries: barEntries,
-                                    selectedScale: selectedScale,
+                                    selectedScale: state.selectedScale,
                                     decimalPlaces: widget.decimalPlaces,
                                   ),
                                 );
@@ -483,7 +437,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                     context,
                                     lineMonths.length,
                                   ),
-                                  child: _buildLineChart(lineMonths),
+                                  child: _buildLineChart(lineMonths, state.selectedScale),
                                 ),
                               ),
                             ),
@@ -498,15 +452,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 child: _AnalyticsCard(
                   margin: const EdgeInsets.fromLTRB(16, 12, 16, 22),
                   title: "Category Breakdown",
-                  subtitle: showPercentage
+                  subtitle: state.showPercentage
                       ? "Viewing percentage share"
                       : "Viewing amount share",
                   icon: Icons.donut_large_rounded,
                   accentColor: const Color(0xFF6C63FF),
                   trailing: _SegmentedToggle(
-                    showPercentage: showPercentage,
-                    onChanged: (value) =>
-                        setState(() => showPercentage = value),
+                    showPercentage: state.showPercentage,
+                    onChanged: (value) => ref
+                        .read(dashboardAnalyticsNotifierProvider(_args).notifier)
+                        .setShowPercentage(value),
                   ),
                   child: Column(
                     children: [
@@ -517,8 +472,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           title: "Sales",
                           data: _cleanPieData(widget.pieSalesList),
                           colors: _colorsFor(widget.pieSalesList.length),
-                          showPercentage: showPercentage,
-                          selectedScale: selectedScale,
+                          showPercentage: state.showPercentage,
+                          selectedScale: state.selectedScale,
                           decimalPlaces: widget.decimalPlaces,
                         ),
                       if (widget.isSalesPieChartVisible &&
@@ -532,8 +487,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             widget.piePurchaseList.length,
                             offset: 3,
                           ),
-                          showPercentage: showPercentage,
-                          selectedScale: selectedScale,
+                          showPercentage: state.showPercentage,
+                          selectedScale: state.selectedScale,
                           decimalPlaces: widget.decimalPlaces,
                         ),
                       if (!widget.isSalesPieChartVisible &&
@@ -657,7 +612,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return calculatedWidth;
   }
 
-  Widget _buildLineChart(List<String> months) {
+  Widget _buildLineChart(List<String> months, NumberScale scale) {
     final maxY = _niceChartMax(_lineMaxY(months));
     final interval = maxY / 5;
 
@@ -686,7 +641,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 getTitlesWidget: (value, meta) => Padding(
                   padding: const EdgeInsets.only(right: 10),
                   child: Text(
-                    _formatCompact(value),
+                    _formatCompact(value, scale),
                     style: GoogleFonts.poppins(
                       fontSize: 11,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -734,7 +689,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               getTooltipItems: (spots) {
                 return spots.map((spot) {
                   return LineTooltipItem(
-                    _formatCompact(spot.y),
+                    _formatCompact(spot.y, scale),
                     GoogleFonts.poppins(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,

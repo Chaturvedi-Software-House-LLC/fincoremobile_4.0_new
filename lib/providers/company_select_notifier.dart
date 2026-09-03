@@ -90,9 +90,16 @@ class CompanySelectResult {
 class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
   final Ref _ref;
 
-  CompanySelectNotifier(this._ref) : super(const CompanySelectState()) {
-    loadData();
-  }
+  // Deliberately NOT auto-calling loadData() here: for an account with
+  // exactly one valid license and one company, loadData() completes the
+  // entire auto-select flow itself (including the real selectCompanyById
+  // network call) and returns a success result - but a result returned
+  // from a call fired off in a constructor has no listener, so nothing
+  // would ever navigate to Dashboard even though the session was fully
+  // established. The widget's initState calls loadData() itself instead,
+  // where the returned CompanySelectResult can actually be observed (see
+  // _CompanySelectTallyOauthState._loadData).
+  CompanySelectNotifier(this._ref) : super(const CompanySelectState());
 
   /// Same checks legacy's license-expiry dialog made before letting a
   /// serial number be used. Thin wrapper over [AuthRepository.isLicenseUsable]
@@ -117,8 +124,29 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
         repo.listLicenses(),
         repo.listCompanies(),
       ]);
-      final licenses = results[0];
-      final companies = results[1];
+      final ownedLicenses = results[0];
+      final ownedCompanies = results[1];
+
+      // Fallback for an account with no owned license of its own - only
+      // `company_users` rows under someone else's license (e.g. a
+      // driver/employee role). `GET /license/user`/`GET /company` are both
+      // owned-license-only, so such an account would otherwise always hit
+      // "No License Found" here even though it has real company access -
+      // see AuthRepository.companiesFromLastLogin.
+      final ownedLicenseIds = ownedLicenses.map((l) => l['id']).toSet();
+      final ownedCompanyIds = ownedCompanies.map((c) => c['id']).toSet();
+      final licenses = [
+        ...ownedLicenses,
+        ...repo
+            .licensesFromLastLoginCompanies()
+            .where((l) => !ownedLicenseIds.contains(l['id'])),
+      ];
+      final companies = [
+        ...ownedCompanies,
+        ...repo.companiesFromLastLogin.where(
+          (c) => !ownedCompanyIds.contains(c['id']),
+        ),
+      ];
 
       final valid = licenses.where(_isLicenseValid).toList();
       final invalid = licenses.where((l) => !_isLicenseValid(l)).toList();
@@ -267,9 +295,13 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
               as String?;
 
       // The real Tally serial number (`$$LicenseInfo:SerialNumber`) this
-      // license was bound to by a tally-connector, once it's synced one -
-      // falls back to '' until tally-admin-api exposes it here.
+      // license was bound to by a tally-connector, once it's synced one.
+      // `GET /company`'s embedded `license` object doesn't expose this
+      // field (only `GET /license/user` does), so read it off
+      // `state.selectedLicense` - the license this company belongs to,
+      // already fetched via `listLicenses()` in `loadData()` - instead.
       final tallySerialNumber =
+          (state.selectedLicense?['tallySerialNumber'] as String?) ??
           (company['license'] as Map<String, dynamic>?)?['tallySerialNumber']
               as String? ??
           '';

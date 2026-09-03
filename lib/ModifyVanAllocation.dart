@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'constants.dart';
@@ -9,6 +10,7 @@ import 'van_allocation_data.dart';
 import 'viewVanAllocations.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
+import 'providers/modify_van_allocation_notifier.dart';
 
 /// Modify an existing Van Allocation. `widget.allocation` is one entry from
 /// `ViewVanAllocationScreen`'s list - see that screen for its shape
@@ -21,133 +23,57 @@ import 'widgets/searchable_selector.dart';
 /// master-restrictions-based design, "update" here means a full-replace PUT
 /// of both restriction sets (master-restrictions has no partial-update
 /// semantics).
-class ModifyVanAllocationScreen extends StatefulWidget {
+class ModifyVanAllocationScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> allocation;
 
   const ModifyVanAllocationScreen({super.key, required this.allocation});
 
   @override
-  State<ModifyVanAllocationScreen> createState() => _ModifyVanAllocationScreenState();
+  ConsumerState<ModifyVanAllocationScreen> createState() =>
+      _ModifyVanAllocationScreenState();
 }
 
-class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
+class _ModifyVanAllocationScreenState
+    extends ConsumerState<ModifyVanAllocationScreen> {
   final Color primaryColor = app_color;
   final Color textColor = const Color(0xFF1F2937);
 
-  bool isLoading = true;
-  bool isSaving = false;
-
-  late final String companyUserId = widget.allocation['companyUserId'] as String;
-
-  MasterOption? selectedLocation;
-  MasterOption? selectedDeliveryNoteVchType;
-  MasterOption? selectedSalesVchType;
-  MasterOption? selectedReceiptVchType;
-  // Kept as a local-only, unsaved UI control - see addVanAllocations.dart's
-  // doc-comment; master-restrictions has no "is_bulk" field.
-  bool isBulkAllocation = false;
-
-  List<MasterOption> locations = [];
-  List<MasterOption> deliveryNoteVchTypes = [];
-  List<MasterOption> salesVchTypes = [];
-  List<MasterOption> receiptVchTypes = [];
-
-  @override
-  void initState() {
-    super.initState();
-    initialize();
-  }
-
-  Future<void> initialize() async {
-    try {
-      final results = await Future.wait([
-        VanAllocationData.listAllGodowns(),
-        VanAllocationData.listVoucherTypesByReservedName('DELIVERY_NOTE'),
-        VanAllocationData.listVoucherTypesByReservedName('SALES'),
-        VanAllocationData.listVoucherTypesByReservedName('RECEIPT'),
-      ]);
-      locations = results[0];
-      deliveryNoteVchTypes = results[1];
-      salesVchTypes = results[2];
-      receiptVchTypes = results[3];
-
-      final godownId = widget.allocation['godownMasterId'] as int?;
-      selectedLocation = godownId == null ? null : _findByMasterId(locations, godownId);
-
-      final vchIds = ((widget.allocation['voucherTypeMasterIds'] as List?) ?? const [])
-          .cast<int>()
-          .toSet();
-      selectedDeliveryNoteVchType = _findByMasterIds(deliveryNoteVchTypes, vchIds);
-      selectedSalesVchType = _findByMasterIds(salesVchTypes, vchIds);
-      selectedReceiptVchType = _findByMasterIds(receiptVchTypes, vchIds);
-    } catch (e) {
-      debugPrint('Modify Van Allocation initialize error: $e');
-    } finally {
-      setState(() => isLoading = false);
-    }
-  }
-
-  MasterOption? _findByMasterId(List<MasterOption> options, int masterId) {
-    for (final o in options) {
-      if (o.masterId == masterId) return o;
-    }
-    return null;
-  }
-
-  MasterOption? _findByMasterIds(List<MasterOption> options, Set<int> masterIds) {
-    for (final o in options) {
-      if (masterIds.contains(o.masterId)) return o;
-    }
-    return null;
-  }
-
-  bool get isFormValid =>
-      selectedLocation != null &&
-      selectedDeliveryNoteVchType != null &&
-      selectedSalesVchType != null &&
-      selectedReceiptVchType != null;
+  ModifyVanAllocationArgs get _args => ModifyVanAllocationArgs(
+        companyUserId: widget.allocation['companyUserId'] as String,
+        godownMasterId: widget.allocation['godownMasterId'] as int?,
+        voucherTypeMasterIds:
+            ((widget.allocation['voucherTypeMasterIds'] as List?) ?? const [])
+                .cast<int>()
+                .toSet(),
+        salesLedgerMasterId: widget.allocation['salesLedgerMasterId'] as int?,
+        cashLedgerMasterId: widget.allocation['cashLedgerMasterId'] as int?,
+      );
 
   Future<void> updateAllocation() async {
-    if (!isFormValid) return;
-    setState(() => isSaving = true);
-    try {
-      final alreadyTaken = await VanAllocationData.isGodownAlreadyAllocated(
-        selectedLocation!.masterId,
-        excludingCompanyUserId: companyUserId,
-      );
-      if (alreadyTaken) {
-        showAppMessage(
-          context,
-          'This vehicle/location is already allocated to another user',
-        );
-        return;
-      }
-
-      await VanAllocationData.saveAllocation(
-        companyUserId: companyUserId,
-        godownMasterId: selectedLocation!.masterId,
-        voucherTypeMasterIds: [
-          selectedDeliveryNoteVchType!.masterId,
-          selectedSalesVchType!.masterId,
-          selectedReceiptVchType!.masterId,
-        ],
-      );
-
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ViewVanAllocationScreen()),
-      );
-    } catch (e) {
-      debugPrint(e.toString());
-      showAppMessage(context, 'Error: $e');
-    } finally {
-      if (mounted) setState(() => isSaving = false);
+    final notifier = ref.read(
+      modifyVanAllocationNotifierProvider(_args).notifier,
+    );
+    if (!ref.read(modifyVanAllocationNotifierProvider(_args)).isFormValid) {
+      return;
     }
+    final error = await notifier.updateAllocation();
+    if (!mounted) return;
+    if (error != null) {
+      showAppMessage(context, error);
+      return;
+    }
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const ViewVanAllocationScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(modifyVanAllocationNotifierProvider(_args));
+    final notifier = ref.read(
+      modifyVanAllocationNotifierProvider(_args).notifier,
+    );
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -196,7 +122,7 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
           ],
         ),
       ),
-      body: isLoading
+      body: state.isLoading
           ? const Center(child: CircularProgressIndicator.adaptive())
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -209,58 +135,78 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
                     _sectionTitle(),
                     const SizedBox(height: 24),
                     SearchableSelectorField<MasterOption>(
-                      value: selectedLocation,
-                      items: locations,
+                      value: state.selectedLocation,
+                      items: state.locations,
                       itemLabel: (v) => v.name,
                       label: 'Location',
                       icon: Icons.location_on_outlined,
                       hintText: 'Search and select location',
-                      onChanged: (val) => setState(() => selectedLocation = val),
+                      onChanged: notifier.selectLocation,
                     ),
                     const SizedBox(height: 16),
                     SearchableSelectorField<MasterOption>(
-                      value: selectedDeliveryNoteVchType,
-                      items: deliveryNoteVchTypes,
+                      value: state.selectedDeliveryNoteVchType,
+                      items: state.deliveryNoteVchTypes,
                       itemLabel: (v) => v.name,
                       label: 'Delivery Note Voucher Type',
                       icon: Icons.receipt_long_outlined,
                       hintText: 'Search and select delivery note voucher type',
-                      onChanged: (val) => setState(() => selectedDeliveryNoteVchType = val),
+                      onChanged: notifier.selectDeliveryNoteVchType,
                     ),
                     const SizedBox(height: 16),
                     SearchableSelectorField<MasterOption>(
-                      value: selectedSalesVchType,
-                      items: salesVchTypes,
+                      value: state.selectedSalesVchType,
+                      items: state.salesVchTypes,
                       itemLabel: (v) => v.name,
                       label: 'Sales Voucher Type',
                       icon: Icons.point_of_sale_outlined,
                       hintText: 'Search and select sales voucher type',
-                      onChanged: (val) => setState(() => selectedSalesVchType = val),
+                      onChanged: notifier.selectSalesVchType,
                     ),
                     const SizedBox(height: 16),
                     SearchableSelectorField<MasterOption>(
-                      value: selectedReceiptVchType,
-                      items: receiptVchTypes,
+                      value: state.selectedReceiptVchType,
+                      items: state.receiptVchTypes,
                       itemLabel: (v) => v.name,
                       label: 'Receipt Voucher Type',
                       icon: Icons.receipt_outlined,
                       hintText: 'Search and select receipt voucher type',
-                      onChanged: (val) => setState(() => selectedReceiptVchType = val),
+                      onChanged: notifier.selectReceiptVchType,
                     ),
                     const SizedBox(height: 16),
-                    _bulkAllocationToggle(),
+                    SearchableSelectorField<MasterOption>(
+                      value: state.selectedSalesLedger,
+                      items: state.salesLedgers,
+                      itemLabel: (v) => v.name,
+                      label: 'Sales Ledger',
+                      icon: Icons.sell_outlined,
+                      hintText: 'Search and select sales ledger',
+                      onChanged: notifier.selectSalesLedger,
+                    ),
+                    const SizedBox(height: 16),
+                    SearchableSelectorField<MasterOption>(
+                      value: state.selectedCashLedger,
+                      items: state.cashLedgers,
+                      itemLabel: (v) => v.name,
+                      label: 'Cash Ledger',
+                      icon: Icons.account_balance_wallet_outlined,
+                      hintText: 'Search and select cash ledger',
+                      onChanged: notifier.selectCashLedger,
+                    ),
+                    const SizedBox(height: 16),
+                    _bulkAllocationToggle(state, notifier),
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: isSaving ? null : updateAllocation,
+                        onPressed: state.isSaving ? null : updateAllocation,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: primaryColor,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(vertical: 15),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
-                        icon: isSaving
+                        icon: state.isSaving
                             ? SizedBox(
                                 height: 18,
                                 width: 18,
@@ -273,7 +219,7 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
                               )
                             : const Icon(Icons.save_outlined, color: Colors.white),
                         label: Text(
-                          isSaving ? "Updating..." : "Update Allocation",
+                          state.isSaving ? "Updating..." : "Update Allocation",
                           style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -285,7 +231,11 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
     );
   }
 
-  Widget _bulkAllocationToggle() {
+  Widget _bulkAllocationToggle(
+    ModifyVanAllocationState state,
+    ModifyVanAllocationNotifier notifier,
+  ) {
+    final bool isBulkAllocation = state.isBulkAllocation;
     final Color stateColor = isBulkAllocation ? primaryColor : Colors.grey;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -300,7 +250,7 @@ class _ModifyVanAllocationScreenState extends State<ModifyVanAllocationScreen> {
         inactiveThumbColor: Colors.grey.shade500,
         inactiveTrackColor: Colors.grey.shade300,
         value: isBulkAllocation,
-        onChanged: (val) => setState(() => isBulkAllocation = val),
+        onChanged: notifier.setBulkAllocation,
         title: Row(
           children: [
             Text('Bulk (Tanker) Delivery', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14)),

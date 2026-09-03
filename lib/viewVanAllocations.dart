@@ -1,12 +1,13 @@
 import 'package:FincoreGo/addVanAllocations.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'constants.dart';
 import 'ModifyVanAllocation.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
-import 'van_allocation_data.dart';
 import 'widgets/entry_widgets.dart';
+import 'providers/view_van_allocation_notifier.dart';
 
 /// Lists company-users who currently have a vehicle allocated - i.e. have a
 /// single-masterId `GODOWN` master-restriction set (see
@@ -18,103 +19,25 @@ import 'widgets/entry_widgets.dart';
 /// company-user then GETs their GODOWN/VOUCHER_TYPE restriction one at a
 /// time. Accepted per the task this was built against - a low-frequency
 /// admin screen, not a hot path.
-class ViewVanAllocationScreen extends StatefulWidget {
+class ViewVanAllocationScreen extends ConsumerStatefulWidget {
   const ViewVanAllocationScreen({super.key});
 
   @override
-  State<ViewVanAllocationScreen> createState() => _ViewVanAllocationScreenState();
+  ConsumerState<ViewVanAllocationScreen> createState() =>
+      _ViewVanAllocationScreenState();
 }
 
-class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
+class _ViewVanAllocationScreenState
+    extends ConsumerState<ViewVanAllocationScreen> {
   final Color primaryColor = app_color;
-
-  bool isLoading = true;
 
   final TextEditingController searchController = TextEditingController();
 
-  List<Map<String, dynamic>> allocations = [];
-  List<Map<String, dynamic>> filteredAllocations = [];
-
-  Set<int> expandedCards = {};
-
-  @override
-  void initState() {
-    super.initState();
-    fetchAllocations();
-  }
-
-  Future<void> fetchAllocations() async {
-    setState(() => isLoading = true);
-    try {
-      final results = await Future.wait([
-        VanAllocationData.listCompanyUsers(),
-        VanAllocationData.listAllGodowns(),
-        VanAllocationData.listVoucherTypesByReservedName('DELIVERY_NOTE'),
-        VanAllocationData.listVoucherTypesByReservedName('SALES'),
-        VanAllocationData.listVoucherTypesByReservedName('RECEIPT'),
-      ]);
-      final users = results[0] as List<CompanyUserOption>;
-      final godowns = results[1] as List<MasterOption>;
-      final godownNameById = {for (final g in godowns) g.masterId: g.name};
-      final vchNameById = <int, String>{
-        for (final v in results[2] as List<MasterOption>) v.masterId: v.name,
-        for (final v in results[3] as List<MasterOption>) v.masterId: v.name,
-        for (final v in results[4] as List<MasterOption>) v.masterId: v.name,
-      };
-      final deliveryIds = (results[2] as List<MasterOption>).map((v) => v.masterId).toSet();
-      final salesIds = (results[3] as List<MasterOption>).map((v) => v.masterId).toSet();
-      final receiptIds = (results[4] as List<MasterOption>).map((v) => v.masterId).toSet();
-
-      final built = <Map<String, dynamic>>[];
-      for (final user in users) {
-        final godownId = await VanAllocationData.currentGodownMasterId(user.id);
-        if (godownId == null) continue; // unrestricted/none -> not "allocated"
-
-        final vchIds = await VanAllocationData.currentVoucherTypeMasterIds(user.id);
-        String? nameFor(Set<int> group) {
-          for (final id in vchIds) {
-            if (group.contains(id)) return vchNameById[id];
-          }
-          return null;
-        }
-
-        built.add({
-          'companyUserId': user.id,
-          'name': user.name,
-          'user_name': user.username,
-          'godownMasterId': godownId,
-          'godown_name': godownNameById[godownId] ?? '',
-          'voucherTypeMasterIds': vchIds,
-          'voucher_type_name': nameFor(deliveryIds) ?? '',
-          'sales_voucher_type': nameFor(salesIds) ?? '',
-          'receipt_voucher_type': nameFor(receiptIds) ?? '',
-        });
-      }
-
-      allocations = built;
-      filteredAllocations = allocations;
-    } catch (e) {
-      debugPrint("VIEW ALLOCATION ERROR: $e");
-    } finally {
-      setState(() => isLoading = false);
-    }
-  }
-
-  void filterAllocations(String query) {
-    if (query.isEmpty) {
-      filteredAllocations = allocations;
-    } else {
-      filteredAllocations = allocations.where((allocation) {
-        return allocation.toString().toLowerCase().contains(query.toLowerCase());
-      }).toList();
-    }
-    setState(() {});
-  }
-
   Future<void> deleteAllocation(Map<String, dynamic> allocation) async {
     try {
-      await VanAllocationData.clearAllocation(allocation['companyUserId'] as String);
-      fetchAllocations();
+      await ref
+          .read(viewVanAllocationNotifierProvider.notifier)
+          .deleteAllocation(allocation);
     } catch (e) {
       debugPrint("DELETE ERROR: $e");
       showAppMessage(context, 'Error: $e');
@@ -205,6 +128,8 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(viewVanAllocationNotifierProvider);
+    final notifier = ref.read(viewVanAllocationNotifierProvider.notifier);
     return Scaffold(
       bottomNavigationBar: const AppBottomNav(
         activeTab: AppBottomNavTab.more,
@@ -244,17 +169,17 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
           ],
         ),
       ),
-      body: isLoading
+      body: state.isLoading
           ? _buildSkeletonList()
           : RefreshIndicator(
               color: primaryColor,
-              onRefresh: fetchAllocations,
+              onRefresh: notifier.fetchAllocations,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   return SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
-                    child: filteredAllocations.isEmpty
+                    child: state.filteredAllocations.isEmpty
                         ? ConstrainedBox(
                             constraints: BoxConstraints(minHeight: constraints.maxHeight - 32),
                             child: IntrinsicHeight(
@@ -263,7 +188,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                                 children: [
                                   _buildSearchBar(),
                                   const SizedBox(height: 18),
-                                  _buildStatsRow(),
+                                  _buildStatsRow(state),
                                   const SizedBox(height: 18),
                                   Expanded(child: _emptyState()),
                                 ],
@@ -275,15 +200,18 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                             children: [
                               _buildSearchBar(),
                               const SizedBox(height: 18),
-                              _buildStatsRow(),
+                              _buildStatsRow(state),
                               const SizedBox(height: 18),
                               ListView.separated(
                                 shrinkWrap: true,
                                 physics: const NeverScrollableScrollPhysics(),
-                                itemCount: filteredAllocations.length,
+                                itemCount: state.filteredAllocations.length,
                                 separatorBuilder: (_, __) => const SizedBox(height: 14),
-                                itemBuilder: (context, index) =>
-                                    _allocationCard(filteredAllocations[index], index),
+                                itemBuilder: (context, index) => _allocationCard(
+                                  state.filteredAllocations[index],
+                                  index,
+                                  state,
+                                ),
                               ),
                               const SizedBox(height: 90),
                             ],
@@ -292,7 +220,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 },
               ),
             ),
-      floatingActionButton: filteredAllocations.isEmpty
+      floatingActionButton: state.filteredAllocations.isEmpty
           ? null
           : FloatingActionButton.extended(
               backgroundColor: primaryColor,
@@ -325,7 +253,9 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
       ),
       child: TextField(
         controller: searchController,
-        onChanged: filterAllocations,
+        onChanged: (value) => ref
+            .read(viewVanAllocationNotifierProvider.notifier)
+            .filter(value),
         style: GoogleFonts.poppins(fontSize: 13.5, fontWeight: FontWeight.w500, color: Theme.of(context).colorScheme.onSurface),
         decoration: InputDecoration(
           hintText: 'Search allocations...',
@@ -340,7 +270,9 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                   splashRadius: 20,
                   onPressed: () {
                     searchController.clear();
-                    filterAllocations('');
+                    ref
+                        .read(viewVanAllocationNotifierProvider.notifier)
+                        .filter('');
                   },
                   icon: Container(
                     padding: const EdgeInsets.all(4),
@@ -371,13 +303,13 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
     );
   }
 
-  Widget _buildStatsRow() {
+  Widget _buildStatsRow(ViewVanAllocationState state) {
     return Row(
       children: [
         Expanded(
           child: _statCard(
             "Vehicle's",
-            allocations.map((e) => e['godown_name']).toSet().length.toString(),
+            state.allocations.map((e) => e['godown_name']).toSet().length.toString(),
             Icons.location_on_outlined,
           ),
         ),
@@ -385,7 +317,7 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
         Expanded(
           child: _statCard(
             'Users',
-            allocations.map((e) => e['user_name']).toSet().length.toString(),
+            state.allocations.map((e) => e['user_name']).toSet().length.toString(),
             Icons.people_outline,
           ),
         ),
@@ -413,8 +345,12 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
     );
   }
 
-  Widget _allocationCard(Map<String, dynamic> allocation, int index) {
-    final bool isExpanded = expandedCards.contains(index);
+  Widget _allocationCard(
+    Map<String, dynamic> allocation,
+    int index,
+    ViewVanAllocationState state,
+  ) {
+    final bool isExpanded = state.expandedCards.contains(index);
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -483,6 +419,8 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
                 children: [
                   _infoChip(Icons.point_of_sale_outlined, 'Sales Voucher', allocation['sales_voucher_type'] ?? ''),
                   _infoChip(Icons.receipt_outlined, 'Receipt Voucher', allocation['receipt_voucher_type'] ?? ''),
+                  _infoChip(Icons.sell_outlined, 'Sales Ledger', allocation['sales_ledger_name'] ?? ''),
+                  _infoChip(Icons.account_balance_wallet_outlined, 'Cash Ledger', allocation['cash_ledger_name'] ?? ''),
                 ],
               ),
             ),
@@ -493,15 +431,9 @@ class _ViewVanAllocationScreenState extends State<ViewVanAllocationScreen> {
           Center(
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
-              onTap: () {
-                setState(() {
-                  if (isExpanded) {
-                    expandedCards.remove(index);
-                  } else {
-                    expandedCards.add(index);
-                  }
-                });
-              },
+              onTap: () => ref
+                  .read(viewVanAllocationNotifierProvider.notifier)
+                  .toggleExpanded(index),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: Row(
