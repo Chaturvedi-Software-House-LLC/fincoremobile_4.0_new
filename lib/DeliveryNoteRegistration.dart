@@ -8,6 +8,7 @@ import 'package:FincoreGo/PendingDeliveryNoteEntry.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -21,18 +22,14 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/signature_capture.dart';
 import 'widgets/searchable_selector.dart';
-import 'api/stock_repository.dart';
-import 'api/voucher_entry_repository.dart';
+import 'providers/delivery_note_registration_notifier.dart';
 import 'api/price_level_repository.dart';
-import 'api/tally_api_client.dart';
-import 'api/pagination_helper.dart';
-import 'api/api_exception.dart';
 import 'api/monthly_bucket_helper.dart' show parseCompactDate;
 
-class Deliverynoteregistration extends StatefulWidget {
+class Deliverynoteregistration extends ConsumerStatefulWidget {
   const Deliverynoteregistration({Key? key}) : super(key: key);
   @override
-  _DeliverynoteregistrationPageState createState() =>
+  ConsumerState<Deliverynoteregistration> createState() =>
       _DeliverynoteregistrationPageState();
 }
 
@@ -161,23 +158,15 @@ class LedgerEntry {
   }
 }
 
-class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
+class _DeliverynoteregistrationPageState
+    extends ConsumerState<Deliverynoteregistration>
     with TickerProviderStateMixin {
-  bool isDashEnable = true,
-      isRolesVisible = true,
-      isUserEnable = true,
-      isUserVisible = true,
-      isRolesEnable = true,
-      _isLoading = true,
-      isVisibleNoUserFound = false;
-
-  bool _isInitialDataLoaded = false;
-
-  bool isVchEditable = false; // state variable
+  DeliveryNoteRegistrationNotifier get _notifier =>
+      ref.read(deliveryNoteRegistrationNotifierProvider.notifier);
+  DeliveryNoteRegistrationState get _s =>
+      ref.read(deliveryNoteRegistrationNotifierProvider);
 
   String? meterReadingError;
-
-  String startfrom = '';
 
   TextEditingController _itemController = TextEditingController();
   TextEditingController _partyLedgerController = TextEditingController();
@@ -194,35 +183,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   // Customer mobile/email for the selected party ledger - fetched in
   // loadLedgerData() alongside TRN/address/emirate/country, used by the
   // UniGas POS delivery note PDF format.
-  String? _selectedPartyMobile;
-  String? _selectedPartyEmail;
-  double ledgerVatAmount = 0,
-      itemsVatAmount = 0,
-      totalVatAmount = 0,
-      totalAmount = 0;
-
   bool isRateFieldEnabled = true;
 
   bool showRateField = true;
-
-  bool isVoucherTypeLocked = false;
-
-  // tally-api master-restrictions-driven godown lock: true when this
-  // company-user's GODOWN restriction (or the unrestricted full list)
-  // resolves to exactly one godown - see loadData(). No live picker widget
-  // currently renders `selectedLocation`/`locationsdata` (the old
-  // commented-out "Location" dropdown elsewhere in this file was never
-  // wired back up), so this flag isn't wired into any `EntryDropdownField`'s
-  // `locked:` prop like isVoucherTypeLocked/isSalesLedgerLocked are - it's
-  // tracked here for parity/future use and because selectedLocation itself
-  // is still used (locked or not) in the save payload's GODOWNNAME.
-  bool isGodownLocked = false;
-
-  // UniGas-only: whether this Delivery Note entry is a bulk (tanker) gas
-  // delivery - null means "not asked yet this entry". Bulk deliveries are
-  // metered (single item, start/end reading required); non-bulk cylinder
-  // deliveries are counted by quantity with no meter reading at all.
-  bool? _isBulkDelivery;
 
   // UniGas bulk delivery only - Receiver Information shown on the printed
   // Bulk Gas Delivery Note. Name/Signature is mandatory before saving;
@@ -240,14 +203,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   // printed Bulk Gas Delivery Note. Null until captured.
   Uint8List? bulkReceiverSignatureBytes;
 
-  double totalPriceOfItems = 0,
-      totalAmountForVatAppEntries = 0,
-      totalAmountOfLedgers = 0;
   final FocusNode _textFieldFocusNodeNarration = FocusNode();
 
   late AnimationController _animationController;
   late Animation<double> _animation;
-  bool isSalesLedgerLocked = false;
 
   /// tally-api migration: replaces legacy's `GET
   /// /api/item/getPriceLevelDetails/:company/:serial` (a single-row,
@@ -293,200 +252,25 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     }
   }
 
-  Future<void> fetchPriceLevelDetailsForSelectedItem(
-    StateSetter setStateDialog,
-  ) async {
-    if (serial_no == null ||
-        serial_no!.trim().isEmpty ||
-        !vanSalesSerialNo.contains(serial_no!.trim())) {
-      return;
-    }
-
-    if (selectedItemMasterId == null || selectedItemMasterId!.trim().isEmpty) {
-      debugPrint(
-        'Price level API skipped: selected item masterid is null/empty',
-      );
-      return;
-    }
-
-    if (selectedPartyLedgerPriceLevel == null ||
-        selectedPartyLedgerPriceLevel.toString().trim().isEmpty) {
-      setStateDialog(() {
-        isRateFieldEnabled = true;
-        showRateField = true;
-      });
-      return;
-    }
-
-    setStateDialog(() {
-      isPriceLevelLoading = true;
-    });
-
-    try {
-      final String selectedDate = saledatestring.isNotEmpty
-          ? saledatestring
-          : DateFormat('yyyyMMdd').format(DateTime.now());
-
-      final int? itemMasterId = int.tryParse(selectedItemMasterId!);
-      final double? apiRate = itemMasterId == null
-          ? null
-          : await _lookupPriceLevelRate(
-              stockItemMasterId: itemMasterId,
-              priceLevelName: selectedPartyLedgerPriceLevel!,
-              asOfYyyyMMdd: selectedDate,
-            );
-
-      if (apiRate != null) {
-        final double qty =
-            double.tryParse(
-              itemQuantityController.text.trim().isEmpty
-                  ? '1'
-                  : itemQuantityController.text.trim(),
-            ) ??
-            1.0;
-
-        final double amount = apiRate * qty;
-
-        setStateDialog(() {
-          itemRateController.text = apiRate.toStringAsFixed(decimal ?? 2);
-          itemAmountController.text = amount.toStringAsFixed(decimal ?? 2);
-          isRateFieldEnabled = false;
-          showRateField = true;
-        });
-      } else {
-        setStateDialog(() {
-          itemRateController.clear();
-          itemAmountController.clear();
-          isRateFieldEnabled = true;
-          showRateField = true;
-        });
-      }
-    } catch (e) {
-      setStateDialog(() {
-        isRateFieldEnabled = true;
-        showRateField = true;
-      });
-    } finally {
-      setStateDialog(() {
-        isPriceLevelLoading = false;
-      });
-    }
+  // Recomputed totals/formatted VAT+total text after any notifier mutation
+  // that touches saleItems/ledgerEntries/VAT ledger - mirrors the inline
+  // `controller_vatamt.text = ...`/`controller_totalamt.text = ...`
+  // formatting duplicated across the pre-migration `setState` blocks this
+  // replaces (those two controllers are widget-local `TextEditingController`s,
+  // so they can't just read the notifier's state directly).
+  void _syncTotalsControllers() {
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
   }
 
   void _deleteLedger(int index) {
-    setState(() {
-      ledgerEntries.removeAt(index);
-
-      // Calculate the total amount for VAT-applicable entries
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      // Calculate the total amount of ledgers
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      // Calculate VAT if applicable
-      if (_selectedvatledger != 'Not Applicable') {
-        double vatPerc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vatPerc;
-
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-
-      // Calculate the total amount
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedTotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedTotal.toString();
-
-      isVisibleLedgerHeading = ledgerEntries.isNotEmpty;
-    });
+    _notifier.deleteLedger(index);
+    _syncTotalsControllers();
   }
 
   void _deleteSaleItem(int index) {
-    setState(() {
-      saleItems.removeAt(index);
-
-      // Calculate the total price of items
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedTotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedTotal.toString();
-
-      isVisibleItemHeading = saleItems.isNotEmpty;
-    });
+    _notifier.deleteSaleItem(index);
+    _syncTotalsControllers();
   }
 
   String formatitemKey(int key) {
@@ -678,19 +462,66 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     return words.trim();
   }
 
-  Map<String, dynamic> jsonEntryData = {
-    "DATE": "",
-    "VOUCHERTYPENAME": "",
-    "PARTYLEDGERNAME": "",
-    "NARRATION": "",
-    "VOUCHERNUMBER": "",
-    "REFERENCE": "",
-    "REFERENCEDATE": "",
-    "INVENTORYENTRIES.LIST": [],
-    "LEDGERENTRIES.LIST": [],
-  };
-
-  bool isVisibleItemHeading = false, isVisibleLedgerHeading = false;
+  // ---- read-only aliases onto notifier state (migrated fields) ----------
+  // Same-named getters delegating to `_s`, rather than per-method local
+  // aliases - this screen's fields are read from dozens of scattered
+  // methods/dialogs (PDF generators, save validation, reset flows), so this
+  // is the "many read sites" case the migration convention calls for (see
+  // `receipt_registration_notifier.dart`'s widget for the same treatment).
+  bool get isVisibleItemHeading => _s.isVisibleItemHeading;
+  bool get isVisibleLedgerHeading => _s.isVisibleLedgerHeading;
+  double get roundedtotalVatAmount => _s.roundedTotalVatAmount;
+  double get roundedtotalAmount => _s.roundedTotalAmount;
+  List<String> get salesledger_data => _s.salesLedgerData;
+  int? get decimal => _s.decimal;
+  List<String> get vchtypenamedata => _s.vchTypeNameData;
+  List<String> get partyledgerdata => _s.partyLedgerData;
+  List<String> get vatledgerdata => _s.vatLedgerData;
+  List<dynamic> get itemdata => _s.itemData;
+  double get vatperc => _s.vatperc;
+  List<String> get locationsdata => _s.locationsData;
+  List<Map<String, dynamic>> get ledgerdata => _s.ledgerData;
+  String get token => _s.token;
+  String get name => _s.name;
+  String get saledatestring => _s.saledatestring;
+  String get saledatetxt => _s.saledatetxt;
+  String get refdatestring => _s.refdatestring;
+  String get refdatetxt => _s.refdatetxt;
+  Map<String, String?> get partyLedgerPriceLevelMap =>
+      _s.partyLedgerPriceLevelMap;
+  String? get company => _s.company;
+  String? get serial_no => _s.serialNo;
+  String? get SecuritybtnAcessHolder => _s.securitybtnAccessHolder;
+  String get company_trn => _s.companyTrn;
+  String get company_address => _s.companyAddress;
+  String get company_emirate => _s.companyEmirate;
+  String get company_country => _s.companyCountry;
+  DateTime get saledate => _s.saledate;
+  DateTime get refdate => _s.refdate;
+  String get currencycode => _s.currencyCode;
+  List<String> get vchnos => _s.vchNos;
+  String get errorMessageVchNo => _s.errorMessageVchNo;
+  List<SaleItem> get saleItems => _s.saleItems;
+  List<LedgerEntry> get ledgerEntries => _s.ledgerEntries;
+  double get ledgerVatAmount => _s.ledgerVatAmount;
+  double get itemsVatAmount => _s.itemsVatAmount;
+  double get totalVatAmount => _s.totalVatAmount;
+  double get totalAmount => _s.totalAmount;
+  double get totalPriceOfItems => _s.totalPriceOfItems;
+  double get totalAmountForVatAppEntries => _s.totalAmountForVatAppEntries;
+  double get totalAmountOfLedgers => _s.totalAmountOfLedgers;
+  bool get isVoucherTypeLocked => _s.isVoucherTypeLocked;
+  bool get isSalesLedgerLocked => _s.isSalesLedgerLocked;
+  bool get isGodownLocked => _s.isGodownLocked;
+  bool get _isLoading => _s.isLoading;
+  bool get _isInitialDataLoaded => _s.isInitialDataLoaded;
+  dynamic get _selectedvchtypename => _s.selectedVchTypeName;
+  dynamic get _selectedpartyledger => _s.selectedPartyLedger;
+  dynamic get _selectedsalesledger => _s.selectedSalesLedger;
+  dynamic get _selectedvatledger => _s.selectedVatLedger;
+  String? get _selectedPartyMobile => _s.selectedPartyMobile;
+  String? get _selectedPartyEmail => _s.selectedPartyEmail;
+  bool? get _isBulkDelivery => _s.isBulkDelivery;
 
   bool isVisibleUnit = true;
 
@@ -700,97 +531,16 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
   GlobalKey<FormState> _itemFormkey = GlobalKey<FormState>();
 
-  double roundedtotalVatAmount = 0.0;
-
-  double roundedtotalAmount = 0.0;
-
   GlobalKey<FormState> _ledgerFormkey = GlobalKey<FormState>();
 
-  List<String> salesledger_data = [];
-
-  int? decimal = 2;
-  late List<String> vchtypenamedata = [];
-  late List<String> partyledgerdata = [];
-  late List<String> vatledgerdata = [];
-
-  List<dynamic> itemdata = [];
-  double vatperc = 0.0;
-
-  List<String> locationsdata = []; // Store the locations here
   late String selectedLocation = ''; // Store the selected location here
 
   List<Unit> unitdata = [];
 
-  List<Map<String, dynamic>> ledgerdata = [];
-
-  String user_email_fetched = "", token = '';
-
-  String name = "",
-      email = "",
-      saledatestring = '',
-      saledatetxt = '',
-      refdatestring = '',
-      refdatetxt = '';
-
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
-  Map<String, String?> partyLedgerPriceLevelMap = {};
   late SharedPreferences prefs;
-
-  // --- tally-api migration -------------------------------------------------
-  // Raw master-data caches populated once by loadData(), used to resolve a
-  // user-facing NAME (the only thing the legacy JSON payload/most of this
-  // screen's UI ever dealt with) to the tally-api `masterId` a
-  // voucher-entries create body needs. Matching by name (not masterId)
-  // mirrors the same simplification already used elsewhere in this
-  // migration (see api/voucher_drilldown_helper.dart's doc-comment) - two
-  // masters with the exact same display name would be conflated, a known,
-  // accepted limitation.
-  final TallyApiClient _tallyApiClient = TallyApiClient();
-  List<Map<String, dynamic>> _stockItemsRaw = [];
-  List<Map<String, dynamic>> _ledgersRaw = [];
-  List<Map<String, dynamic>> _groupsRaw = [];
-  List<Map<String, dynamic>> _unitsRaw = [];
-  List<Map<String, dynamic>> _godownsRaw = [];
-  List<Map<String, dynamic>> _voucherTypesRaw = [];
-  List<Map<String, dynamic>> _currenciesRaw = [];
-
-  int? _masterIdByName(List<Map<String, dynamic>> rows, String? name) {
-    if (name == null || name.trim().isEmpty) return null;
-    for (final row in rows) {
-      if (row['name']?.toString() == name) return row['masterId'] as int?;
-    }
-    return null;
-  }
-
-  int? _unitMasterIdBySymbol(String? symbol) {
-    if (symbol == null || symbol.trim().isEmpty) return null;
-    for (final unit in _unitsRaw) {
-      if (unit['symbol']?.toString() == symbol) return unit['masterId'] as int?;
-    }
-    return null;
-  }
-
-  int? _stockItemMasterIdByName(String? name) {
-    if (name == null || name.trim().isEmpty) return null;
-    for (final item in _stockItemsRaw) {
-      if (item['name']?.toString() == name) return item['masterId'] as int?;
-    }
-    return null;
-  }
-
-  int? _currencyMasterIdForCode(String code) {
-    for (final c in _currenciesRaw) {
-      if ((c['isoCurrencyCode']?.toString() ?? '').toUpperCase() ==
-          code.toUpperCase()) {
-        return c['masterId'] as int?;
-      }
-    }
-    return _currenciesRaw.isNotEmpty
-        ? _currenciesRaw.first['masterId'] as int?
-        : null;
-  }
 
   /// tally-api's stock item `rate` fields (e.g. `stardardPrice`,
   /// `lastSalePrice`) and the price-levels `rate` field are all Tally's
@@ -805,13 +555,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   }
 
 
-  dynamic _selectedledger,
-      _selecteditem,
-      _selectedunit,
-      _selectedsalesledger,
-      _selectedvchtypename,
-      _selectedpartyledger,
-      _selectedvatledger;
+  dynamic _selectedledger, _selecteditem, _selectedunit;
 
   late final TextEditingController controller_narration =
       TextEditingController();
@@ -845,23 +589,9 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       _isFocused_totalamt = false,
       _isFocused_refno = false;
 
-  String? company = "",
-      company_lowercase = "",
-      serial_no = "",
-      username = "",
-      HttpURL = "",
-      SecuritybtnAcessHolder = "";
-
-  late DateTime saledate, refdate;
-  List<String> vchnos = [];
-
   double selectedMultiplier = 0.0;
 
   final DateFormat _dateFormat = DateFormat('yyyyMMdd');
-
-  List<SaleItem> saleItems = [];
-  List<LedgerEntry> ledgerEntries = [];
-  String currencycode = '';
 
   final TextEditingController itemQuantityController = TextEditingController();
   final TextEditingController itemRateController = TextEditingController();
@@ -878,169 +608,13 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   final TextEditingController _refdateController = TextEditingController();
 
   final TextEditingController _vchnoController = TextEditingController();
-  String errorMessageVchNo = '';
-  int? unitValue;
-
-  late DateTime now = DateTime.now();
-
-  // Current year start date
-  late DateTime yearStartDate = DateTime(now.year, 1, 1);
-
-  // Current year end date
-  late DateTime yearEndDate = DateTime(now.year, 12, 31);
-
-  Future<void> _selectDateRangeVchNo(BuildContext context) async {
-    final initialDateRange = DateTimeRange(
-      start: yearStartDate,
-      end: yearEndDate,
-    );
-
-    DateTimeRange? selectedDateRange = await showDateRangePicker(
-      context: context,
-      initialDateRange: initialDateRange,
-      firstDate: DateTime(1900),
-      lastDate: DateTime(2100),
-      builder: (BuildContext context, Widget? child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: app_color, // main accent color
-              onPrimary: Colors.white,
-              surface: Theme.of(context).colorScheme.surface,
-              onSurface: Theme.of(context).colorScheme.onSurface,
-            ),
-            datePickerTheme: DatePickerThemeData(
-              rangeSelectionBackgroundColor: app_color.withOpacity(
-                0.15,
-              ), // 🔹 light shade of your app_color
-              rangeSelectionOverlayColor: MaterialStatePropertyAll(
-                app_color.withOpacity(0.15),
-              ),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (selectedDateRange != null && selectedDateRange != initialDateRange) {
-      setState(() {
-        yearStartDate = selectedDateRange.start;
-        yearEndDate = selectedDateRange.end;
-      });
-
-      fetchvchnos(_selectedvchtypename);
-    }
-  }
 
   void checkVchNoExistence(String vchNo) {
-    if (vchNo.isEmpty || vchNo == '') {
-      setState(() {
-        errorMessageVchNo = 'Voucher No. cannot be empty';
-      });
-    } else {
-      if (vchnos.contains(vchNo)) {
-        setState(() {
-          errorMessageVchNo =
-              'Voucher no: $vchNo against $_selectedvchtypename already exists';
-        });
-      } else {
-        setState(() {
-          errorMessageVchNo = '';
-        });
-      }
-    }
+    _notifier.checkVchNoExistence(vchNo);
   }
 
   String generateNextVchNo(List<String> vchnos) {
-    if (vchnos.isEmpty) return "1";
-
-    Map<String, List<Map<String, dynamic>>> patternGroups = {};
-
-    for (String vch in vchnos) {
-      List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
-
-      if (matches.isNotEmpty) {
-        RegExpMatch selectedMatch = matches.last;
-
-        // 🔥 Ignore year like 2026
-        if (matches.length > 1) {
-          for (int i = matches.length - 1; i >= 0; i--) {
-            String val = matches[i].group(0)!;
-            int num = int.tryParse(val) ?? 0;
-
-            if (!(val.length == 4 && num >= 2000 && num <= 2099)) {
-              selectedMatch = matches[i];
-              break;
-            }
-          }
-        }
-
-        String numberPart = selectedMatch.group(0)!;
-        int number = int.tryParse(numberPart) ?? 0;
-
-        String prefix = vch.substring(0, selectedMatch.start);
-        String suffix = vch.substring(selectedMatch.end);
-
-        String patternKey = prefix + "#" + suffix;
-
-        patternGroups.putIfAbsent(patternKey, () => []);
-
-        bool exists = patternGroups[patternKey]!.any(
-          (e) => e["number"] == number,
-        );
-
-        if (!exists) {
-          patternGroups[patternKey]!.add({
-            "original": vch,
-            "number": number,
-            "length": numberPart.length,
-          });
-        }
-      }
-    }
-
-    if (patternGroups.isEmpty) {
-      return vchnos.last + "1";
-    }
-
-    // ✅ Dominant pattern
-    String selectedPattern = patternGroups.entries
-        .reduce((a, b) => a.value.length > b.value.length ? a : b)
-        .key;
-
-    List<Map<String, dynamic>> selectedList = patternGroups[selectedPattern]!;
-
-    // 🔥 STEP 1: Extract & sort numbers
-    List<int> numbers = selectedList.map((e) => e["number"] as int).toList();
-    numbers = numbers.toSet().toList();
-
-    numbers.sort();
-
-    int length = selectedList.first["length"];
-
-    // 🔥 STEP 2: Find missing number (gap)
-    int expected = numbers.first;
-
-    int nextNumber = numbers.last + 1; // fallback
-
-    for (int num in numbers) {
-      if (num != expected) {
-        nextNumber = expected;
-        break;
-      }
-      expected++;
-    }
-
-    // 🔥 STEP 3: Format number
-    String newNumber = nextNumber.toString().padLeft(length, '0');
-
-    // reconstruct
-    List<String> parts = selectedPattern.split("#");
-    String prefix = parts[0];
-    String suffix = parts[1];
-
-    return prefix + newNumber + suffix;
+    return _notifier.generateNextVchNo(vchnos);
   }
 
   // Estimates how much extra bottom padding the LAST item row needs so the
@@ -2529,45 +2103,33 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       });
     }
 
+    controller_narration.clear();
+    controller_refno.clear();
+
+    _textFieldFocusNodeNarration.unfocus(); // Unfocus the TextField
+
+    // Migrated-state half (saledate/refdate/party ledger/sales+VAT ledger
+    // defaults/saleItems+ledgerEntries clear+totals recompute/isBulkDelivery
+    // reset) - see `resetAfterShare`'s doc-comment.
+    _notifier.resetAfterShare();
+    _syncTotalsControllers();
+
+    _dateController.text = saledatetxt;
+    _refdateController.text = refdatetxt;
+    // Don't reassign _selectedvchtypename here - for UniGas it's locked
+    // to the allocation-assigned voucher type, and shouldn't fall back
+    // to the first option on reset like a manually-selected one would.
+    fetchvchnos(_selectedvchtypename);
+    _partyLedgerController.clear();
+    voucherStartReadingController.clear();
+    voucherEndReadingController.clear();
+    bulkReceiverNameController.clear();
+    bulkReceiverMobileController.clear();
+    bulkReceiverEidController.clear();
+    bulkReceiverSignatureBytes = null;
+
     setState(() {
-      controller_narration.clear();
-      controller_refno.clear();
-
-      _textFieldFocusNodeNarration.unfocus(); // Unfocus the TextField
-
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-      refdate = DateTime.now();
-      refdatestring = _dateFormat.format(refdate);
-      refdatetxt = formatlastsaledate(refdatestring);
-      _refdateController.text = refdatetxt;
-      // Don't reassign _selectedvchtypename here - for UniGas it's locked
-      // to the allocation-assigned voucher type, and shouldn't fall back
-      // to the first option on reset like a manually-selected one would.
-      fetchvchnos(_selectedvchtypename);
-      _selectedpartyledger = null;
-      _partyLedgerController.clear();
-      voucherStartReadingController.clear();
-      voucherEndReadingController.clear();
-      // Next entry should be asked again whether it's bulk or not.
-      _isBulkDelivery = null;
-      bulkReceiverNameController.clear();
-      bulkReceiverMobileController.clear();
-      bulkReceiverEidController.clear();
-      bulkReceiverSignatureBytes = null;
-
-      // Don't reassign _selectedsalesledger on UniGas either - it's locked
-      // to the allocation-assigned sales ledger, same as the voucher type
-      // above, and shouldn't fall back to the first option on reset.
-      if (!isUniGasSerial(serial_no)) {
-        _selectedsalesledger = salesledger_data[0];
-      }
-
       _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-
-      _selectedvatledger = _defaultVatLedger();
 
       _selecteditem = '${itemdata[0]['name']}';
       _itemController.text = _selecteditem;
@@ -2579,103 +2141,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       }
       _updateUnitDropdown(_selecteditem);
 
-      saleItems.clear();
-      ledgerEntries.clear();
-
-      // making sales list empty and setting values
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (saleItems.isEmpty) {
-        isVisibleItemHeading = false;
-      } else {
-        isVisibleItemHeading = true;
-      }
-      // making ledger list empty and setting values
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double previousAmount, LedgerEntry entry) {
-            return previousAmount + entry.ledgerAmount;
-          });
-
-      if (_selectedvatledger != 'Not Applicable') {
-        double vat_perc = vatperc / 100;
-        ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      } else {
-        totalVatAmount = 0;
-        roundedtotalVatAmount = double.parse(
-          totalVatAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedVat = formatter.format(roundedtotalVatAmount);
-        controller_vatamt.text = formattedVat.toString();
-      }
-      if (ledgerEntries.isEmpty) {
-        isVisibleLedgerHeading = false;
-      } else {
-        isVisibleLedgerHeading = true;
-      }
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      String formattedtotal = formatter.format(roundedtotalAmount);
-      controller_totalamt.text = formattedtotal.toString();
       _isFocused_vchno = false;
       _isFocused_item = false;
       _isFocused_unit = false;
@@ -3637,326 +3102,42 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
     if (saleItems.isEmpty) {
       showAppMessage(context, 'Atleast add 1 item');
-    } else {
-      setState(() {
-        _isLoading = true;
-      });
-      String narrationValue = controller_narration.text.trim();
-      String vchnoValue = _vchnoController.text;
-
-      String refnoValue = controller_refno.text;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-
-      String selectedReferenceDate = refdatestring;
-
-      if (selectedReferenceDate.trim().isEmpty &&
-          _refdateController.text.trim().isNotEmpty) {
-        final parsedDate = DateFormat(
-          'dd-MM-yyyy',
-        ).parse(_refdateController.text.trim());
-        selectedReferenceDate = _dateFormat.format(parsedDate);
-      }
-
-      jsonEntryData["DATE"] = saledatestring;
-      jsonEntryData["VOUCHERTYPENAME"] = _selectedvchtypename;
-      jsonEntryData["PARTYLEDGERNAME"] = _selectedpartyledger;
-      jsonEntryData["totalAmount"] = roundedtotalAmount.toStringAsFixed(
-        decimal!,
-      );
-      jsonEntryData["NARRATION"] = narrationValue;
-      jsonEntryData["VOUCHERNUMBER"] = vchnoValue;
-      jsonEntryData["REFERENCE"] = refnoValue;
-      jsonEntryData["REFERENCEDATE"] = selectedReferenceDate;
-
-      double totalItemAmount = 0.0;
-
-      for (SaleItem item in saleItems) {
-        totalItemAmount += double.parse(
-          item.itemAmount.toStringAsFixed(decimal!),
-        ); // calculating item amounts total
-      }
-
-      for (var saleItem in saleItems) {
-        // making sales ledger
-        if (saleItem.accountingAllocationList.isEmpty) {
-          saleItem.accountingAllocationList = {
-            "LEDGERNAME": _selectedsalesledger,
-            "AMOUNT": saleItem.itemAmount.toStringAsFixed(decimal!),
-            "ISDEEMEDPOSITIVE": "No",
-          };
-        }
-      }
-
-      jsonEntryData["INVENTORYENTRIES.LIST"] = saleItems.map((item) {
-        // making stockitem list
-        return {
-          "STOCKITEMNAME": item.itemName,
-          "ISDEEMEDPOSITIVE": "No",
-          "RATE":
-              "${item.itemPrice.toStringAsFixed(decimal!)}/${item.itemUnit}",
-          "AMOUNT": item.itemAmount.toStringAsFixed(decimal!),
-          "ACTUALQTY": "${item.itemQuantity} ${item.itemUnit}",
-          "BILLEDQTY": "${item.itemQuantity} ${item.itemUnit}",
-          "BATCHALLOCATIONS.LIST": item.batchAllocationList,
-          "ACCOUNTINGALLOCATIONS.LIST": item.accountingAllocationList,
-          if (item.basicUserDescriptions.isNotEmpty)
-            "BASICUSERDESCRIPTION.LIST": item.basicUserDescriptions
-                .map((desc) => {"BASICUSERDESCRIPTION": desc})
-                .toList(),
-        };
-      }).toList();
-
-      double totalLedgerAmount = 0.0;
-
-      for (LedgerEntry ledger in ledgerEntries) {
-        // calculating total ledger amount
-        totalLedgerAmount += double.parse(
-          ledger.ledgerAmount.toStringAsFixed(decimal!),
-        ); // calculating ledger amounts total
-      }
-
-      double partyLedgerAmount = double.parse(
-        (double.parse(totalVatAmount.toStringAsFixed(decimal!)) +
-                double.parse(totalItemAmount.toStringAsFixed(decimal!)) +
-                double.parse(totalLedgerAmount.toStringAsFixed(decimal!)))
-            .toStringAsFixed(decimal!),
-      ); // adding vat total, items total, ledgers total
-
-      partyLedgerAmount = partyLedgerAmount * -1;
-
-      List<Map<String, Object>> ledgerList = [];
-
-      Map<String, Object> partyLedgerData = {
-        // making party ledger
-        "LEDGERNAME": _selectedpartyledger,
-        "AMOUNT": partyLedgerAmount.toStringAsFixed(decimal!),
-        "ISPARTYLEDGER": "Yes",
-        "ISDEEMEDPOSITIVE": "Yes",
-        "ledgerType": "Party",
-      };
-      ledgerList.add(partyLedgerData);
-
-      // Add ledger entries to the list
-      ledgerList.addAll(
-        ledgerEntries.map((item) {
-          return {
-            "LEDGERNAME": item.ledgerName,
-            "VATAPPLICABLE": item.vatApp,
-            "AMOUNT": item.ledgerAmount,
-            "ISDEEMEDPOSITIVE": "No",
-            "ledgerType": "ledgerList",
-          };
-        }),
-      );
-
-      // Add VAT ledger data if applicable
-      if (_selectedvatledger != 'Not Applicable') {
-        Map<String, Object> vatDataToAdd = {
-          "LEDGERNAME": _selectedvatledger,
-          "AMOUNT": roundedtotalVatAmount,
-          "ISDEEMEDPOSITIVE": "No",
-          "ledgerType": "VAT",
-        };
-        ledgerList.add(vatDataToAdd);
-      }
-
-      jsonEntryData["LEDGERENTRIES.LIST"] = ledgerList;
-
-      /*print(jsonEntryData);*/
-
-      // --- tally-api migration ---------------------------------------------
-      // Replaces legacy's `POST /api/entry/create/:company/:serial` (the
-      // Tally-XML-shaped `jsonEntryData` built above) with
-      // `VoucherEntryRepository.create()`, built to tally-api's
-      // `voucherEntrySchema`. Every field legacy sent is mapped onto its
-      // closest new-schema equivalent below; see the field-by-field notes
-      // inline for the few that have no direct equivalent.
-      try {
-        final int? voucherTypeMasterId = _masterIdByName(
-          _voucherTypesRaw,
-          _selectedvchtypename,
-        );
-        final int? partyLedgerMasterId = _masterIdByName(
-          _ledgersRaw,
-          _selectedpartyledger?.toString(),
-        );
-        final int? currencyMasterId = _currencyMasterIdForCode(currencycode);
-
-        if (voucherTypeMasterId == null) {
-          showAppMessage(context, 'Unknown voucher type - please reselect it');
-          setState(() => _isLoading = false);
-          return;
-        }
-        if (partyLedgerMasterId == null) {
-          showAppMessage(context, 'Unknown party ledger - please reselect it');
-          setState(() => _isLoading = false);
-          return;
-        }
-        if (currencyMasterId == null) {
-          showAppMessage(context, 'No currency configured for this company');
-          setState(() => _isLoading = false);
-          return;
-        }
-
-        // DATE/REFERENCEDATE are compact "yyyyMMdd" throughout this screen;
-        // voucherEntrySchema wants ISO "yyyy-MM-dd".
-        String isoDate(String yyyyMMdd) =>
-            DateFormat('yyyy-MM-dd').format(parseCompactDate(yyyyMMdd));
-
-        final List<Map<String, dynamic>> ledgerEntriesBody = [];
-
-        // Party ledger - legacy sent a negative AMOUNT + ISDEEMEDPOSITIVE
-        // "Yes"; voucherEntrySchema separates magnitude (`amount`, always
-        // positive) from direction (`isDebit`) instead of a signed amount,
-        // so a negative legacy amount + ISDEEMEDPOSITIVE "Yes" is mapped to
-        // isDebit: true here.
-        ledgerEntriesBody.add({
-          'ledgerMasterId': partyLedgerMasterId,
-          'amount': partyLedgerAmount.abs(),
-          'isDebit': partyLedgerAmount < 0,
-          'isPartyLedger': true,
-        });
-
-        for (final entry in ledgerEntries) {
-          final int? ledgerMasterId = _masterIdByName(
-            _ledgersRaw,
-            entry.ledgerName,
-          );
-          if (ledgerMasterId == null) continue;
-          ledgerEntriesBody.add({
-            'ledgerMasterId': ledgerMasterId,
-            'amount': entry.ledgerAmount.abs(),
-            'isDebit': false,
-            'isPartyLedger': false,
-          });
-        }
-
-        if (_selectedvatledger != 'Not Applicable') {
-          final int? vatLedgerMasterId = _masterIdByName(
-            _ledgersRaw,
-            _selectedvatledger?.toString(),
-          );
-          if (vatLedgerMasterId != null) {
-            ledgerEntriesBody.add({
-              'ledgerMasterId': vatLedgerMasterId,
-              'amount': roundedtotalVatAmount.abs(),
-              'isDebit': false,
-              'isPartyLedger': false,
-            });
-          }
-        }
-
-        final List<Map<String, dynamic>> inventoryEntriesBody = [];
-        for (final item in saleItems) {
-          final int? stockItemMasterId =
-              item.itemMasterId ?? _stockItemMasterIdByName(item.itemName);
-          if (stockItemMasterId == null) {
-            throw ApiException(
-              statusCode: 0,
-              code: 'UNKNOWN_ITEM',
-              message: 'Unknown stock item: ${item.itemName}',
-            );
-          }
-
-          int? unitMasterId = _unitMasterIdBySymbol(item.itemUnit);
-          if (unitMasterId == null) {
-            // Fall back to the item's own base unit if its unit symbol
-            // couldn't be matched by name (e.g. an alternate unit not
-            // reflected in the base/additional-unit pair tally-api's
-            // stock-item row carries).
-            final stockRow = _stockItemsRaw.firstWhere(
-              (i) => i['masterId'] == stockItemMasterId,
-              orElse: () => const {},
-            );
-            unitMasterId = stockRow['baseUnitMasterId'] as int?;
-          }
-          if (unitMasterId == null) {
-            throw ApiException(
-              statusCode: 0,
-              code: 'UNKNOWN_UNIT',
-              message: 'Unknown unit for item: ${item.itemName}',
-            );
-          }
-
-          final String? salesLedgerName =
-              item.accountingAllocationList['LEDGERNAME']?.toString();
-          final int? inventoryLedgerMasterId = _masterIdByName(
-            _ledgersRaw,
-            salesLedgerName,
-          );
-          if (inventoryLedgerMasterId == null) {
-            throw ApiException(
-              statusCode: 0,
-              code: 'UNKNOWN_SALES_LEDGER',
-              message: 'Unknown sales ledger: ${salesLedgerName ?? ''}',
-            );
-          }
-
-          final List<Map<String, dynamic>> batchAllocations = [];
-          final int? godownMasterId = _masterIdByName(
-            _godownsRaw,
-            item.itemLocation,
-          );
-          if (godownMasterId != null) {
-            batchAllocations.add({
-              'godownMasterId': godownMasterId,
-              // This screen never tracks Tally batch numbers - "Primary
-              // Batch" is Tally's own implicit batch name for a godown
-              // allocation on an item that isn't batch-tracked, not an
-              // invented value.
-              'batchName': 'Primary Batch',
-              'quantity': double.tryParse(item.itemQuantity) ?? 0,
-            });
-          }
-
-          inventoryEntriesBody.add({
-            'stockItemMasterId': stockItemMasterId,
-            'quantity': double.tryParse(item.itemQuantity) ?? 0,
-            'rate': item.itemPrice,
-            'unitMasterId': unitMasterId,
-            'amount': item.itemAmount,
-            'ledgerMasterId': inventoryLedgerMasterId,
-            'isDebitQuantity': false,
-            'batchAllocations': batchAllocations,
-            // BASICUSERDESCRIPTION.LIST (UniGas free-text lines) maps onto
-            // the schema's `description` array on the inventory entry -
-            // the closest available field for arbitrary text lines against
-            // an item.
-            if (item.basicUserDescriptions.isNotEmpty)
-              'description': item.basicUserDescriptions,
-          });
-        }
-
-        final Map<String, dynamic> body = {
-          'voucherTypeMasterId': voucherTypeMasterId,
-          'date': isoDate(saledatestring),
-          'currencyMasterId': currencyMasterId,
-          if (narrationValue.isNotEmpty) 'narration': narrationValue,
-          if (vchnoValue.trim().isNotEmpty) 'voucherNumber': vchnoValue.trim(),
-          if (refnoValue.trim().isNotEmpty) 'reference': refnoValue.trim(),
-          if (selectedReferenceDate.trim().isNotEmpty)
-            'referenceDate': isoDate(selectedReferenceDate),
-          'ledgerEntries': ledgerEntriesBody,
-          'inventoryEntries': inventoryEntriesBody,
-        };
-
-        debugPrint(jsonEncode(body), wrapWidth: 1024);
-
-        await VoucherEntryRepository.instance.create(body);
-
-        loadLedgerData();
-      } on ApiException catch (e) {
-        showAppMessage(context, e.message);
-      } catch (e) {
-        setState(() {
-          _isLoading = false;
-        });
-        print(e);
-      }
+      return;
     }
-    setState(() {
-      _isLoading = false;
-    });
+
+    String narrationValue = controller_narration.text.trim();
+    String vchnoValue = _vchnoController.text;
+    String refnoValue = controller_refno.text;
+
+    // Verbatim port of the original's reference-date fallback: prefer
+    // `refdatestring` (migrated state); if that's blank but the widget-local
+    // `_refdateController` has text, parse it back out of its display
+    // format. Resolved here (not in the notifier) since it needs the
+    // widget-local controller.
+    String selectedReferenceDate = refdatestring;
+    if (selectedReferenceDate.trim().isEmpty &&
+        _refdateController.text.trim().isNotEmpty) {
+      final parsedDate = DateFormat(
+        'dd-MM-yyyy',
+      ).parse(_refdateController.text.trim());
+      selectedReferenceDate = _dateFormat.format(parsedDate);
+    }
+
+    final result = await _notifier.saveEntry(
+      narration: narrationValue,
+      vchno: vchnoValue,
+      refno: refnoValue,
+      referenceDate: selectedReferenceDate,
+    );
+
+    if (result.success) {
+      loadLedgerData();
+    } else if (result.errorMessage != null) {
+      showAppMessage(context, result.errorMessage!);
+    }
+    // else: a generic (non-ApiException) failure - matches the original's
+    // silent `catch (e) { ...; print(e); }` branch (no message, no ledger
+    // reload).
   }
 
   void showDeliveryNoteDialog(
@@ -4043,37 +3224,32 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                           // that link.
                           FocusScope.of(context).requestFocus(FocusNode());
                           Navigator.pop(context);
+
+                          controller_narration.clear();
+                          controller_refno.clear();
+                          _textFieldFocusNodeNarration.unfocus();
+                          voucherStartReadingController.clear();
+                          voucherEndReadingController.clear();
+                          bulkReceiverNameController.clear();
+                          bulkReceiverMobileController.clear();
+                          bulkReceiverEidController.clear();
+                          bulkReceiverSignatureBytes = null;
+
+                          // Migrated-state half - see `resetAfterShare`'s
+                          // doc-comment.
+                          _notifier.resetAfterShare();
+                          _syncTotalsControllers();
+
+                          _dateController.text = saledatetxt;
+                          _refdateController.text = refdatetxt;
+
+                          fetchvchnos(_selectedvchtypename);
+                          _partyLedgerController.clear();
+
                           setState(() {
-                            controller_narration.clear();
-                            controller_refno.clear();
-                            _textFieldFocusNodeNarration.unfocus();
-                            voucherStartReadingController.clear();
-                            voucherEndReadingController.clear();
-                            _isBulkDelivery = null;
-                            bulkReceiverNameController.clear();
-                            bulkReceiverMobileController.clear();
-                            bulkReceiverEidController.clear();
-                            bulkReceiverSignatureBytes = null;
-
-                            saledate = DateTime.now();
-                            saledatestring = _dateFormat.format(saledate);
-                            saledatetxt = formatlastsaledate(saledatestring);
-                            _dateController.text = saledatetxt;
-
-                            refdate = DateTime.now();
-                            refdatestring = _dateFormat.format(refdate);
-                            refdatetxt = formatlastsaledate(refdatestring);
-                            _refdateController.text = refdatetxt;
-
-                            fetchvchnos(_selectedvchtypename);
-
-                            _selectedpartyledger = null;
-                            _partyLedgerController.clear();
-
                             _selectedledger = ledgerdata.isNotEmpty
                                 ? ledgerdata[0]['name']
                                 : null;
-                            _selectedvatledger = _defaultVatLedger();
 
                             _selecteditem = '${itemdata[0]['name']}';
                             _itemController.text = _selecteditem;
@@ -4086,19 +3262,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                             }
 
                             _updateUnitDropdown(_selecteditem);
-
-                            saleItems.clear();
-                            ledgerEntries.clear();
-
-                            totalPriceOfItems = 0.0;
-                            totalAmountOfLedgers = 0.0;
-                            totalVatAmount = 0.0;
-
-                            controller_vatamt.clear();
-                            controller_totalamt.clear();
-
-                            isVisibleItemHeading = false;
-                            isVisibleLedgerHeading = false;
 
                             _isFocused_vchno = false;
                             _isFocused_item = false;
@@ -4315,19 +3478,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     return currentSerial == uniGasSerialNumber;
   }
 
-  // vatledgerdata[0] is always the synthetic "Not Applicable" entry added
-  // ahead of the API's real VAT ledgers. For UniGas, default to the first
-  // real ledger (vatledgerdata[1]) instead of "Not Applicable" - UniGas
-  // sales/deliveries are always VAT-applicable in practice. Every other
-  // serial keeps the existing "Not Applicable" default.
-  String? _defaultVatLedger() {
-    if (vatledgerdata.isEmpty) return null;
-    if (isUniGasMeterReadingSerial && vatledgerdata.length > 1) {
-      return vatledgerdata[1];
-    }
-    return vatledgerdata[0];
-  }
-
   /// tally-api migration: replaces legacy's `GET
   /// /api/entry/getSalesData/:company/:serial` (a single server-shaped
   /// response with `vchTypes`/`partyLedgers`/`salesLedgers`/`otherLedgers`/
@@ -4354,381 +3504,48 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   /// method's job is only to repopulate them from the new backend, not to
   /// change how they're consumed.
   Future<void> loadData() async {
-    vchtypenamedata.clear();
-    itemdata.clear();
-    salesledger_data.clear();
-    partyledgerdata.clear();
-    vatledgerdata.clear();
-    ledgerdata.clear();
-    locationsdata.clear();
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    final prefs = await SharedPreferences.getInstance();
-
-    String godownName = '';
-
-    String? allocationString = prefs.getString('spectra_allocations');
-
-    if (allocationString != null && allocationString.isNotEmpty) {
-      List<dynamic> allocations = jsonDecode(allocationString);
-
-      if (allocations.isNotEmpty) {
-        final allocation = allocations.first as Map<String, dynamic>;
-
-        godownName = allocation['godown']?.toString() ?? '';
-      }
+    final error = await _notifier.loadData();
+    if (error != null) {
+      showAppMessage(context, error);
     }
-
-    try {
-      final String currentSerialNo = serial_no?.trim() ?? '';
-      final bool isVanSalesSerial = vanSalesSerialNo.contains(currentSerialNo);
-
-      debugPrint('loadData serial_no -> $currentSerialNo');
-      debugPrint('loadData isVanSalesSerial -> $isVanSalesSerial');
-      debugPrint('loadData assigned godownName -> $godownName');
-
-      final results = await Future.wait([
-        StockRepository.instance.listStockItems(),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany('/ledgers?page=$page&limit=100'),
-        ),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany('/groups?page=$page&limit=100'),
-        ),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany('/units?page=$page&limit=100'),
-        ),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany('/godowns?page=$page&limit=100'),
-        ),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany(
-            '/voucher-types?page=$page&limit=100',
-          ),
-        ),
-        fetchAllPages(
-          (page) => _tallyApiClient.getForCompany(
-            '/currencies?page=$page&limit=100',
-          ),
-        ),
-      ]);
-
-      _stockItemsRaw = results[0];
-      _ledgersRaw = results[1];
-      _groupsRaw = results[2];
-      _unitsRaw = results[3];
-      _godownsRaw = results[4];
-      _voucherTypesRaw = results[5];
-      _currenciesRaw = results[6];
-
-      final Set<int> partyGroupIds = _groupsRaw
-          .where(
-            (g) =>
-                const {'SUNDRY_DEBTORS', 'SUNDRY_CREDITORS'}.contains(
-                  g['reservedName']?.toString(),
-                ) ||
-                const {
-                  'sundry debtors',
-                  'sundry creditors',
-                  'customers',
-                  'suppliers',
-                  'creditors',
-                  'debtors',
-                }.contains((g['name']?.toString() ?? '').trim().toLowerCase()),
-          )
-          .map((g) => g['masterId'] as int)
-          .toSet();
-      final Set<int> salesGroupIds = _groupsRaw
-          .where((g) => g['reservedName']?.toString() == 'SALES')
-          .map((g) => g['masterId'] as int)
-          .toSet();
-      final Set<int> vatGroupIds = _groupsRaw
-          .where((g) => g['reservedName']?.toString() == 'DUTIES')
-          .map((g) => g['masterId'] as int)
-          .toSet();
-
-      String? voucherTypeToFetch;
-
-      setState(() {
-        // Voucher types applicable to a Delivery Note - Tally's own
-        // reserved voucher type for this entry family. A company can have
-        // several voucher types (aliases) sharing this reservedName.
-        vchtypenamedata = _voucherTypesRaw
-            .where(
-              (vt) =>
-                  vt['reservedName']?.toString() == 'DELIVERY_NOTE' &&
-                  vt['isActive'] != false,
-            )
-            .map((vt) => vt['name'].toString())
-            .toList();
-
-        // Exactly one Delivery Note voucher type (server-side pre-filtered
-        // by this company-user's VOUCHER_TYPE master-restriction, or the
-        // unrestricted full list) means this company-user is locked to one
-        // voucher type; otherwise (0 or 2+) leave it a normal editable
-        // picker defaulted to the first entry.
-        if (vchtypenamedata.length == 1) {
-          _selectedvchtypename = vchtypenamedata[0];
-          isVoucherTypeLocked = true;
-        } else {
-          _selectedvchtypename = vchtypenamedata.isNotEmpty
-              ? vchtypenamedata[0]
-              : null;
-          isVoucherTypeLocked = false;
-        }
-        voucherTypeToFetch = _selectedvchtypename;
-
-        debugPrint('vanSalesSerialNo set -> $vanSalesSerialNo');
-        debugPrint('selected serial_no -> $currentSerialNo');
-        debugPrint(
-          'is van sales serial -> ${vanSalesSerialNo.contains(currentSerialNo)}',
-        );
-
-        partyledgerdata.clear();
-        partyLedgerPriceLevelMap.clear();
-
-        for (final ledger in _ledgersRaw) {
-          if (!partyGroupIds.contains(ledger['groupMasterId'] as int?)) {
-            continue;
-          }
-          final String ledgerName = ledger['name']?.toString().trim() ?? '';
-          if (ledgerName.isEmpty) continue;
-          if (!partyledgerdata.contains(ledgerName)) {
-            partyledgerdata.add(ledgerName);
-          }
-          // Legacy only ever populated per-party price levels for van-sales
-          // (UniGas/Spectra) serials - every other account's `getSalesData`
-          // response used the "OLD RESPONSE FORMAT" branch with no
-          // `price_level` field at all (see this migration's reference
-          // commit, lib/DeliveryNoteRegistration.dart pre-tally-api). tally-api's
-          // `/ledgers` list carries `priceLevel` on every row regardless of
-          // account, so this must still be gated by [isVanSalesSerial] here
-          // rather than always reading it, to keep non-Spectra accounts
-          // exactly as before (no auto price-level lookup). A blank string
-          // collapses to null, matching the van-sales auto-rate flow
-          // (fetchPriceLevelDetailsForSelectedItem)'s existing "no price
-          // level -> fall back to manual rate entry" branch.
-          if (isVanSalesSerial) {
-            final String? rawPriceLevel = ledger['priceLevel']?.toString();
-            partyLedgerPriceLevelMap[ledgerName] =
-                (rawPriceLevel == null || rawPriceLevel.trim().isEmpty)
-                ? null
-                : rawPriceLevel.trim();
-          }
-        }
-        partyledgerdata.sort(
-          (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
-        );
-
-        salesledger_data = _ledgersRaw
-            .where((l) => salesGroupIds.contains(l['groupMasterId'] as int?))
-            .map((l) => l['name'].toString())
-            .toList();
-
-        // Sales ledger default: the company-wide SALES-group ledger lookup
-        // above, not a per-user restriction - soft/editable default only,
-        // never locked. Falls back to the existing no-default behavior
-        // (first item) when zero or 2+ distinct SALES-group ledgers exist.
-        final List<String> distinctSalesLedgerNames = salesledger_data
-            .toSet()
-            .toList();
-        if (distinctSalesLedgerNames.length == 1) {
-          _selectedsalesledger = distinctSalesLedgerNames.first;
-        } else {
-          _selectedsalesledger = salesledger_data.isNotEmpty
-              ? salesledger_data[0]
-              : null;
-        }
-        isSalesLedgerLocked = false;
-
-        ledgerdata = _ledgersRaw
-            .where(
-              (l) =>
-                  !partyGroupIds.contains(l['groupMasterId'] as int?) &&
-                  !salesGroupIds.contains(l['groupMasterId'] as int?) &&
-                  !vatGroupIds.contains(l['groupMasterId'] as int?),
-            )
-            .map((l) => {'name': l['name'].toString()})
-            .toList();
-
-        _selectedledger = ledgerdata.isNotEmpty
-            ? ledgerdata[0]['name']?.toString() ?? ''
-            : '';
-
-        vatledgerdata.add('Not Applicable');
-        vatledgerdata.addAll(
-          _ledgersRaw
-              .where((l) => vatGroupIds.contains(l['groupMasterId'] as int?))
-              .map((l) => l['name'].toString()),
-        );
-
-        _selectedvatledger = _defaultVatLedger();
-
-        // Reshaped into the same {name, masterid, part, saleprice,
-        // standardprice, unit:[{name,multiplier}]} shape the legacy
-        // `items` array used, so every existing item-picker/unit-dropdown
-        // widget below keeps working unmodified.
-        itemdata = _stockItemsRaw.map((item) {
-          final List<Map<String, dynamic>> units = [];
-          if (item['baseUnitSymbol'] != null) {
-            units.add({'name': item['baseUnitSymbol'], 'multiplier': '1'});
-          }
-          if (item['additionalUnitSymbol'] != null) {
-            units.add({
-              'name': item['additionalUnitSymbol'],
-              'multiplier': item['conversion']?.toString() ?? '0',
-            });
-          }
-          return {
-            'name': item['name'],
-            'masterid': item['masterId']?.toString(),
-            'part': (item['partNo'] as List?)?.isNotEmpty == true
-                ? (item['partNo'] as List).first.toString()
-                : '',
-            'saleprice': item['lastSalePrice'],
-            'standardprice': item['stardardPrice'],
-            'unit': units,
-          };
-        }).toList();
-
-        locationsdata = _godownsRaw.map((g) => g['name'].toString()).toList();
-
-        // Exactly one godown (server-side pre-filtered by this
-        // company-user's GODOWN master-restriction, or the unrestricted
-        // full list) means this company-user is locked to one
-        // vehicle/godown; otherwise (0 or 2+) leave it unlocked with no
-        // auto-selected default.
-        if (locationsdata.length == 1) {
-          selectedLocation = locationsdata[0];
-          isGodownLocked = true;
-        } else {
-          isGodownLocked = false;
-        }
-        isVisibleLocation = locationsdata.isNotEmpty;
-
-        if (_selecteditem != null) {
-          _updateUnitDropdown(_selecteditem);
-        }
-      });
-
-      if (voucherTypeToFetch != null && voucherTypeToFetch!.isNotEmpty) {
-        await fetchvchnos(voucherTypeToFetch!);
-      }
-    } on ApiException catch (e) {
-      showAppMessage(context, e.message);
-    } catch (e) {
-      print('error -> $e');
+    if (_selecteditem != null) {
+      _updateUnitDropdown(_selecteditem);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   /// tally-api migration: legacy's `GET /api/ledger/getLedger/:company/:serial`
   /// (POSTed with `{"ledger": name}`) returned exactly the TRN/address/
   /// state/country/mobile/email fields tally-api's own `/ledgers` list row
-  /// already carries (`tinNumber`/`address`/`stateName`/`countryName`/
-  /// `mobileNumber`/`email`) - loadData() already fetched the full ledger
-  /// list into `_ledgersRaw`, so this is now a pure client-side lookup by
-  /// name, no network round-trip needed.
+  /// already carries. The notifier's `loadLedgerData` does the lookup and
+  /// returns the result (or `null` for "ledger not found"); this wrapper
+  /// makes the actual `showAppMessage`/`showDeliveryNoteDialog` calls, since
+  /// those need `context`.
   Future<void> loadLedgerData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final ledger = _ledgersRaw.firstWhere(
-        (l) => l['name']?.toString() == _selectedpartyledger,
-        orElse: () => const {},
-      );
-
-      if (ledger.isEmpty) {
-        showAppMessage(context, 'Ledger not found');
-      } else {
-        final String tinValue = ledger['tinNumber']?.toString() ?? 'null';
-        final String address =
-            (ledger['address'] as List?)?.join(', ') ?? 'null';
-        final String emirate = ledger['stateName']?.toString() ?? 'null';
-        final String country = ledger['countryName']?.toString() ?? 'null';
-
-        setState(() {
-          _selectedPartyMobile = ledger['mobileNumber']?.toString();
-          _selectedPartyEmail = ledger['email']?.toString();
-          showDeliveryNoteDialog(context, tinValue, address, emirate, country);
-        });
-      }
-    } catch (e) {
-      print(e);
+    final result = await _notifier.loadLedgerData();
+    if (result == null) {
+      showAppMessage(context, 'Ledger not found');
+      return;
     }
-
-    setState(() {
-      _isLoading = false;
-    });
+    showDeliveryNoteDialog(
+      context,
+      result.tin,
+      result.address,
+      result.emirate,
+      result.country,
+    );
   }
 
   /// Backed by tally-api's `GET .../voucher-entries/voucher-numbers` (see
-  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - unions this
-  /// app's own draft `VoucherEntry` numbers with the real Tally-synced
-  /// `Voucher.number`s for this vchtype/date-range, replacing the earlier
-  /// client-side-only approach (`listAll()` + filter) that only ever saw
-  /// this app's own drafts. The suggestion is then still user-editable in
-  /// the Voucher No. field (gated by the existing `canEditVoucherNo`
-  /// permission flag), never silently auto-assigned.
+  /// `VoucherEntryRepository.voucherNumbers`'s doc-comment) - the notifier
+  /// does the fetch/sort/next-number-generation; this wrapper sets the
+  /// widget-local `_vchnoController.text` from the result and surfaces any
+  /// error via `showAppMessage`.
   Future<void> fetchvchnos(String vchname) async {
-    final DateTime rangeStart = parseCompactDate(startfrom);
-    final DateTime rangeEnd = yearEndDate;
-
-    vchnos.clear();
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final int? voucherTypeMasterId = _masterIdByName(
-        _voucherTypesRaw,
-        vchname,
-      );
-
-      if (voucherTypeMasterId != null) {
-        final String fromParam = DateFormat('yyyy-MM-dd').format(rangeStart);
-        final String toParam = DateFormat('yyyy-MM-dd').format(rangeEnd);
-
-        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
-          voucherTypeMasterId: voucherTypeMasterId,
-          from: fromParam,
-          to: toParam,
-        );
-      }
-
-      setState(() {
-        // SORT first
-        vchnos.sort((a, b) {
-          RegExp regExp = RegExp(r'(\d+)(?!.*\d)');
-          int numA = int.tryParse(regExp.firstMatch(a)?.group(0) ?? '0') ?? 0;
-          int numB = int.tryParse(regExp.firstMatch(b)?.group(0) ?? '0') ?? 0;
-          return numA.compareTo(numB);
-        });
-
-        // GENERATE NEXT
-        String nextVch = generateNextVchNo(vchnos);
-
-        _vchnoController.text = nextVch;
-      });
-    } on ApiException catch (e) {
-      vchnos.clear();
-      showAppMessage(context, e.message);
-    } catch (e) {
-      vchnos.clear();
-      print(e);
+    final result = await _notifier.fetchVchNos(vchname);
+    _vchnoController.text = result.nextVchNo;
+    if (result.error != null) {
+      showAppMessage(context, result.error!);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   void _updateUnitDropdown(dynamic _selectedItem) {
@@ -4799,29 +3616,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     });
   }
 
-  void updateRateAndAmount() {
-    String qtyValue = itemQuantityController.text;
-
-    if (qtyValue.isEmpty) {
-      qtyValue = '0';
-    }
-
-    String rateValue = itemRateController.text;
-    if (rateValue.isEmpty) {
-      rateValue = '0';
-    }
-    double amountValue = (double.parse(qtyValue) * double.parse(rateValue));
-
-    double roundedAmountValue = double.parse(
-      amountValue.toStringAsFixed(decimal!),
-    );
-
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-    String formattedAmount = formatter.format(roundedAmountValue);
-
-    itemAmountController.text = formattedAmount.toString();
-  }
-
   // When both start/end meter readings are entered and valid, quantity is
   // derived from them (end - start) and the field is locked to prevent it
   // drifting out of sync with the readings. If both readings are cleared,
@@ -4856,29 +3650,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     }
   }
 
-  void updateAmount() {
-    String qtyValue = itemQuantityController.text;
-
-    if (qtyValue.isEmpty) {
-      qtyValue = '0';
-    }
-
-    String rateValue = itemRateController.text;
-    if (rateValue.isEmpty) {
-      rateValue = '0';
-    }
-    double amountValue = (double.parse(qtyValue) * double.parse(rateValue));
-
-    double roundedAmountValue = double.parse(
-      amountValue.toStringAsFixed(decimal!),
-    );
-
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-    String formattedAmount = formatter.format(roundedAmountValue);
-
-    itemAmountController.text = formattedAmount.toString();
-  }
-
   Future<void> _selectsaleDate(BuildContext context) async {
     if (isUniGasSerial(serial_no)) {
       closeKeyboard(context);
@@ -4905,13 +3676,10 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
         );
       },
     );
-    if (picked != null && picked != saledate)
-      setState(() {
-        saledate = picked;
-        saledatestring = _dateFormat.format(saledate);
-        saledatetxt = formatlastsaledate(saledatestring);
-        _dateController.text = saledatetxt;
-      });
+    if (picked != null && picked != saledate) {
+      _notifier.setSaleDate(picked);
+      _dateController.text = saledatetxt;
+    }
   }
 
   Future<void> _selectrefDate(BuildContext context) async {
@@ -4938,711 +3706,14 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     );
 
     if (picked != null) {
-      setState(() {
-        refdate = picked;
-        refdatestring = _dateFormat.format(picked); // yyyyMMdd for API body
-        refdatetxt = formatlastsaledate(refdatestring); // display text
-        _refdateController.text = refdatetxt;
-      });
+      _notifier.setRefDate(picked);
+      _refdateController.text = refdatetxt;
 
       debugPrint("Updated Reference Date Display: ${_refdateController.text}");
       debugPrint("Updated Reference Date Body: $refdatestring");
     }
   }
 
-  void resetItemDialogFields() {
-    _selecteditem = null;
-    selectedItemMasterId = null;
-    _selectedunit = null;
-
-    _itemController.clear();
-    itemQuantityController.clear();
-    itemRateController.clear();
-    itemAmountController.clear();
-
-    selectedMultiplier = 0.0;
-    selectedLocation = '';
-
-    isVisibleLocation = false;
-    isVisibleUnit = false;
-    isPriceLevelLoading = false;
-    isRateFieldEnabled = true;
-  }
-
-  /*Future<void> _showItemDetailsPopup(BuildContext context) async {
-    _selecteditem = null;
-    _itemController.clear();
-
-    itemRateController.clear();
-    itemAmountController.clear();
-
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return StatefulBuilder(
-            builder: (context, setStateDialog) {
-              return AlertDialog(
-                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                title: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [Colors.teal, Colors.greenAccent],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                      ),
-                      child: const Icon(Icons.add_shopping_cart, color: Colors.white, size: 28),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Add Item",
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                  ],
-                ),
-                content: SizedBox(
-                  width: MediaQuery.of(context).size.width * 0.9,
-                  child: SingleChildScrollView(
-                    child: Form(
-                      key: _itemFormkey,
-                      child: Column(
-                        children: [
-
-                          // 🔍 Item Search
-                          TypeAheadField<Map<String, dynamic>>(
-                            // 🔹 Latest API requires this controller instead of inside TextFieldConfiguration
-                            controller: _itemController,
-                            decorationBuilder: (context, child) {
-                              return Material(
-                                elevation: 6,
-                                borderRadius: BorderRadius.circular(16),
-                                color: Theme.of(context).cardColor,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: child,
-                                ),
-                              );
-                            },
-
-                            // 🔹 Suggestion logic
-                            suggestionsCallback: (pattern) async {
-                              return itemdata
-                                  .where((item) {
-                                final name = item['name']?.toString().toLowerCase() ?? '';
-                                final part = item['part']?.toString().toLowerCase() ?? '';
-                                return name.contains(pattern.toLowerCase()) ||
-                                    part.contains(pattern.toLowerCase());
-                              })
-                                  .cast<Map<String, dynamic>>() // 👈 important fix
-                                  .toList();
-                            },
-
-                            // 🔹 How each suggestion looks
-                            itemBuilder: (context, suggestion) {
-                              return ListTile(
-                                title: Text(
-                                  suggestion['name'] ?? '',
-                                  style: GoogleFonts.poppins(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
-                                ),
-                                subtitle: Text(
-                                  suggestion['part'] ?? '',
-                                  style: GoogleFonts.poppins(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                                ),
-                              );
-                            },
-
-                            // 🔹 Required in new API (replaces onSuggestionSelected)
-
-                            */ /*onSelected: (suggestion) {
-                              setStateDialog(() {
-                                _selecteditem = suggestion['name'] ?? '';
-                                _itemController.text = _selecteditem;
-
-                                if (locationsdata.isNotEmpty) {
-                                  selectedLocation = locationsdata[0];
-                                  isVisibleLocation = true;
-                                } else {
-                                  isVisibleLocation = false;
-                                }
-
-                                _updateUnitDropdown(_selecteditem);
-                                isVisibleUnit = true;
-                              });
-                            },*/ /*
-
-                            onSelected: (suggestion) async {
-                              setStateDialog(() {
-                                debugPrint('item clicked');
-
-                                _selecteditem = suggestion['name']?.toString() ?? '';
-                                selectedItemMasterId = suggestion['masterid']?.toString() ??
-                                    suggestion['itemId']?.toString() ??
-                                    suggestion['id']?.toString();
-
-                                _itemController.text = _selecteditem;
-
-                                debugPrint('selected item name -> $_selecteditem');
-                                debugPrint('selected item masterid -> $selectedItemMasterId');
-
-                                if (locationsdata.isNotEmpty) {
-                                  selectedLocation = locationsdata[0];
-                                  isVisibleLocation = true;
-                                } else {
-                                  isVisibleLocation = false;
-                                }
-
-                                _updateUnitDropdown(_selecteditem);
-                                isVisibleUnit = true;
-                              });
-
-                              await fetchPriceLevelDetailsForSelectedItem(setStateDialog);
-                              },
-
-
-
-                            // 🔹 Main TextField builder (replaces old textFieldConfiguration)
-                            builder: (context, controller, focusNode) {
-                              return TextField(
-                                controller: controller,
-                                focusNode: focusNode,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onSurface,
-                                ),
-                                decoration: InputDecoration(
-                                  labelText: "Item",
-                                  hintText: "Search item",
-                                  labelStyle: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-
-                                  hintStyle: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-                                  prefixIcon: Container(
-                                    margin: const EdgeInsets.all(8),
-                                    decoration: const BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [Colors.blue, Colors.lightBlueAccent],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      borderRadius: BorderRadius.all(Radius.circular(8)),
-                                    ),
-                                    child: const Icon(Icons.inventory_outlined, color: Colors.white),
-                                  ),
-
-                                  suffixIcon: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (!isPriceLevelLoading && _itemController.text.isNotEmpty)
-                                        IconButton(
-                                          icon: Icon(Icons.close, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 20),
-                                          onPressed: () {
-                                            _itemController.clear();
-                                            setStateDialog(() {
-                                              _selecteditem = "";
-                                              selectedItemMasterId = null;
-                                              itemRateController.clear();
-                                              isVisibleLocation = false;
-                                              isVisibleUnit = false;
-                                            });
-                                          },
-                                        ),
-
-                                      if (!isPriceLevelLoading)
-                                        Icon(Icons.arrow_drop_down, color: Theme.of(context).colorScheme.onSurfaceVariant),
-
-                                      const SizedBox(width: 6),
-                                    ],
-                                  ),
-
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                  ),
-
-                                  disabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                    borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                  ),
-
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                    borderSide: BorderSide(color: app_color, width: 1.5),
-                                  ),
-                                  contentPadding:
-                                  const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                                ),
-                              );
-                            },
-
-                            // 🔹 Optional — shows if no match found
-                            emptyBuilder: (context) => Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Text(
-                                "No item found",
-                                style: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  color: Colors.redAccent,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ),
-
-
-                          if (isPriceLevelLoading)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 12),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  SizedBox(
-                                    height: 22,
-                                    width: 22,
-                                    child: Theme.of(context).platform == TargetPlatform.iOS
-                                        ? const CupertinoActivityIndicator(radius: 11)
-                                        : CircularProgressIndicator(
-                                      strokeWidth: 2.4,
-                                      valueColor: AlwaysStoppedAnimation<Color>(app_color),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    "Loading item details...",
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          // 📍 Location
-                          */ /*Visibility(
-                            visible: isVisibleLocation,
-                            child: Column(
-                              children: [
-                                const SizedBox(height: 14),
-
-                                DropdownButtonFormField<String>(
-                                  isExpanded: true,
-
-                                  value: selectedLocation,
-                                  items: locationsdata.map((value) {
-                                    return DropdownMenuItem(
-
-                                      value: value,
-
-                                      child: SizedBox(
-                                        width: double.infinity,
-                                        child: Text(
-                                          value,
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                      ),
-                                    );
-                                  }).toList(),
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onSurface,
-                                  ),
-                                  onChanged: (val) => setStateDialog(() => selectedLocation = val!),
-                                  decoration: InputDecoration(
-                                    labelText: "Location",
-                                    labelStyle: GoogleFonts.poppins(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                    prefixIcon: Container(
-                                      margin: const EdgeInsets.all(8),
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [Colors.orange, Colors.redAccent],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        ),
-                                        borderRadius: BorderRadius.all(Radius.circular(8)),
-                                      ),
-                                      child: const Icon(Icons.location_on, color: Colors.white),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(color: app_color, width: 1.5),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                          ),*/ /*
-
-
-                    if (!isPriceLevelLoading) ...[
-
-                      // 📦 Unit
-                      Visibility(
-                        visible: isVisibleUnit,
-                        child: Column(
-                          children: [
-                            const SizedBox(height: 14),
-
-                            DropdownButtonFormField<String>(
-                              value: _selectedunit,
-                              items: unitdata.map((u) {
-                                return DropdownMenuItem(value: u.name, child: Text(
-                                  u.name,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onSurface,
-                                  ),
-                                ),);
-                              }).toList(),
-                              onChanged: (val) {
-                                setStateDialog(() {
-                                  _selectedunit = val!;
-                                  itemQuantityController.text = "1";
-                                  selectedMultiplier = unitdata.firstWhere((u) => u.name == _selectedunit).multiplier;
-                                  updateRateAndAmount();
-                                });
-                              },
-                              decoration: InputDecoration(
-                                labelStyle: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                                labelText: "Unit",
-                                prefixIcon: Container(
-                                  margin: const EdgeInsets.all(8),
-                                  decoration: const BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [Colors.purple, Colors.deepPurpleAccent],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                                  ),
-                                  child: const Icon(Icons.straighten, color: Colors.white),
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                ),
-
-                                disabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                ),
-
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: app_color, width: 1.5),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      // 🔢 Quantity
-                      TextFormField(
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                        controller: itemQuantityController,
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => updateRateAndAmount(),
-                        decoration: InputDecoration(
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-
-                          hintStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          labelText: "Quantity",
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.green, Colors.lightGreen],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(Radius.circular(8)),
-                            ),
-                            child: const Icon(Icons.confirmation_num, color: Colors.white),
-                          ),
-
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                          ),
-
-                          disabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                          ),
-
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-
-                        ),
-                      ),
-
-
-
-                      // 💲 Rate
-
-                      Visibility(
-                        visible: showRateField,
-                        child:  Column(
-                          children: [
-
-                            const SizedBox(height: 14),
-                            TextFormField(
-                              enabled: isRateFieldEnabled,
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: isRateFieldEnabled ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              controller: itemRateController,
-                              keyboardType: TextInputType.number,
-
-                              // ✅ only allow manual amount update when rate is editable
-                              onChanged: isRateFieldEnabled ? (_) => updateAmount() : null,
-
-                              decoration: InputDecoration(
-                                labelStyle: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: isRateFieldEnabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                                hintStyle: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                                labelText: "Rate",
-
-                                // ✅ disabled field background
-                                filled: !isRateFieldEnabled,
-                                fillColor: !isRateFieldEnabled ? (Theme.of(context).brightness == Brightness.dark ? Theme.of(context).colorScheme.surfaceContainerHighest : Colors.grey.shade100) : null,
-
-                                prefix: Container(
-                                  margin: const EdgeInsets.only(right: 8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: isRateFieldEnabled
-                                          ? [Colors.blue, Colors.blue]
-                                          : [Colors.grey, Colors.grey],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                    borderRadius: const BorderRadius.all(Radius.circular(8)),
-                                  ),
-                                  child: currencySymbolWidget(
-                                    currencycode,
-                                    getCurrencySymbol(currencycode),
-                                    GoogleFonts.poppins(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                ),
-
-                                disabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                                ),
-
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: app_color, width: 1.5),
-                                ),
-                              ),
-                            )
-                          ],
-                        ),
-                      ),
-
-
-                      const SizedBox(height: 14),
-
-                      // 💰 Amount (Disabled with Gradient Currency Symbol)
-                      TextFormField(
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                        controller: itemAmountController,
-                        enabled: false,
-                        decoration: InputDecoration(
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: isRateFieldEnabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          hintStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          labelText: "Amount",
-
-                          // ✅ disabled field background
-                          filled: true,
-                          fillColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).colorScheme.surfaceContainerHighest : Colors.grey.shade100,
-
-                          prefix: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.grey, Colors.grey],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: const BorderRadius.all(Radius.circular(8)),
-                            ),
-                            child: currencySymbolWidget(
-                              currencycode,
-                              getCurrencySymbol(currencycode),
-                              GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                          ),
-
-                          disabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: Theme.of(context).dividerColor),
-                          ),
-
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(color: app_color, width: 1.5),
-                          ),
-                        ),
-                      ),
-                    ]
-
-
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      setStateDialog(() {
-                        resetItemDialogFields();
-                      });
-
-                      */ /*setState(() {
-                        resetItemDialogFields();
-                      });*/ /*
-
-                      _selectedledger =null;
-                      ledgerAmountController.clear();
-
-                      Navigator.of(context).pop();
-                    },
-                    child: Text(
-                      "Cancel",
-                      style: GoogleFonts.poppins(color: app_color),
-                    ),
-                  ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: app_color,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    ),
-                    icon: const Icon(Icons.check, color: Colors.white),
-                    label: Text("Add Item",
-                        style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
-                    onPressed: () {
-                      if (_itemFormkey.currentState!.validate()) {
-                        addItem();
-                      }
-                    },
-                  ),
-                ],
-              );
-
-            },);}
-    );
-  }*/
 
   // ─────────────────────────────────────────────────────────────────
   // EXPERIMENTAL: bulk multi-item add.
@@ -5698,58 +3769,44 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     );
   }
 
-  // Mirrors the totals recalculation addItem() does, kept separate so
-  // this experimental flow can't regress the existing single-item logic.
-  void _recalcTotalsAfterBulkAdd() {
-    setState(() {
-      isVisibleItemHeading = saleItems.isNotEmpty;
-
-      totalPriceOfItems = saleItems.fold(0.0, (
-        double previousAmount,
-        SaleItem item,
-      ) {
-        return previousAmount +
-            (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                double.parse(item.itemQuantity));
-      });
-
-      double vat_perc = vatperc / 100;
-      if (_selectedvatledger != 'Not Applicable') {
-        double totalAmountForVatAppEntries = ledgerEntries
-            .where((entry) => entry.vatApp)
-            .fold(0.0, (double previousAmount, LedgerEntry entry) {
-              return previousAmount + entry.ledgerAmount;
-            });
-        double ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-        itemsVatAmount = double.parse(
-          (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-        );
-        totalVatAmount = itemsVatAmount + ledgerVatAmount;
-      } else {
-        totalVatAmount = 0;
-      }
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-      final vatFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = vatFormatter.format(roundedtotalVatAmount);
-
-      double totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-        double previousAmount,
-        LedgerEntry entry,
-      ) {
-        return previousAmount + entry.ledgerAmount;
-      });
-
-      totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-      roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-      final totalFormatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_totalamt.text = totalFormatter.format(roundedtotalAmount);
-    });
-  }
-
   // Small colored badge used to permanently show where a rate came from
   // (Price Level / Item Rate / Manual) — a normal user-facing indicator.
+  InputDecoration _inputDecoration({
+    required String label,
+    required IconData icon,
+    required List<Color> gradientColors,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: GoogleFonts.poppins(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+      prefixIcon: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: gradientColors),
+          borderRadius: const BorderRadius.all(Radius.circular(8)),
+        ),
+        child: Icon(icon, color: Colors.white),
+      ),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: app_color, width: 1.5),
+      ),
+    );
+  }
+
   Widget _rateSourceBadge(String source) {
     final Color color = source == 'Price Level'
         ? Colors.green
@@ -5898,17 +3955,17 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
   Future<void> _onAddItemTapped(BuildContext context) async {
     if (isUniGasMeterReadingSerial && _isBulkDelivery == null) {
       final bool isBulk = await _resolveIsBulkFromSpectraAllocation();
-      setState(() {
-        _isBulkDelivery = isBulk;
-        // Pre-fill the fixed UAE Emirates ID prefix so the user only
-        // ever types the remaining digits.
-        if (isBulk && bulkReceiverEidController.text.isEmpty) {
+      _notifier.setBulkDelivery(isBulk);
+      // Pre-fill the fixed UAE Emirates ID prefix so the user only ever
+      // types the remaining digits.
+      if (isBulk && bulkReceiverEidController.text.isEmpty) {
+        setState(() {
           bulkReceiverEidController.text = '784-';
           bulkReceiverEidController.selection = TextSelection.collapsed(
             offset: bulkReceiverEidController.text.length,
           );
-        }
-      });
+        });
+      }
     }
     // Bulk deliveries allow exactly one item for the whole entry - once
     // it's added, block reopening the picker entirely rather than just
@@ -7218,6 +5275,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     Map<String, String> selectedUnitPerItem,
     Map<String, List<TextEditingController>> descriptionControllers,
   ) async {
+    final List<DnBulkEntry> entries = [];
     for (final name in selectedItemNames) {
       final Map<String, dynamic>? itemInfo = itemdata.firstWhere(
         (i) => i['name'] == name,
@@ -7245,12 +5303,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           double.tryParse(rateEditControllers[name]?.text.trim() ?? '') ?? 0.0;
       final int parsedQty =
           int.tryParse(qtyEditControllers[name]?.text.trim() ?? '') ?? 1;
-      final String qty = (parsedQty < 1 ? 1 : parsedQty).toString();
-      // Matches updateRateAndAmount()/addItem(): amount is rounded to the
-      // configured decimal places before being stored, not left raw.
-      final double amount = double.parse(
-        (resolvedRate * double.parse(qty)).toStringAsFixed(decimal!),
-      );
       final bool isBulk = isUniGasMeterReadingSerial && _isBulkDelivery == true;
       final String meterFrom = isBulk
           ? (startReadingControllers[name]?.text.trim() ?? '')
@@ -7259,1455 +5311,24 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
           ? (endReadingControllers[name]?.text.trim() ?? '')
           : '';
 
-      final int existingIndex = saleItems.indexWhere(
-        (i) =>
-            i.itemName == name &&
-            double.parse(i.itemPrice.toStringAsFixed(decimal!)) ==
-                double.parse(resolvedRate.toStringAsFixed(decimal!)) &&
-            i.itemUnit == unitName,
+      entries.add(
+        DnBulkEntry(
+          name: name,
+          unitName: unitName,
+          quantity: parsedQty,
+          rate: resolvedRate,
+          location: selectedLocation,
+          meterFrom: meterFrom,
+          meterTo: meterTo,
+          descriptions: itemDescriptions,
+          itemMasterId: int.tryParse(itemInfo['masterid']?.toString() ?? ''),
+        ),
       );
-
-      if (existingIndex != -1) {
-        final existing = saleItems[existingIndex];
-        // BigInt, not int - a manually-typed quantity can run past int64
-        // range and int.parse() throws FormatException on that instead of
-        // silently erroring, crashing the add-item flow outright.
-        final String newQty =
-            (BigInt.parse(existing.itemQuantity) + BigInt.from(parsedQty))
-                .toString();
-        saleItems[existingIndex] = existing
-            .updateQuantity(newQty)
-            .updateItemAmount(resolvedRate * BigInt.parse(newQty).toDouble());
-      } else {
-        saleItems.add(
-          SaleItem(
-            itemName: name,
-            itemQuantity: qty,
-            itemPrice: resolvedRate,
-            itemAmount: amount,
-            itemLocation: selectedLocation,
-            itemUnit: unitName,
-            accountingAllocationList: {},
-            batchAllocationList: {
-              'GODOWNNAME': selectedLocation,
-              'AMOUNT': amount,
-              'ACTUALQTY': '$qty $unitName',
-              'BILLEDQTY': '$qty $unitName',
-            },
-            meterFrom: meterFrom,
-            meterTo: meterTo,
-            basicUserDescriptions: itemDescriptions,
-            itemMasterId: int.tryParse(itemInfo['masterid']?.toString() ?? ''),
-          ),
-        );
-      }
     }
 
-    _recalcTotalsAfterBulkAdd();
+    _notifier.addBulkItems(entries);
+    _syncTotalsControllers();
   }
-
-  Future<void> _showItemDetailsPopup(BuildContext context) async {
-    _selecteditem = null;
-    _itemController.clear();
-    itemRateController.clear();
-    itemAmountController.clear();
-    voucherStartReadingController.clear();
-    voucherEndReadingController.clear();
-    const bool showMeterReading = true;
-
-    showModalBottomSheet(
-      useSafeArea: true,
-      barrierColor: Colors.black.withValues(alpha: 0.45),
-      context: context,
-      enableDrag: false,
-
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            final mediaQuery = MediaQuery.of(context);
-            final screenHeight = mediaQuery.size.height;
-            final keyboardOpen = mediaQuery.viewInsets.bottom > 0;
-
-            final bool hasItemDetails =
-                isVisibleUnit ||
-                showRateField ||
-                itemAmountController.text.isNotEmpty;
-
-            double sheetSize;
-
-            if (keyboardOpen) {
-              sheetSize = screenHeight < 700 ? 0.95 : 0.82;
-            } else if (hasItemDetails) {
-              if (screenHeight < 700) {
-                sheetSize = 0.90;
-              } else if (screenHeight < 850) {
-                sheetSize = 0.78;
-              } else {
-                sheetSize = 0.68;
-              }
-            } else {
-              if (screenHeight < 700) {
-                sheetSize = 0.65;
-              } else if (screenHeight < 850) {
-                sheetSize = 0.55;
-              } else {
-                sheetSize = 0.45;
-              }
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
-              child: DraggableScrollableSheet(
-                initialChildSize: sheetSize,
-                minChildSize: sheetSize,
-                maxChildSize: keyboardOpen ? 0.95 : 0.90,
-                expand: false,
-                builder: (context, scrollController) {
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(24),
-                      ),
-                      border: Border.all(
-                        color: Theme.of(
-                          context,
-                        ).dividerColor.withValues(alpha: 0.45),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          blurRadius: 24,
-                          offset: const Offset(0, -8),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 10),
-
-                        Container(
-                          width: 45,
-                          height: 5,
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).dividerColor,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [Colors.teal, Colors.greenAccent],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.add_shopping_cart,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-
-                        const SizedBox(height: 10),
-
-                        Text(
-                          "Add Item",
-                          style: GoogleFonts.poppins(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        Expanded(
-                          child: SingleChildScrollView(
-                            controller: scrollController,
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.manual,
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-                            child: Form(
-                              key: _itemFormkey,
-                              child: Column(
-                                children: [
-                                  TypeAheadField<Map<String, dynamic>>(
-                                    controller: _itemController,
-                                    decorationBuilder: (context, child) {
-                                      return Material(
-                                        elevation: 6,
-                                        borderRadius: BorderRadius.circular(16),
-                                        color: Theme.of(context).cardColor,
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                          child: child,
-                                        ),
-                                      );
-                                    },
-                                    suggestionsCallback: (pattern) async {
-                                      return itemdata
-                                          .where((item) {
-                                            final name =
-                                                item['name']
-                                                    ?.toString()
-                                                    .toLowerCase() ??
-                                                '';
-                                            final part =
-                                                item['part']
-                                                    ?.toString()
-                                                    .toLowerCase() ??
-                                                '';
-
-                                            return name.contains(
-                                                  pattern.toLowerCase(),
-                                                ) ||
-                                                part.contains(
-                                                  pattern.toLowerCase(),
-                                                );
-                                          })
-                                          .cast<Map<String, dynamic>>()
-                                          .toList();
-                                    },
-                                    itemBuilder: (context, suggestion) {
-                                      return ListTile(
-                                        title: Text(
-                                          suggestion['name'] ?? '',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 14,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurface,
-                                          ),
-                                        ),
-                                        subtitle: Text(
-                                          suggestion['part'] ?? '',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    onSelected: (suggestion) async {
-                                      FocusScope.of(context).unfocus();
-
-                                      setStateDialog(() {
-                                        _selecteditem =
-                                            suggestion['name']?.toString() ??
-                                            '';
-
-                                        selectedItemMasterId =
-                                            suggestion['masterid']
-                                                ?.toString() ??
-                                            suggestion['itemId']?.toString() ??
-                                            suggestion['id']?.toString();
-
-                                        _itemController.text = _selecteditem;
-
-                                        if (locationsdata.isNotEmpty) {
-                                          selectedLocation = locationsdata[0];
-                                          isVisibleLocation = true;
-                                        } else {
-                                          isVisibleLocation = false;
-                                        }
-
-                                        _updateUnitDropdown(_selecteditem);
-                                        isVisibleUnit = true;
-                                      });
-
-                                      await fetchPriceLevelDetailsForSelectedItem(
-                                        setStateDialog,
-                                      );
-                                    },
-                                    builder: (context, controller, focusNode) {
-                                      return TextField(
-                                        controller: controller,
-                                        focusNode: focusNode,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                        ),
-                                        decoration: InputDecoration(
-                                          labelText: "Item",
-                                          hintText: "Search item",
-                                          labelStyle: GoogleFonts.poppins(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                          hintStyle: GoogleFonts.poppins(
-                                            fontSize: 13,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                          prefixIcon: Container(
-                                            margin: const EdgeInsets.all(8),
-                                            decoration: const BoxDecoration(
-                                              gradient: LinearGradient(
-                                                colors: [
-                                                  Colors.blue,
-                                                  Colors.lightBlueAccent,
-                                                ],
-                                              ),
-                                              borderRadius: BorderRadius.all(
-                                                Radius.circular(8),
-                                              ),
-                                            ),
-                                            child: const Icon(
-                                              Icons.inventory_outlined,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                          suffixIcon: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              if (!isPriceLevelLoading &&
-                                                  _itemController
-                                                      .text
-                                                      .isNotEmpty)
-                                                IconButton(
-                                                  icon: Icon(
-                                                    Icons.close,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurfaceVariant,
-                                                    size: 20,
-                                                  ),
-                                                  onPressed: () {
-                                                    _itemController.clear();
-
-                                                    setStateDialog(() {
-                                                      _selecteditem = "";
-                                                      selectedItemMasterId =
-                                                          null;
-                                                      itemRateController
-                                                          .clear();
-                                                      isVisibleLocation = false;
-                                                      isVisibleUnit = false;
-                                                    });
-                                                  },
-                                                ),
-                                              if (!isPriceLevelLoading)
-                                                Icon(
-                                                  Icons.arrow_drop_down,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                              const SizedBox(width: 6),
-                                            ],
-                                          ),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                          ),
-                                          enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: BorderSide(
-                                              color: Theme.of(
-                                                context,
-                                              ).dividerColor,
-                                            ),
-                                          ),
-                                          focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: BorderSide(
-                                              color: app_color,
-                                              width: 1.5,
-                                            ),
-                                          ),
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                horizontal: 14,
-                                                vertical: 14,
-                                              ),
-                                        ),
-                                      );
-                                    },
-                                    emptyBuilder: (context) => Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Text(
-                                        "No item found",
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 13,
-                                          color: Colors.redAccent,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-
-                                  if (isPriceLevelLoading)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 12),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          SizedBox(
-                                            height: 22,
-                                            width: 22,
-                                            child:
-                                                Theme.of(context).platform ==
-                                                    TargetPlatform.iOS
-                                                ? const CupertinoActivityIndicator(
-                                                    radius: 11,
-                                                  )
-                                                : CircularProgressIndicator(
-                                                    strokeWidth: 2.4,
-                                                    valueColor:
-                                                        AlwaysStoppedAnimation<
-                                                          Color
-                                                        >(app_color),
-                                                  ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            "Loading item details...",
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w500,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-
-                                  if (!isPriceLevelLoading) ...[
-                                    AnimatedSize(
-                                      duration: const Duration(
-                                        milliseconds: 250,
-                                      ),
-                                      child: Visibility(
-                                        visible: isVisibleUnit,
-                                        child: Column(
-                                          children: [
-                                            const SizedBox(height: 14),
-                                            DropdownButtonFormField<String>(
-                                              value: _selectedunit,
-                                              isExpanded: true,
-                                              items: unitdata.map((u) {
-                                                return DropdownMenuItem(
-                                                  value: u.name,
-                                                  child: Text(
-                                                    u.name,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                      color: Theme.of(
-                                                        context,
-                                                      ).colorScheme.onSurface,
-                                                    ),
-                                                  ),
-                                                );
-                                              }).toList(),
-                                              onChanged: (val) {
-                                                setStateDialog(() {
-                                                  _selectedunit = val!;
-                                                  itemQuantityController.text =
-                                                      "1";
-                                                  selectedMultiplier = unitdata
-                                                      .firstWhere(
-                                                        (u) =>
-                                                            u.name ==
-                                                            _selectedunit,
-                                                      )
-                                                      .multiplier;
-                                                  updateRateAndAmount();
-                                                });
-                                              },
-                                              decoration: _inputDecoration(
-                                                label: "Unit",
-                                                icon: Icons.straighten,
-                                                gradientColors: const [
-                                                  Colors.purple,
-                                                  Colors.deepPurpleAccent,
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-
-                                    const SizedBox(height: 14),
-
-                                    // 📝 Basic User Description (UniGas only) - one or
-                                    // more separate single-line boxes, "+" adds another.
-                                    // Sent as Tally's BASICUSERDESCRIPTION.LIST on this
-                                    // item's inventory entry (one object per box).
-                                    if (isUniGasSerial(serial_no) &&
-                                        isVisibleUnit) ...[
-                                      Row(
-                                        children: [
-                                          Text(
-                                            "Description (optional)",
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w500,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                          const Spacer(),
-                                          InkWell(
-                                            borderRadius:
-                                                BorderRadius.circular(20),
-                                            onTap: () {
-                                              setStateDialog(() {
-                                                itemDescriptionControllers.add(
-                                                  TextEditingController(),
-                                                );
-                                              });
-                                            },
-                                            child: Container(
-                                              padding: const EdgeInsets.all(
-                                                4,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: app_color.withOpacity(
-                                                  0.12,
-                                                ),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: Icon(
-                                                Icons.add,
-                                                size: 18,
-                                                color: app_color,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 6),
-                                      for (
-                                        int i = 0;
-                                        i < itemDescriptionControllers.length;
-                                        i++
-                                      ) ...[
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: TextField(
-                                                controller:
-                                                    itemDescriptionControllers[i],
-                                                maxLines: 1,
-                                                maxLength: 75,
-                                                decoration: InputDecoration(
-                                                  hintText:
-                                                      "Enter description",
-                                                  isDense: true,
-                                                  contentPadding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 14,
-                                                        vertical: 12,
-                                                      ),
-                                                  border: OutlineInputBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          14,
-                                                        ),
-                                                  ),
-                                                  focusedBorder:
-                                                      OutlineInputBorder(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              14,
-                                                            ),
-                                                        borderSide: BorderSide(
-                                                          color: app_color,
-                                                          width: 1.5,
-                                                        ),
-                                                      ),
-                                                ),
-                                              ),
-                                            ),
-                                            if (itemDescriptionControllers
-                                                    .length >
-                                                1)
-                                              IconButton(
-                                                icon: const Icon(
-                                                  Icons.close,
-                                                  size: 18,
-                                                  color: Colors.redAccent,
-                                                ),
-                                                onPressed: () {
-                                                  setStateDialog(() {
-                                                    itemDescriptionControllers
-                                                        .removeAt(i)
-                                                        .dispose();
-                                                  });
-                                                },
-                                              ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                      const SizedBox(height: 6),
-                                    ],
-
-                                    TextFormField(
-                                      controller: itemQuantityController,
-                                      keyboardType: TextInputType.number,
-                                      enabled:
-                                          !(isUniGasMeterReadingSerial &&
-                                              showMeterReading &&
-                                              _isQtyLockedByMeterReading(
-                                                voucherStartReadingController
-                                                    .text,
-                                                voucherEndReadingController
-                                                    .text,
-                                              )),
-                                      onChanged: (_) => updateRateAndAmount(),
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurface,
-                                      ),
-                                      decoration: _inputDecoration(
-                                        label: "Quantity",
-                                        icon: Icons.confirmation_num,
-                                        gradientColors: const [
-                                          Colors.green,
-                                          Colors.lightGreen,
-                                        ],
-                                      ),
-                                    ),
-
-                                    if (isUniGasMeterReadingSerial &&
-                                        showMeterReading) ...[
-                                      const SizedBox(height: 12),
-
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 0,
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Expanded(
-                                                  child: TextFormField(
-                                                    controller:
-                                                        voucherStartReadingController,
-                                                    keyboardType:
-                                                        TextInputType.number,
-                                                    onChanged: (_) {
-                                                      setState(() {
-                                                        final start =
-                                                            double.tryParse(
-                                                              voucherStartReadingController
-                                                                  .text
-                                                                  .trim(),
-                                                            );
-                                                        final end = double.tryParse(
-                                                          voucherEndReadingController
-                                                              .text
-                                                              .trim(),
-                                                        );
-
-                                                        if (start != null &&
-                                                            end != null &&
-                                                            end <= start) {
-                                                          meterReadingError =
-                                                              "End reading must be greater than start reading";
-                                                        } else {
-                                                          meterReadingError =
-                                                              null;
-                                                        }
-                                                        _syncQtyWithMeterReading(
-                                                          startController:
-                                                              voucherStartReadingController,
-                                                          endController:
-                                                              voucherEndReadingController,
-                                                          qtyController:
-                                                              itemQuantityController,
-                                                        );
-                                                      });
-                                                    },
-                                                    inputFormatters: [
-                                                      FilteringTextInputFormatter
-                                                          .digitsOnly,
-                                                    ],
-                                                    decoration: _inputDecoration(
-                                                      label: "Start Reading",
-                                                      icon: Icons.speed,
-                                                      gradientColors: const [
-                                                        Colors.orange,
-                                                        Colors.deepOrangeAccent,
-                                                      ],
-                                                    ).copyWith(counterText: ''),
-                                                  ),
-                                                ),
-
-                                                const SizedBox(width: 10),
-
-                                                Expanded(
-                                                  child: TextFormField(
-                                                    controller:
-                                                        voucherEndReadingController,
-                                                    keyboardType:
-                                                        TextInputType.number,
-                                                    onChanged: (_) {
-                                                      setState(() {
-                                                        final start =
-                                                            double.tryParse(
-                                                              voucherStartReadingController
-                                                                  .text
-                                                                  .trim(),
-                                                            );
-                                                        final end = double.tryParse(
-                                                          voucherEndReadingController
-                                                              .text
-                                                              .trim(),
-                                                        );
-
-                                                        if (start != null &&
-                                                            end != null &&
-                                                            end <= start) {
-                                                          meterReadingError =
-                                                              "End reading must be greater than start reading";
-                                                        } else {
-                                                          meterReadingError =
-                                                              null;
-                                                        }
-                                                        _syncQtyWithMeterReading(
-                                                          startController:
-                                                              voucherStartReadingController,
-                                                          endController:
-                                                              voucherEndReadingController,
-                                                          qtyController:
-                                                              itemQuantityController,
-                                                        );
-                                                      });
-                                                    },
-                                                    inputFormatters: [
-                                                      FilteringTextInputFormatter
-                                                          .digitsOnly,
-                                                    ],
-                                                    decoration: _inputDecoration(
-                                                      label: "End Reading",
-                                                      icon:
-                                                          Icons.speed_outlined,
-                                                      gradientColors:
-                                                          meterReadingError ==
-                                                              null
-                                                          ? const [
-                                                              Colors.red,
-                                                              Colors.redAccent,
-                                                            ]
-                                                          : const [
-                                                              Colors.red,
-                                                              Colors.deepOrange,
-                                                            ],
-                                                    ).copyWith(counterText: ''),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-
-                                            AnimatedSwitcher(
-                                              duration: const Duration(
-                                                milliseconds: 220,
-                                              ),
-                                              child: meterReadingError == null
-                                                  ? const SizedBox.shrink()
-                                                  : Padding(
-                                                      key: const ValueKey(
-                                                        "meter_error",
-                                                      ),
-                                                      padding:
-                                                          const EdgeInsets.only(
-                                                            top: 8,
-                                                            left: 4,
-                                                          ),
-                                                      child: Row(
-                                                        children: [
-                                                          const Icon(
-                                                            Icons
-                                                                .error_outline_rounded,
-                                                            color: Colors
-                                                                .redAccent,
-                                                            size: 16,
-                                                          ),
-                                                          const SizedBox(
-                                                            width: 6,
-                                                          ),
-                                                          Expanded(
-                                                            child: Text(
-                                                              meterReadingError!,
-                                                              style: GoogleFonts.poppins(
-                                                                color: Colors
-                                                                    .redAccent,
-                                                                fontSize: 11.5,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w500,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-
-                                    AnimatedSize(
-                                      duration: const Duration(
-                                        milliseconds: 250,
-                                      ),
-                                      child: Visibility(
-                                        visible: showRateField,
-                                        child: Column(
-                                          children: [
-                                            const SizedBox(height: 14),
-                                            TextFormField(
-                                              enabled: isRateFieldEnabled,
-                                              controller: itemRateController,
-                                              keyboardType:
-                                                  TextInputType.number,
-                                              onChanged: isRateFieldEnabled
-                                                  ? (_) => updateAmount()
-                                                  : null,
-                                              style: GoogleFonts.poppins(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w500,
-                                                color: isRateFieldEnabled
-                                                    ? Theme.of(
-                                                        context,
-                                                      ).colorScheme.onSurface
-                                                    : Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
-                                              ),
-                                              decoration: _currencyDecoration(
-                                                label: "Rate",
-                                                enabled: isRateFieldEnabled,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-
-                                    const SizedBox(height: 14),
-
-                                    TextFormField(
-                                      controller: itemAmountController,
-                                      enabled: false,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurface,
-                                      ),
-                                      decoration: _currencyDecoration(
-                                        label: "Amount",
-                                        enabled: false,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        SafeArea(
-                          top: false,
-                          child: Container(
-                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).cardColor,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.08),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, -2),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton(
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                    ),
-                                    onPressed: () {
-                                      setStateDialog(() {
-                                        resetItemDialogFields();
-                                      });
-
-                                      _selectedledger = null;
-                                      ledgerAmountController.clear();
-
-                                      Navigator.of(context).pop();
-                                    },
-                                    child: Text(
-                                      "Cancel",
-                                      style: GoogleFonts.poppins(
-                                        color: app_color,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: app_color,
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                      ),
-                                    ),
-                                    icon: const Icon(
-                                      Icons.check,
-                                      color: Colors.white,
-                                    ),
-                                    label: Text(
-                                      "Add Item",
-                                      style: GoogleFonts.poppins(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    onPressed: () {
-                                      if (_itemFormkey.currentState!
-                                          .validate()) {
-                                        addItem();
-                                      }
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  InputDecoration _inputDecoration({
-    required String label,
-    required IconData icon,
-    required List<Color> gradientColors,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: GoogleFonts.poppins(
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-      prefixIcon: Container(
-        margin: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: gradientColors),
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
-        ),
-        child: Icon(icon, color: Colors.white),
-      ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
-      ),
-      disabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: app_color, width: 1.5),
-      ),
-    );
-  }
-
-  InputDecoration _currencyDecoration({
-    required String label,
-    required bool enabled,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      filled: !enabled,
-      fillColor: !enabled
-          ? (Theme.of(context).brightness == Brightness.dark
-                ? Theme.of(context).colorScheme.surfaceContainerHighest
-                : Colors.grey.shade100)
-          : null,
-      labelStyle: GoogleFonts.poppins(
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-        color: enabled
-            ? Theme.of(context).colorScheme.onSurfaceVariant
-            : Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-      prefix: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: enabled
-                ? const [Colors.blue, Colors.blue]
-                : const [Colors.grey, Colors.grey],
-          ),
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
-        ),
-        child: currencySymbolWidget(
-          currencycode,
-          getCurrencySymbol(currencycode),
-          GoogleFonts.poppins(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
-      ),
-      disabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: app_color, width: 1.5),
-      ),
-    );
-  }
-
-  /*void _showLedgerDetailsPopup(BuildContext context) {
-    final TextEditingController _ledgerController =
-    TextEditingController();
-
-    _ledgerController.clear();
-    _selectedledger = null;
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-
-            // 🔝 Title with gradient icon
-            title: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [Colors.deepPurple, Colors.purpleAccent],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: const Icon(Icons.account_balance, color: Colors.white, size: 28),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  "Add Ledger",
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ],
-            ),
-
-            content: SingleChildScrollView(
-              child: Form(
-                key: _ledgerFormkey,
-                child: Column(
-                  children: [
-
-                    // 🔻 Ledger Dropdown
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 4,
-                        horizontal: 4,
-                      ),
-                      child: SizedBox(
-                        width: MediaQuery.of(context).size.width,
-                        child: TypeAheadField<String>(
-                        controller: _ledgerController,
-
-                        suggestionsCallback: (pattern) async {
-                          return ledgerdata
-                              .map<String>((ledger) => ledger['name'].toString())
-                              .where(
-                                (item) => item
-                                .toLowerCase()
-                                .contains(pattern.toLowerCase()),
-                          )
-                              .toList();
-                        },
-
-                        builder: (context, textController, focusNode) {
-                          return TextField(
-                            controller: textController,
-                            focusNode: focusNode,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.onSurface,
-                            ),
-
-
-
-                            decoration: InputDecoration(
-                              hintText: _selectedledger?.isNotEmpty == true
-                                  ? _selectedledger
-                                  : "Select Ledger",
-
-                              labelText: "Ledger Name",
-                              hintStyle: GoogleFonts.poppins(
-                                fontSize: 13,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              labelStyle: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                              prefixIcon: Container(
-                                margin: const EdgeInsets.all(8),
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.blue,
-                                      Colors.lightBlueAccent,
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  borderRadius: BorderRadius.all(
-                                    Radius.circular(12),
-                                  ),
-                                ),
-                                child: const Icon(
-                                  Icons.account_balance_wallet,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                              ),
-
-                              suffixIcon: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_ledgerController.text.isNotEmpty)
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.close,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                        size: 20,
-                                      ),
-                                      onPressed: () {
-                                        setState(() {
-                                          _ledgerController.clear();
-                                          _selectedledger = "";
-                                        });
-                                      },
-                                    ),
-
-                                  Icon(
-                                    Icons.arrow_drop_down,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  ),
-
-                                  const SizedBox(width: 6),
-                                ],
-                              ),
-
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(
-                                  color: app_color,
-                                  width: 1.5,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-
-                        decorationBuilder: (context, child) {
-                          return Material(
-                            elevation: 6,
-                            borderRadius: BorderRadius.circular(16),
-                            color: Theme.of(context).cardColor,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: child,
-                            ),
-                          );
-                        },
-
-                          itemBuilder: (context, String suggestion) {
-                            return ListTile(
-                              title: Text(
-                                suggestion,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(context).colorScheme.onSurface,
-                                ),
-                              ),
-                            );
-                          },
-
-                        onSelected: (String suggestion) {
-                          setState(() {
-                            _selectedledger = suggestion;
-                            _ledgerController.text = suggestion;
-                          });
-                        },
-
-                          emptyBuilder: (context) => Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text(
-                              "No ledger found",
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                color: Colors.redAccent,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    //const SizedBox(height: 6),
-
-                    /// Ledger Amount
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                      child: TextFormField(
-                        controller: ledgerAmountController,
-
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-
-                        keyboardType: TextInputType.number,
-
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'^-?\d*\.?\d*'),
-                          ),
-                        ],
-
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter amount';
-                          } else if (double.tryParse(value) == 0.0) {
-                            return 'Amount cannot be 0';
-                          }
-                          return null;
-                        },
-
-                        decoration: InputDecoration(
-                          labelText: "Amount",
-                          hintText: "Enter Amount",
-
-                          labelStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-
-                          hintStyle: GoogleFonts.poppins(
-                            fontSize: 13,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-
-                          errorStyle: GoogleFonts.poppins(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-
-                          prefix: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.orange,
-                                  Colors.redAccent,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(8),
-                              ),
-                            ),
-                            child: currencySymbolWidget(
-                              currencycode,
-                              getCurrencySymbol(currencycode),
-                              GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(
-                              color: Theme.of(context).dividerColor,
-                              width: 1,
-                            ),
-                          ),
-
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(
-                              color: app_color,
-                              width: 1.5,
-                            ),
-                          ),
-
-                          errorBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                              color: Colors.redAccent,
-                              width: 1.5,
-                            ),
-                          ),
-
-                          focusedErrorBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                              color: Colors.redAccent,
-                              width: 1.5,
-                            ),
-                          ),
-
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            ),
-
-            // Actions
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-                  ledgerAmountController.clear();
-                },
-                child: Text("Cancel", style: GoogleFonts.poppins(color: app_color)),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: app_color,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                ),
-                icon: const Icon(Icons.check, color: Colors.white),
-                label: Text("Add Ledger",
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    )),
-                onPressed: () {
-                  if (_ledgerFormkey.currentState!.validate()) {
-                    _ledgerFormkey.currentState!.save();
-                    addLedger();
-                  }
-                },
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }*/
 
   void _showLedgerDetailsPopup(BuildContext context) {
     final TextEditingController _ledgerController = TextEditingController();
@@ -9233,274 +5854,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     );
   }
 
-  void _recalculateTotals() {
-    // Agar items empty hain to heading chhupao
-    isVisibleItemHeading = saleItems.isNotEmpty;
-
-    // Total items ka price
-    totalPriceOfItems = saleItems.fold(0.0, (
-      double previousAmount,
-      SaleItem item,
-    ) {
-      return previousAmount +
-          (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-              double.parse(item.itemQuantity));
-    });
-
-    // VAT calculation
-    if (_selectedvatledger != 'Not Applicable') {
-      double vatPerc = vatperc / 100;
-
-      totalAmountForVatAppEntries = ledgerEntries
-          .where((entry) => entry.vatApp)
-          .fold(0.0, (double prev, LedgerEntry entry) {
-            return prev + entry.ledgerAmount;
-          });
-
-      ledgerVatAmount = totalAmountForVatAppEntries * vatPerc;
-      itemsVatAmount = double.parse(
-        (totalPriceOfItems * vatPerc).toStringAsFixed(decimal!),
-      );
-      totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = formatter
-          .format(roundedtotalVatAmount)
-          .toString();
-    } else {
-      totalVatAmount = 0;
-      roundedtotalVatAmount = double.parse(
-        totalVatAmount.toStringAsFixed(decimal!),
-      );
-      NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-      controller_vatamt.text = formatter.format(0).toString();
-    }
-
-    // Ledger totals
-    totalAmountOfLedgers = ledgerEntries.fold(
-      0.0,
-      (double prev, entry) => prev + entry.ledgerAmount,
-    );
-
-    // Final total
-    totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-    roundedtotalAmount = double.parse(totalAmount.toStringAsFixed(decimal!));
-
-    NumberFormat formatter = NumberFormat('#,##0.${'0' * decimal!}', 'en_US');
-    controller_totalamt.text = formatter.format(roundedtotalAmount).toString();
-  }
-
-  void addItem() {
-    final itemName = _selecteditem;
-    final itemQuantity = itemQuantityController.text;
-    final itemPrice = itemRateController.text;
-    final itemAmount = itemAmountController.text;
-    final itemLocation = selectedLocation;
-    final itemUnit = _selectedunit;
-
-    final meterFrom = voucherStartReadingController.text.trim();
-    final meterTo = voucherEndReadingController.text.trim();
-
-    final qty = double.tryParse(itemQuantity.replaceAll(',', '').trim()) ?? 0;
-
-    if (itemQuantity.trim().isEmpty || qty <= 0) {
-      showAppMessage(context, "Quantity must be greater than 0");
-      return;
-    }
-
-    if (isUniGasMeterReadingSerial) {
-      final meterFrom = voucherStartReadingController.text.trim();
-      final meterTo = voucherEndReadingController.text.trim();
-
-      // ✅ If one field is entered and other is empty, restrict saving
-      if ((meterFrom.isNotEmpty && meterTo.isEmpty) ||
-          (meterFrom.isEmpty && meterTo.isNotEmpty)) {
-        showAppMessage(context, "Please enter both start and end readings");
-        return;
-      }
-
-      // ✅ If both fields have value, validate end > start
-      if (meterFrom.isNotEmpty && meterTo.isNotEmpty) {
-        final start = BigInt.tryParse(meterFrom);
-        final end = BigInt.tryParse(meterTo);
-
-        if (start == null || end == null || end <= start) {
-          showAppMessage(
-            context,
-            "End reading must be greater than start reading",
-          );
-          return;
-        }
-      }
-    }
-
-    if (itemName.isNotEmpty && itemPrice.isNotEmpty) {
-      Navigator.of(context).pop();
-
-      double parsedAmount = double.parse(itemAmount.replaceAll(',', ''));
-      double parsedPrice = double.parse(itemPrice.replaceAll(',', ''));
-      String parsedQuantity = itemQuantity.replaceAll(',', '');
-
-      final qty_unit = '$parsedQuantity $itemUnit';
-
-      Map<String, dynamic> batchAllocation = {
-        'GODOWNNAME': itemLocation,
-        'AMOUNT': parsedAmount,
-        'ACTUALQTY': qty_unit,
-        'BILLEDQTY': qty_unit,
-      };
-
-      // Check if the item already exists in the list with the same name and price
-      int existingIndex = saleItems.indexWhere(
-        (item) =>
-            item.itemName == itemName &&
-            double.parse(item.itemPrice.toStringAsFixed(decimal!)) ==
-                parsedPrice &&
-            item.itemUnit == itemUnit,
-      );
-      if (existingIndex != -1) {
-        // Item already exists with the same name, price, and unit, update its quantity and amount
-        SaleItem existingItem = saleItems[existingIndex];
-        // BigInt, not int - a manually-typed quantity can run past int64
-        // range and int.parse() throws FormatException on that instead of
-        // silently erroring, crashing the add-item flow outright.
-        String newQuantity =
-            (BigInt.parse(existingItem.itemQuantity) +
-                    BigInt.parse(parsedQuantity))
-                .toString();
-        double newAmount = parsedPrice * BigInt.parse(newQuantity).toDouble();
-        saleItems[existingIndex] = existingItem
-            .updateQuantity(newQuantity)
-            .updateItemAmount(newAmount);
-      } else {
-        // Item doesn't exist, create a new SaleItem object and add it to the list
-        final newItem = SaleItem(
-          itemName: itemName,
-          itemQuantity: parsedQuantity,
-          itemPrice: parsedPrice,
-          itemAmount: parsedAmount,
-          itemLocation: itemLocation,
-          itemUnit: itemUnit,
-          accountingAllocationList: {},
-          batchAllocationList: batchAllocation,
-          meterFrom: meterFrom,
-          meterTo: meterTo,
-          basicUserDescriptions: isUniGasSerial(serial_no)
-              ? itemDescriptionControllers
-                    .map((c) => c.text.trim())
-                    .where((t) => t.isNotEmpty)
-                    .toList()
-              : const [],
-          itemMasterId: int.tryParse(selectedItemMasterId ?? ''),
-        );
-
-        setState(() {
-          saleItems.add(newItem);
-        });
-      }
-      for (final c in itemDescriptionControllers) {
-        c.dispose();
-      }
-      itemDescriptionControllers = [TextEditingController()];
-
-      setState(() {
-        if (saleItems.isEmpty) {
-          isVisibleItemHeading = false;
-        } else {
-          isVisibleItemHeading = true;
-        }
-
-        totalPriceOfItems = saleItems.fold(0.0, (
-          double previousAmount,
-          SaleItem item,
-        ) {
-          return previousAmount +
-              (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                  double.parse(item.itemQuantity));
-        });
-
-        if (_selectedvatledger != 'Not Applicable') {
-          // Calculate the total price of items
-
-          double vat_perc = vatperc / 100;
-
-          totalAmountForVatAppEntries = ledgerEntries
-              .where((entry) => entry.vatApp)
-              .fold(0.0, (double previousAmount, LedgerEntry entry) {
-                return previousAmount + entry.ledgerAmount;
-              });
-
-          ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-
-          itemsVatAmount = double.parse(
-            (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-          );
-          totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(roundedtotalVatAmount);
-          controller_vatamt.text = formattedVat.toString();
-        } else {
-          totalVatAmount = 0;
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(0);
-          controller_vatamt.text = formattedVat.toString();
-        }
-
-        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-          double previousAmount,
-          LedgerEntry entry,
-        ) {
-          return previousAmount + entry.ledgerAmount;
-        });
-
-        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-        roundedtotalAmount = double.parse(
-          totalAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalAmount);
-        controller_totalamt.text = formattedtotal.toString();
-
-        _selecteditem = '${itemdata[0]['name']}';
-        if (locationsdata.isNotEmpty) {
-          selectedLocation = locationsdata[0];
-          setState(() {
-            isVisibleLocation = true;
-          });
-        } else {
-          setState(() {
-            isVisibleLocation = false;
-          });
-        }
-        _updateUnitDropdown(_selecteditem);
-        itemQuantityController.text = 1.toString();
-        itemAmountController.clear();
-        itemRateController.clear();
-      });
-    }
-  }
-
+  /// Thin wrapper: the guard/`Navigator.pop`/dialog-local resets stay here
+  /// (need `context`/`_selectedledger`/`ledgerAmountController`, all
+  /// widget-local); the actual `ledgerEntries` mutation + totals recompute
+  /// is `_notifier.addOrMergeLedger` - see that method's doc-comment for the
+  /// pre-existing `vatapplicable` crash this preserves verbatim.
   void addLedger() {
     Map<String, dynamic>? specificLedger = ledgerdata.firstWhere(
       (ledger) => ledger['name'] == _selectedledger,
@@ -9509,185 +5867,18 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     final ledgerName = specificLedger['name'];
     final ledgerAmount = ledgerAmountController.text;
 
-    int vatApplicable = specificLedger['vatapplicable'];
-    final vatApp = vatApplicable == 1 ? true : false;
-
     if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      // Create a new SaleItem object and add it to the list
       Navigator.of(context).pop();
-      int existingIndex = ledgerEntries.indexWhere(
-        (entry) => entry.ledgerName == ledgerName,
-      );
       double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
-
-      if (existingIndex != -1) {
-        // Ledger already exists, update its amount
-        LedgerEntry existingLedger = ledgerEntries[existingIndex];
-        double newAmount = existingLedger.ledgerAmount + parsedAmount;
-
-        // Update vatApp if necessary
-        bool newVatApp =
-            existingLedger.vatApp; // Initialize with the existing value
-        newVatApp = vatApp;
-
-        ledgerEntries[existingIndex] = existingLedger.updateAmount(
-          newAmount,
-          newVatApp,
-        );
-      } else {
-        // Ledger doesn't exist, create a new LedgerEntry object and add it to the list
-        final newItem = LedgerEntry(
-          ledgerName: ledgerName,
-          ledgerAmount: parsedAmount,
-          vatApp: vatApp,
-        );
-        setState(() {
-          ledgerEntries.add(newItem);
-        });
-      }
-      setState(() {
-        if (ledgerEntries.isEmpty) {
-          isVisibleLedgerHeading = false;
-        } else {
-          isVisibleLedgerHeading = true;
-        }
-
-        totalPriceOfItems = saleItems.fold(0.0, (
-          double previousAmount,
-          SaleItem item,
-        ) {
-          return previousAmount +
-              (double.parse(item.itemPrice.toStringAsFixed(decimal!)) *
-                  double.parse(item.itemQuantity));
-        });
-
-        if (_selectedvatledger != 'Not Applicable') {
-          // Calculate the total ledger amount for entries with vatApp set to true
-          totalAmountForVatAppEntries = ledgerEntries
-              .where((entry) => entry.vatApp)
-              .fold(0.0, (double previousAmount, LedgerEntry entry) {
-                return previousAmount + entry.ledgerAmount;
-              });
-
-          double vat_perc = vatperc / 100;
-
-          itemsVatAmount = double.parse(
-            (totalPriceOfItems * vat_perc).toStringAsFixed(decimal!),
-          );
-          ledgerVatAmount = totalAmountForVatAppEntries * vat_perc;
-
-          /*print('Total Ledger Amount for VAT-Applicable Entries: $totalAmountForVatAppEntries');
-          print('5% VAT Amount: $ledgerVatAmount');*/
-
-          totalVatAmount = itemsVatAmount + ledgerVatAmount;
-
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(roundedtotalVatAmount);
-          controller_vatamt.text = formattedVat.toString();
-        } else {
-          totalVatAmount = 0;
-          roundedtotalVatAmount = double.parse(
-            totalVatAmount.toStringAsFixed(decimal!),
-          );
-          NumberFormat formatter = NumberFormat(
-            '#,##0.${'0' * decimal!}',
-            'en_US',
-          );
-          String formattedVat = formatter.format(0);
-          controller_vatamt.text = formattedVat.toString();
-        }
-        totalAmountOfLedgers = ledgerEntries.fold(0.0, (
-          double previousAmount,
-          LedgerEntry entry,
-        ) {
-          return previousAmount + entry.ledgerAmount;
-        });
-
-        totalAmount = totalPriceOfItems + totalAmountOfLedgers + totalVatAmount;
-        roundedtotalAmount = double.parse(
-          totalAmount.toStringAsFixed(decimal!),
-        );
-        NumberFormat formatter = NumberFormat(
-          '#,##0.${'0' * decimal!}',
-          'en_US',
-        );
-        String formattedtotal = formatter.format(roundedtotalAmount);
-        controller_totalamt.text = formattedtotal.toString();
-        _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-        ledgerAmountController.clear();
-      });
+      _notifier.addOrMergeLedger(ledgerName, parsedAmount);
+      _syncTotalsControllers();
+      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+      ledgerAmountController.clear();
     }
   }
 
-  late String company_trn, company_address, company_emirate, company_country;
-
-  Future<void> _initSharedPreferences() async {
+  Future<void> _initWidgetPrefs() async {
     prefs = await SharedPreferences.getInstance();
-
-    setState(() {
-      company = prefs.getString('company_name');
-      company_lowercase = company!.replaceAll(' ', '').toLowerCase();
-      serial_no = prefs.getString('serial_no');
-      username = prefs.getString('username');
-      token = prefs.getString('token') ?? '';
-      currencycode = prefs.getString('currencycode') ?? 'AED';
-      startfrom =
-          prefs.getString('startfrom') ??
-          DateFormat('yyyyMMdd').format(yearStartDate);
-      company_trn = prefs.getString("company_trn") ?? "null";
-      company_address = prefs.getString("company_address") ?? "null";
-      company_emirate = prefs.getString("company_emirate") ?? "null";
-      company_country = prefs.getString("company_country") ?? "null";
-
-      vatperc = prefs.getDouble('vatperc') ?? 5.0;
-
-      decimal = prefs.getInt('decimalplace') ?? 2;
-
-      saledate = DateTime.now();
-      saledatestring = _dateFormat.format(saledate);
-      saledatetxt = formatlastsaledate(saledatestring);
-      _dateController.text = saledatetxt;
-
-      refdate = DateTime.now();
-      refdatestring = _dateFormat.format(refdate);
-      refdatetxt = formatlastsaledate(refdatestring);
-      _refdateController.text = refdatetxt;
-
-      SecuritybtnAcessHolder = prefs.getString('secbtnaccess');
-
-      String? email_nav = prefs.getString('email_nav');
-      String? name_nav = prefs.getString('name_nav');
-
-      itemQuantityController.text = 1.toString();
-      controller_vatamt.text = 0.toString();
-
-      controller_totalamt.text = 0.toString();
-
-      if (email_nav != null && name_nav != null) {
-        name = name_nav;
-        email = email_nav;
-      }
-      if (SecuritybtnAcessHolder == "True") {
-        isRolesVisible = true;
-        isUserVisible = true;
-      } else {
-        isRolesVisible = false;
-        isUserVisible = false;
-      }
-    });
-
-    await loadData();
-    if (mounted) {
-      setState(() {
-        _isInitialDataLoaded = true;
-      });
-    }
   }
 
   @override
@@ -9702,7 +5893,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
     _animation = Tween<double>(begin: 1.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
-    _initSharedPreferences();
+    _initWidgetPrefs();
   }
 
   @override
@@ -9714,14 +5905,6 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
       c.dispose();
     }
     super.dispose();
-  }
-
-  bool isValidEmail(String email) {
-    // Simple email validation pattern
-    final RegExp emailRegex = RegExp(
-      r'^[\w-]+(\.[\w-]+)*@[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*(\.[a-zA-Z]{2,})$',
-    );
-    return emailRegex.hasMatch(email);
   }
 
   // Skeleton stand-in for the entry form while the initial dropdown/lookup
@@ -9750,6 +5933,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(deliveryNoteRegistrationNotifierProvider);
     if (!_isInitialDataLoaded) {
       return Scaffold(
         bottomNavigationBar: const AppBottomNav(
@@ -9991,10 +6175,8 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                     );
                                   }).toList(),
                                   onChanged: (value) async {
-                                    setState(() {
-                                      _selectedvchtypename = value!;
-                                      fetchvchnos(_selectedvchtypename);
-                                    });
+                                    _notifier.setSelectedVchType(value!);
+                                    fetchvchnos(_selectedvchtypename);
                                   },
                                 ),
 
@@ -10091,11 +6273,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                                       size: 20,
                                                     ),
                                                     onPressed: () {
+                                                      _partyLedgerController
+                                                          .clear();
+                                                      _notifier
+                                                          .clearSelectedPartyLedger();
                                                       setState(() {
-                                                        _partyLedgerController
-                                                            .clear();
-                                                        _selectedpartyledger =
-                                                            "";
                                                         selectedPartyLedgerPriceLevel =
                                                             null;
                                                       });
@@ -10175,21 +6357,21 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                             );
                                           },
                                       onSelected: (String suggestion) {
+                                        _notifier.selectPartyLedger(suggestion);
+                                        _partyLedgerController.text =
+                                            suggestion;
                                         setState(() {
-                                          _selectedpartyledger = suggestion;
-                                          _partyLedgerController.text =
-                                              suggestion;
                                           selectedPartyLedgerPriceLevel =
                                               partyLedgerPriceLevelMap[suggestion];
-                                          debugPrint(
-                                            'selected party ledger -> $_selectedpartyledger',
-                                          );
-                                          debugPrint(
-                                            'selected price level -> $selectedPartyLedgerPriceLevel',
-                                          );
-                                          FocusManager.instance.primaryFocus
-                                              ?.unfocus();
                                         });
+                                        debugPrint(
+                                          'selected party ledger -> $_selectedpartyledger',
+                                        );
+                                        debugPrint(
+                                          'selected price level -> $selectedPartyLedgerPriceLevel',
+                                        );
+                                        FocusManager.instance.primaryFocus
+                                            ?.unfocus();
                                       },
                                       emptyBuilder: (context) => Padding(
                                         padding: const EdgeInsets.all(12.0),
@@ -10232,9 +6414,7 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                     );
                                   }).toList(),
                                   onChanged: (value) async {
-                                    setState(() {
-                                      _selectedsalesledger = value!;
-                                    });
+                                    _notifier.setSelectedSalesLedger(value!);
                                   },
                                 ),
                               ],
@@ -10383,31 +6563,12 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                             item.meterTo,
                                           ),
                                       onIncrement: () {
-                                        int currentQty =
-                                            int.tryParse(item.itemQuantity) ??
-                                            0;
-                                        setState(() {
-                                          item.itemQuantity = (currentQty + 1)
-                                              .toString();
-                                          _recalculateTotals();
-                                        });
+                                        _notifier.incrementItemQuantity(index);
+                                        _syncTotalsControllers();
                                       },
                                       onDecrement: () {
-                                        int currentQty =
-                                            int.tryParse(item.itemQuantity) ??
-                                            0;
-                                        if (currentQty > 1) {
-                                          setState(() {
-                                            item.itemQuantity = (currentQty - 1)
-                                                .toString();
-                                            _recalculateTotals();
-                                          });
-                                        } else {
-                                          setState(() {
-                                            saleItems.removeAt(index);
-                                            _recalculateTotals();
-                                          });
-                                        }
+                                        _notifier.decrementItemQuantity(index);
+                                        _syncTotalsControllers();
                                       },
                                       onDelete: () {
                                         _deleteSaleItem(index);
@@ -10583,112 +6744,11 @@ class _DeliverynoteregistrationPageState extends State<Deliverynoteregistration>
                                       items: vatledgerdata,
                                       itemLabel: (item) => item,
                                       onChanged: (value) {
-                                        setState(() {
-                                          _selectedvatledger = value!;
-
-                                          // 👇 VAT calculation logic intact
-                                          totalPriceOfItems = saleItems.fold(
-                                            0.0,
-                                            (double prev, SaleItem item) =>
-                                                prev +
-                                                (double.parse(
-                                                      item.itemPrice
-                                                          .toStringAsFixed(
-                                                            decimal!,
-                                                          ),
-                                                    ) *
-                                                    double.parse(
-                                                      item.itemQuantity,
-                                                    )),
-                                          );
-
-                                          totalAmountOfLedgers = ledgerEntries
-                                              .fold(
-                                                0.0,
-                                                (
-                                                  double prev,
-                                                  LedgerEntry entry,
-                                                ) => prev + entry.ledgerAmount,
-                                              );
-
-                                          if (_selectedvatledger ==
-                                              'Not Applicable') {
-                                            totalVatAmount = 0;
-                                            roundedtotalVatAmount =
-                                                double.parse(
-                                                  totalVatAmount
-                                                      .toStringAsFixed(
-                                                        decimal!,
-                                                      ),
-                                                );
-                                            NumberFormat formatter =
-                                                NumberFormat(
-                                                  '#,##0.${'0' * decimal!}',
-                                                  'en_US',
-                                                );
-                                            controller_vatamt.text = formatter
-                                                .format(0);
-                                          } else {
-                                            double
-                                            totalAmountForLedgerVatAppEntries =
-                                                ledgerEntries
-                                                    .where(
-                                                      (entry) => entry.vatApp,
-                                                    )
-                                                    .fold(
-                                                      0.0,
-                                                      (
-                                                        double prev,
-                                                        LedgerEntry entry,
-                                                      ) =>
-                                                          prev +
-                                                          entry.ledgerAmount,
-                                                    );
-
-                                            double vat_perc = vatperc / 100;
-                                            itemsVatAmount = double.parse(
-                                              (totalPriceOfItems * vat_perc)
-                                                  .toStringAsFixed(decimal!),
+                                        _notifier
+                                            .setSelectedVatLedgerAndRecalculate(
+                                              value!,
                                             );
-                                            ledgerVatAmount =
-                                                totalAmountForLedgerVatAppEntries *
-                                                vat_perc;
-                                            totalVatAmount =
-                                                itemsVatAmount +
-                                                ledgerVatAmount;
-
-                                            roundedtotalVatAmount =
-                                                double.parse(
-                                                  totalVatAmount
-                                                      .toStringAsFixed(
-                                                        decimal!,
-                                                      ),
-                                                );
-                                            NumberFormat formatter =
-                                                NumberFormat(
-                                                  '#,##0.${'0' * decimal!}',
-                                                  'en_US',
-                                                );
-                                            controller_vatamt.text = formatter
-                                                .format(roundedtotalVatAmount);
-                                          }
-
-                                          totalAmount =
-                                              totalPriceOfItems +
-                                              totalAmountOfLedgers +
-                                              totalVatAmount;
-                                          roundedtotalAmount = double.parse(
-                                            totalAmount.toStringAsFixed(
-                                              decimal!,
-                                            ),
-                                          );
-                                          NumberFormat formatter = NumberFormat(
-                                            '#,##0.${'0' * decimal!}',
-                                            'en_US',
-                                          );
-                                          controller_totalamt.text = formatter
-                                              .format(roundedtotalAmount);
-                                        });
+                                        _syncTotalsControllers();
                                       },
                                     ),
                                   ),
