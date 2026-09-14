@@ -4643,6 +4643,20 @@ class _SalesOrderRegistrationPageState
             }
           });
           _updateUnitDropdown(_selecteditem);
+          // `loadData()` already fetches/computes the voucher-number
+          // suggestion into `vchnos`, but nothing ever wrote it into
+          // `_vchnoController` on initial load - only the widget-side
+          // `fetchvchnos()` wrapper does that, and that's only ever
+          // called from manual interactions (changing the voucher-type
+          // dropdown), never on first load. `generateNextVchNo` is
+          // pure/derives from the already-loaded `vchnos` list, so this
+          // doesn't re-fetch anything. Guarded on emptiness so this
+          // doesn't stomp a manual edit on a later, unrelated state
+          // change.
+          if (_vchnoController.text.isEmpty) {
+            _vchnoController.text = _notifier.nextVchNoSuggestion ??
+                _notifier.generateNextVchNo(_notifier.vchnos);
+          }
         }
       },
     );

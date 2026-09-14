@@ -681,6 +681,15 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
   final TextEditingController _refdateController = TextEditingController();
 
   final TextEditingController _vchnoController = TextEditingController();
+  // Guards the one-time initial-load voucher-number auto-fill in
+  // `_syncDateControllers` so it doesn't re-trigger every time the
+  // notifier's state changes afterward (e.g. adding an item, picking a
+  // ledger) - `_vchnoController.text.isEmpty` alone isn't a safe guard,
+  // since an admin manually clearing the field to type their own number
+  // would look identical to "never filled yet" and get silently
+  // overwritten back to the suggested number on the very next unrelated
+  // state change.
+  bool _vchNoAutoFillTriggered = false;
 
   late DateTime now = DateTime.now();
 
@@ -800,7 +809,6 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     final locationsdata = vm.locationsData;
     final ledgerdata = vm.ledgerData;
     final currencycode = vm.currencyCode;
-    final serial_no = vm.serialNo;
     // UniGas uses a completely separate POS Tax Invoice format (the old
     // A4-style layout is retired for this serial type) - see
     // _generateUniGasTaxInvoicePDF.
@@ -2590,7 +2598,6 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     final locationsdata = vm.locationsData;
     final ledgerdata = vm.ledgerData;
     final currencycode = vm.currencyCode;
-    final serial_no = vm.serialNo;
     // Resolve the van (vehicle) allocated to this device's serial number
     // from the locally-cached 'spectra_allocations' SharedPreferences
     // value rather than making a fresh network call.
@@ -7598,6 +7605,33 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
   void _syncDateControllers(SalesRegistrationState state) {
     _dateController.text = state.saledatetxt;
     _refdateController.text = state.refdatetxt;
+    // `loadData()` fetches the voucher-number list internally, but nothing
+    // wrote a suggestion into this controller on initial load - only the
+    // widget-side `fetchvchnos()` wrapper did that, and that's only ever
+    // called from manual interactions (changing the voucher-type dropdown,
+    // the vchno date-range picker), never on first load. Gated on
+    // `_vchNoAutoFillTriggered` (a one-shot flag, not just text emptiness)
+    // so this can't re-fire and stomp an admin's manual clear/edit on a
+    // later, unrelated state change. Computed server-side
+    // (`fetchNextVoucherNumber`) rather than via the local
+    // `generateNextVchNo()` pattern-match, which used to mean re-scanning
+    // this company's entire voucher history on the UI thread on every
+    // screen open.
+    if (!_vchNoAutoFillTriggered &&
+        state.isInitialDataLoaded &&
+        state.selectedVchTypeName != null) {
+      _vchNoAutoFillTriggered = true;
+      _notifier
+          .fetchNextVoucherNumber(
+            state.selectedVchTypeName!,
+            DateTime(DateTime.now().year, 12, 31),
+          )
+          .then((vchNo) {
+            if (mounted && _vchnoController.text.isEmpty) {
+              setState(() => _vchnoController.text = vchNo);
+            }
+          });
+    }
   }
 
   @override
@@ -7697,12 +7731,9 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     final isGodownLocked = vm.isGodownLocked;
     final _isLoading = vm.isLoading;
     final _isInitialDataLoaded = vm.isInitialDataLoaded;
-    final hostname = vm.hostname;
     final company = vm.company;
     final company_lowercase = vm.companyLowercase;
-    final serial_no = vm.serialNo;
     final username = vm.username;
-    final token = vm.token;
     final currencycode = vm.currencyCode;
     final startfrom = vm.startfrom;
     final company_trn = vm.companyTrn;
@@ -7810,8 +7841,15 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
                             ],
                             controller: _dateController,
                             readOnly: true,
-                            enabled: !isUniGasSerial,
-                            suffixIcon: isUniGasSerial
+                            // Locked for a restricted (e.g. driver)
+                            // company-user, same admin check
+                            // canEditVoucherNo uses - NOT isUniGasSerial,
+                            // which is a company-wide flag true for every
+                            // user (including admins) of a UniGas-format
+                            // company and previously locked the date for
+                            // all of them regardless of role.
+                            enabled: canEditVoucherNo,
+                            suffixIcon: !canEditVoucherNo
                                 ? Icon(
                                     Icons.lock,
                                     color: Theme.of(
@@ -7819,7 +7857,7 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
                                     ).colorScheme.onSurfaceVariant,
                                   )
                                 : null,
-                            onTap: isUniGasSerial
+                            onTap: !canEditVoucherNo
                                 ? null
                                 : () {
                                     _selectsaleDate(context);
@@ -8343,6 +8381,9 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
                               signatureBytes: receiverSignatureBytes,
                               onCaptured: (bytes) => setState(() {
                                 receiverSignatureBytes = bytes;
+                              }),
+                              onRemove: () => setState(() {
+                                receiverSignatureBytes = null;
                               }),
                             ),
                           ],

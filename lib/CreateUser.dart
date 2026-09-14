@@ -660,21 +660,4 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
       lastName: lastName,
     );
   }
-
-  /*void _submitForm() {
-    final name = controller_name.text;
-    final email = controller_username.text;
-    final password = controller_password.text;
-    final role = selectedrole?["role_name"];
-
-    if (name.isEmpty || email.isEmpty || role == null) {
-      showAppMessage(context, "Please fill all required fields.");
-      return;
-    }
-
-
-    _updateFocus();
-    final generatedPassword = _generateRandomPassword(); // generates 5-char password
-    userRegistration(serial_no!, email, generatedPassword, role, name);
-  }*/
 }

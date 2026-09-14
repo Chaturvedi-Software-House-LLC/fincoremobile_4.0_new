@@ -475,6 +475,12 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       final summary = await _ref
           .read(dashboardRepositoryProvider)
           .summary(from: from, to: to);
+      // The screen can navigate away (disposing this provider) while any
+      // of this method's several awaits are still in flight - writing to
+      // `state` afterward throws "Tried to use DashboardNotifier after
+      // `dispose` was called." Every await boundary below needs this same
+      // guard before touching `state` again.
+      if (!mounted) return;
 
       final salesValue = parseMoneyField(summary['sales']);
       final purchaseValue = parseMoneyField(summary['purchase']);
@@ -502,12 +508,15 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       await _prefs.setDouble('payable', payableValue);
       await _prefs.setDouble('cash', cashValue);
     } on ApiException catch (e) {
+      if (!mounted) return;
       state = state.copyWith(errorMessage: e.message);
     } catch (e) {
+      if (!mounted) return;
       state = state.copyWith(
         errorMessage: 'Could not load dashboard data. Please try again.',
       );
     }
+    if (!mounted) return;
 
     try {
       if (_linechartdashprefs == 'True' ||
@@ -523,6 +532,7 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
             final chartRows = await _ref
                 .read(dashboardRepositoryProvider)
                 .salesChart(from: from, to: to, groupBy: 'month');
+            if (!mounted) return;
 
             if (chartRows.isEmpty) {
               state = state.copyWith(
@@ -578,6 +588,7 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
             final breakdownRows = await _ref
                 .read(dashboardRepositoryProvider)
                 .voucherTypeBreakdown(from: from, to: to);
+            if (!mounted) return;
 
             final salesSlices = breakdownRows
                 .where((row) => parseMoneyField(row['sales']).abs() > 0)
@@ -632,8 +643,10 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       state = state.copyWith(errorMessage: e.toString());
     }
+    if (!mounted) return;
 
     state = state.copyWith(isLoading: false);
   }

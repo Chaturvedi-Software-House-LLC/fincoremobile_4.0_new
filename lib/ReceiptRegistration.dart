@@ -4241,7 +4241,8 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
 
     _dateController.text = receiptdatetxt;
     controller_totalamt.text = _s.formattedTotalBillAmount;
-    _vchnoController.text = _notifier.generateNextVchNo(vchnos);
+    _vchnoController.text =
+        _notifier.nextVchNoSuggestion ?? _notifier.generateNextVchNo(vchnos);
   }
 
   Future<void> _selectDateRangeVchNo(BuildContext context) async {
@@ -4308,7 +4309,8 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
     }
 
     // GENERATE NEXT
-    _vchnoController.text = _notifier.generateNextVchNo(vchnos);
+    _vchnoController.text =
+        _notifier.nextVchNoSuggestion ?? _notifier.generateNextVchNo(vchnos);
   }
 
   @override
@@ -4462,8 +4464,14 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
                               ],
                               controller: _dateController,
                               readOnly: true,
-                              enabled: !isUniGasSerial,
-                              suffixIcon: isUniGasSerial
+                              // Locked for a restricted (e.g. driver)
+                              // company-user, same admin check
+                              // canEditVoucherNo uses just below - NOT
+                              // isUniGasSerial, which is a company-wide
+                              // flag true for every user (including
+                              // admins) of a UniGas-format company.
+                              enabled: canEditVoucherNo,
+                              suffixIcon: !canEditVoucherNo
                                   ? Icon(
                                       Icons.lock,
                                       color: Theme.of(
@@ -4471,7 +4479,7 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
                                       ).colorScheme.onSurfaceVariant,
                                     )
                                   : null,
-                              onTap: isUniGasSerial
+                              onTap: !canEditVoucherNo
                                   ? null
                                   : () {
                                       _selectreceiptDate(context);
@@ -5479,6 +5487,9 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
                                 signatureBytes: receiverSignatureBytes,
                                 onCaptured: (bytes) => setState(() {
                                   receiverSignatureBytes = bytes;
+                                }),
+                                onRemove: () => setState(() {
+                                  receiverSignatureBytes = null;
                                 }),
                               ),
                             ],

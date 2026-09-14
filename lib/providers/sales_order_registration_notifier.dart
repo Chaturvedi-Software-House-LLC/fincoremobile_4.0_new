@@ -312,6 +312,12 @@ class SalesOrderRegistrationNotifier
   List<Map<String, dynamic>> ledgerdata = [];
   List<String> vchnos = [];
 
+  /// Server-computed suggestion from the most recent [fetchVchNos] call -
+  /// see `next-voucher-number.helper.ts`. Null until the first successful
+  /// fetch, in which case callers fall back to the local (now O(n),
+  /// Set-based) `generateNextVchNo(vchnos)` computation.
+  String? nextVchNoSuggestion;
+
   final TallyApiClient _tallyApiClient = TallyApiClient();
   final Map<String, int> _ledgerMasterIdByName = {};
   final Map<String, int> _godownMasterIdByName = {};
@@ -605,11 +611,19 @@ class SalesOrderRegistrationNotifier
 
   /// Verbatim port of `generateNextVchNo` (a pure function of its
   /// argument - kept as a method taking [vchnos] explicitly, same as the
-  /// original, rather than reading the field implicitly).
+  /// original, rather than reading the field implicitly). Duplicate-number
+  /// tracking per pattern uses a `Set<int>` (O(1) membership) rather than a
+  /// `List` + `.any(...)` linear scan - with a real company's full voucher
+  /// history (tens/hundreds of thousands of numbers, almost always one
+  /// dominant pattern) the old scan was O(n^2) and could block the UI
+  /// thread for minutes once this started being called from the
+  /// initial-load path (previously only manual, much-smaller-scoped
+  /// interactions triggered it).
   String generateNextVchNo(List<String> vchnos) {
     if (vchnos.isEmpty) return "1";
 
-    Map<String, List<Map<String, dynamic>>> patternGroups = {};
+    final Map<String, ({int firstLength, Set<int> numbers})> patternGroups =
+        {};
 
     for (String vch in vchnos) {
       List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
@@ -637,19 +651,11 @@ class SalesOrderRegistrationNotifier
 
         String patternKey = prefix + "#" + suffix;
 
-        patternGroups.putIfAbsent(patternKey, () => []);
-
-        bool exists = patternGroups[patternKey]!.any(
-          (e) => e["number"] == number,
+        final group = patternGroups.putIfAbsent(
+          patternKey,
+          () => (firstLength: numberPart.length, numbers: <int>{}),
         );
-
-        if (!exists) {
-          patternGroups[patternKey]!.add({
-            "original": vch,
-            "number": number,
-            "length": numberPart.length,
-          });
-        }
+        group.numbers.add(number);
       }
     }
 
@@ -658,16 +664,14 @@ class SalesOrderRegistrationNotifier
     }
 
     String selectedPattern = patternGroups.entries
-        .reduce((a, b) => a.value.length > b.value.length ? a : b)
+        .reduce((a, b) => a.value.numbers.length > b.value.numbers.length ? a : b)
         .key;
 
-    List<Map<String, dynamic>> selectedList = patternGroups[selectedPattern]!;
+    final selectedGroup = patternGroups[selectedPattern]!;
 
-    List<int> numbers = selectedList.map((e) => e["number"] as int).toList();
-    numbers = numbers.toSet().toList();
-    numbers.sort();
+    List<int> numbers = selectedGroup.numbers.toList()..sort();
 
-    int length = selectedList.first["length"];
+    int length = selectedGroup.firstLength;
 
     int expected = numbers.first;
     int nextNumber = numbers.last + 1;
@@ -893,6 +897,7 @@ class SalesOrderRegistrationNotifier
     _commit(() => _isLoading = true);
 
     String? error;
+    String? nextVch;
     try {
       final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
 
@@ -900,11 +905,25 @@ class SalesOrderRegistrationNotifier
         final String fromParam = DateFormat('yyyy-MM-dd').format(yearStartDate);
         final String toParam = DateFormat('yyyy-MM-dd').format(yearEndDate);
 
-        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
-          voucherTypeMasterId: voucherTypeMasterId,
-          from: fromParam,
-          to: toParam,
-        );
+        // Server-computed suggestion (see `next-voucher-number.helper.ts`)
+        // rather than downloading the full list and pattern-matching it on
+        // the UI thread - fetched alongside, not instead of, `vchnos`
+        // itself, which is still needed for the duplicate-number check.
+        final results = await Future.wait([
+          VoucherEntryRepository.instance.voucherNumbers(
+            voucherTypeMasterId: voucherTypeMasterId,
+            from: fromParam,
+            to: toParam,
+          ),
+          VoucherEntryRepository.instance.nextVoucherNumber(
+            voucherTypeMasterId: voucherTypeMasterId,
+            from: fromParam,
+            to: toParam,
+          ),
+        ]);
+        vchnos = results[0] as List<String>;
+        nextVch = results[1] as String;
+        nextVchNoSuggestion = nextVch;
       }
 
       _commit(() {
@@ -923,7 +942,7 @@ class SalesOrderRegistrationNotifier
       error = 'Could not reach the server. Please try again.';
     }
 
-    final String nextVch = generateNextVchNo(vchnos);
+    nextVch ??= generateNextVchNo(vchnos);
     _commit(() => _isLoading = false);
     return VchNosResult(error: error, nextVchNo: nextVch);
   }

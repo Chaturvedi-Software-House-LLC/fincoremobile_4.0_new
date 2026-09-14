@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,96 @@ import '../api/tally_api_client.dart';
 import '../api/voucher_entry_dropdowns_repository.dart';
 import '../api/voucher_entry_repository.dart';
 import '../constants.dart' show vanSalesSerialNo, uniGasSerialNumber;
+
+/// One "prefix#suffix" voucher-number pattern's distinct numeric values -
+/// see `computeNextVchNoLocally()`. `firstLength` is the digit-width of
+/// whichever voucher number first established this pattern (used to
+/// zero-pad the suggested next number the same way).
+class _PatternGroup {
+  _PatternGroup(this.firstLength);
+  final int firstLength;
+  final Set<int> numbers = {};
+}
+
+/// Top-level (isolate-safe) pattern-match computation backing
+/// `SalesRegistrationNotifier.generateNextVchNo()` - pulled out to
+/// top-level specifically so it can also run via `compute()` on a
+/// background isolate (see `fetchNextVoucherNumber`'s error fallback),
+/// keeping the UI thread/its loading animation responsive even in the
+/// worst case (server call failed AND the local list is huge) rather than
+/// only in the common case this app's own O(n) fix already covers.
+String computeNextVchNoLocally(List<String> vchnos) {
+  if (vchnos.isEmpty) return "1";
+
+  Map<String, _PatternGroup> patternGroups = {};
+
+  for (String vch in vchnos) {
+    List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
+
+    if (matches.isNotEmpty) {
+      RegExpMatch selectedMatch = matches.last;
+
+      if (matches.length > 1) {
+        for (int i = matches.length - 1; i >= 0; i--) {
+          String val = matches[i].group(0)!;
+          int num = int.tryParse(val) ?? 0;
+
+          if (!(val.length == 4 && num >= 2000 && num <= 2099)) {
+            selectedMatch = matches[i];
+            break;
+          }
+        }
+      }
+
+      String numberPart = selectedMatch.group(0)!;
+      int number = int.tryParse(numberPart) ?? 0;
+
+      String prefix = vch.substring(0, selectedMatch.start);
+      String suffix = vch.substring(selectedMatch.end);
+
+      String patternKey = prefix + "#" + suffix;
+
+      final group = patternGroups.putIfAbsent(
+        patternKey,
+        () => _PatternGroup(numberPart.length),
+      );
+      group.numbers.add(number);
+    }
+  }
+
+  if (patternGroups.isEmpty) {
+    return vchnos.last + "1";
+  }
+
+  String selectedPattern = patternGroups.entries
+      .reduce((a, b) => a.value.numbers.length > b.value.numbers.length ? a : b)
+      .key;
+
+  final selectedGroup = patternGroups[selectedPattern]!;
+
+  List<int> numbers = selectedGroup.numbers.toList()..sort();
+
+  int length = selectedGroup.firstLength;
+
+  int expected = numbers.first;
+  int nextNumber = numbers.last + 1;
+
+  for (int num in numbers) {
+    if (num != expected) {
+      nextNumber = expected;
+      break;
+    }
+    expected++;
+  }
+
+  String newNumber = nextNumber.toString().padLeft(length, '0');
+
+  List<String> parts = selectedPattern.split("#");
+  String prefix = parts[0];
+  String suffix = parts[1];
+
+  return prefix + newNumber + suffix;
+}
 
 /// Riverpod migration of `SalesRegistration.dart`'s
 /// `_SalesRegistrationPageState`.
@@ -751,88 +842,7 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
   /// year-like number, e.g. "2026", when another number is present),
   /// then finds the first gap in the dominant pattern's number sequence
   /// (or continues past the max if there's no gap).
-  String generateNextVchNo() {
-    if (vchnos.isEmpty) return "1";
-
-    Map<String, List<Map<String, dynamic>>> patternGroups = {};
-
-    for (String vch in vchnos) {
-      List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
-
-      if (matches.isNotEmpty) {
-        RegExpMatch selectedMatch = matches.last;
-
-        if (matches.length > 1) {
-          for (int i = matches.length - 1; i >= 0; i--) {
-            String val = matches[i].group(0)!;
-            int num = int.tryParse(val) ?? 0;
-
-            if (!(val.length == 4 && num >= 2000 && num <= 2099)) {
-              selectedMatch = matches[i];
-              break;
-            }
-          }
-        }
-
-        String numberPart = selectedMatch.group(0)!;
-        int number = int.tryParse(numberPart) ?? 0;
-
-        String prefix = vch.substring(0, selectedMatch.start);
-        String suffix = vch.substring(selectedMatch.end);
-
-        String patternKey = prefix + "#" + suffix;
-
-        patternGroups.putIfAbsent(patternKey, () => []);
-
-        bool exists = patternGroups[patternKey]!.any(
-          (e) => e["number"] == number,
-        );
-
-        if (!exists) {
-          patternGroups[patternKey]!.add({
-            "original": vch,
-            "number": number,
-            "length": numberPart.length,
-          });
-        }
-      }
-    }
-
-    if (patternGroups.isEmpty) {
-      return vchnos.last + "1";
-    }
-
-    String selectedPattern = patternGroups.entries
-        .reduce((a, b) => a.value.length > b.value.length ? a : b)
-        .key;
-
-    List<Map<String, dynamic>> selectedList = patternGroups[selectedPattern]!;
-
-    List<int> numbers = selectedList.map((e) => e["number"] as int).toList();
-    numbers = numbers.toSet().toList();
-    numbers.sort();
-
-    int length = selectedList.first["length"];
-
-    int expected = numbers.first;
-    int nextNumber = numbers.last + 1;
-
-    for (int num in numbers) {
-      if (num != expected) {
-        nextNumber = expected;
-        break;
-      }
-      expected++;
-    }
-
-    String newNumber = nextNumber.toString().padLeft(length, '0');
-
-    List<String> parts = selectedPattern.split("#");
-    String prefix = parts[0];
-    String suffix = parts[1];
-
-    return prefix + newNumber + suffix;
-  }
+  String generateNextVchNo() => computeNextVchNoLocally(vchnos);
 
   // ---- network / data-loading methods (return result info, no context) --
 
@@ -976,7 +986,7 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
               ? salesledger_data[0]
               : null;
         }
-        isSalesLedgerLocked = false;
+        isSalesLedgerLocked = salesledger_data.length == 1;
 
         vatledgerdata.add('Not Applicable');
         vatledgerdata.addAll([for (final l in vatLedgers) l['name'] as String]);
@@ -1149,6 +1159,38 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
 
     _commit(() => _isLoading = false);
     return error;
+  }
+
+  /// Server-computed replacement for the local `generateNextVchNo()`
+  /// pattern-match - see `VoucherEntryRepository.nextVoucherNumber` and
+  /// `tally-api`'s `next-voucher-number` endpoint. Same
+  /// `voucherTypeMasterId`/date-window resolution as [fetchVchNos]. Falls
+  /// back to the (now O(n), Set-based) local computation on any API error,
+  /// using whatever `vchnos` is already cached, so a suggestion still
+  /// appears if the network call fails.
+  Future<String> fetchNextVoucherNumber(String vchname, DateTime toDate) async {
+    final int? voucherTypeMasterId = _voucherTypeMasterIdByName[vchname];
+    if (voucherTypeMasterId == null) return generateNextVchNo();
+
+    try {
+      final String fromParam = DateFormat(
+        'yyyy-MM-dd',
+      ).format(parseCompactDate(startfrom));
+      final String toParam = DateFormat('yyyy-MM-dd').format(toDate);
+
+      return await VoucherEntryRepository.instance.nextVoucherNumber(
+        voucherTypeMasterId: voucherTypeMasterId,
+        from: fromParam,
+        to: toParam,
+      );
+    } catch (_) {
+      // Runs on a background isolate (not the fallback on an already-empty
+      // list `fetchVchNos`/`loadData` leave behind on their own network
+      // failure) - `vchnos` here can still be the large list a prior,
+      // separately-successful fetch already populated, so this keeps the
+      // loading animation/UI thread responsive even in that worst case.
+      return compute(computeNextVchNoLocally, vchnos);
+    }
   }
 
   /// Verbatim port of `saveEntry()`'s payload-building/submit logic, minus

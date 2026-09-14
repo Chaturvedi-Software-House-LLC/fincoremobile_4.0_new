@@ -247,11 +247,17 @@ class _SignatureCapturePageState extends State<SignatureCapturePage> {
 class ReceiverSignatureTile extends StatelessWidget {
   final Uint8List? signatureBytes;
   final ValueChanged<Uint8List> onCaptured;
+  /// Clears an already-captured signature entirely, distinct from
+  /// "Retake" (which re-opens the pad to overwrite it). Optional - a
+  /// caller that has nowhere to persist "no signature" (e.g. still
+  /// mid-migration) can omit it and the tile just won't offer removal.
+  final VoidCallback? onRemove;
 
   const ReceiverSignatureTile({
     super.key,
     required this.signatureBytes,
     required this.onCaptured,
+    this.onRemove,
   });
 
   Future<void> _capture(BuildContext context) async {
@@ -376,6 +382,17 @@ class ReceiverSignatureTile extends StatelessWidget {
                         color: app_color,
                       ),
                     ),
+                    if (onRemove != null) ...[
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: onRemove,
+                        child: Icon(
+                          Icons.delete_outline_rounded,
+                          size: 20,
+                          color: Colors.red.shade400,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
         ),

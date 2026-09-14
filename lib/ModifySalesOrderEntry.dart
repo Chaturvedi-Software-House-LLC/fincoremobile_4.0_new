@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -176,6 +177,25 @@ class _ModifySalesOrderEntryPageState
   String get errorMessageVchNo => _s.errorMessageVchNo;
 
   bool isVchEditable = false; // state variable
+
+  /// Same `secbtnaccess` admin-role flag app_bottom_nav.dart/the
+  /// registration screens read - used only to lock the Date field for a
+  /// restricted (e.g. driver) company-user, since this screen has no
+  /// other admin-check available. NOT the same thing as `isUniGasSerial`,
+  /// which is a company-wide flag true for every user (including admins)
+  /// of a UniGas-format company - using that for a per-user lock was the
+  /// original bug.
+  bool _canEditDate = false;
+
+  Future<void> _loadCanEditDate() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _canEditDate = (prefs.getString('secbtnaccess') ?? 'False')
+          .toLowerCase() ==
+          'true';
+    });
+  }
 
   DateTime get yearStartDate => _s.yearStartDate;
   DateTime get yearEndDate => _s.yearEndDate;
@@ -4960,6 +4980,7 @@ class _ModifySalesOrderEntryPageState
         }
       },
     );
+    _loadCanEditDate();
   }
 
   @override
@@ -5161,7 +5182,7 @@ class _ModifySalesOrderEntryPageState
                                             context,
                                           ).cardColor.withOpacity(0.95)),
                                   prefixIcon: GestureDetector(
-                                    onTap: isUniGasSerial(serial_no)
+                                    onTap: !_canEditDate
                                         ? null
                                         : () => _selectsaleDate(context),
                                     child: Container(
@@ -5184,7 +5205,7 @@ class _ModifySalesOrderEntryPageState
                                       ),
                                     ),
                                   ),
-                                  suffixIcon: isUniGasSerial(serial_no)
+                                  suffixIcon: !_canEditDate
                                       ? Icon(
                                           Icons.lock,
                                           color: Theme.of(
@@ -5213,7 +5234,7 @@ class _ModifySalesOrderEntryPageState
                                 ),
                                 readOnly: true,
                                 enableInteractiveSelection: false,
-                                onTap: isUniGasSerial(serial_no)
+                                onTap: !_canEditDate
                                     ? null
                                     : () {
                                         _selectsaleDate(context);

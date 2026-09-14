@@ -1143,7 +1143,7 @@ class ReceiptRegistrationNotifier
         }).toList();
 
         _selectedbankcashname = null;
-        isBankCashLedgerLocked = false;
+        isBankCashLedgerLocked = bankcashname_data.length == 1;
 
         if (tallyAutoCashLedgerName != null &&
             tallyAutoCashLedgerName.isNotEmpty) {
@@ -1209,6 +1209,13 @@ class ReceiptRegistrationNotifier
     return error;
   }
 
+  /// Server-computed suggestion from the most recent [fetchVchNos] call -
+  /// see `next-voucher-number.helper.ts`. Read by the widget instead of
+  /// re-running `generateNextVchNo(vchnos)` locally once a fetch has
+  /// succeeded; null until the first successful fetch, in which case the
+  /// widget falls back to the local (now O(n), Set-based) computation.
+  String? nextVchNoSuggestion;
+
   /// Verbatim port of `fetchvchnos`, minus the `_vchnoController.text`
   /// write - the widget sets it from [state]'s `vchNos` via
   /// `generateNextVchNo` itself after this resolves.
@@ -1220,6 +1227,7 @@ class ReceiptRegistrationNotifier
     ).format(yearEndDate);
 
     vchnos.clear();
+    nextVchNoSuggestion = null;
     _commit(() => _isLoading = true);
 
     String? error;
@@ -1230,11 +1238,24 @@ class ReceiptRegistrationNotifier
         final DateTime startDate = parseCompactDate(formattedStartDateVchNo);
         final String fromParam = DateFormat('yyyy-MM-dd').format(startDate);
 
-        vchnos = await VoucherEntryRepository.instance.voucherNumbers(
-          voucherTypeMasterId: voucherTypeMasterId,
-          from: fromParam,
-          to: formattedEndDateVchNo,
-        );
+        // Server-computed suggestion (see `next-voucher-number.helper.ts`)
+        // rather than downloading the full list and pattern-matching it on
+        // the UI thread - fetched alongside, not instead of, `vchnos`
+        // itself, which is still needed for the duplicate-number check.
+        final results = await Future.wait([
+          VoucherEntryRepository.instance.voucherNumbers(
+            voucherTypeMasterId: voucherTypeMasterId,
+            from: fromParam,
+            to: formattedEndDateVchNo,
+          ),
+          VoucherEntryRepository.instance.nextVoucherNumber(
+            voucherTypeMasterId: voucherTypeMasterId,
+            from: fromParam,
+            to: formattedEndDateVchNo,
+          ),
+        ]);
+        vchnos = results[0] as List<String>;
+        nextVchNoSuggestion = results[1] as String;
       }
 
       _commit(() {
@@ -1256,11 +1277,19 @@ class ReceiptRegistrationNotifier
     return error;
   }
 
-  /// Verbatim port of `generateNextVchNo`.
+  /// Verbatim port of `generateNextVchNo`. Duplicate-number tracking per
+  /// pattern uses a `Set<int>` (O(1) membership) rather than a `List` +
+  /// `.any(...)` linear scan - with a real company's full voucher history
+  /// (tens/hundreds of thousands of numbers, almost always one dominant
+  /// pattern) the old scan was O(n^2) and could block the UI thread for
+  /// minutes once this started being called from the initial-load path
+  /// (previously only manual, much-smaller-scoped interactions triggered
+  /// it).
   String generateNextVchNo(List<String> vchnos) {
     if (vchnos.isEmpty) return "1";
 
-    Map<String, List<Map<String, dynamic>>> patternGroups = {};
+    final Map<String, ({int firstLength, Set<int> numbers})> patternGroups =
+        {};
 
     for (String vch in vchnos) {
       List<RegExpMatch> matches = RegExp(r'\d+').allMatches(vch).toList();
@@ -1288,19 +1317,11 @@ class ReceiptRegistrationNotifier
 
         String patternKey = prefix + "#" + suffix;
 
-        patternGroups.putIfAbsent(patternKey, () => []);
-
-        bool exists = patternGroups[patternKey]!.any(
-          (e) => e["number"] == number,
+        final group = patternGroups.putIfAbsent(
+          patternKey,
+          () => (firstLength: numberPart.length, numbers: <int>{}),
         );
-
-        if (!exists) {
-          patternGroups[patternKey]!.add({
-            "original": vch,
-            "number": number,
-            "length": numberPart.length,
-          });
-        }
+        group.numbers.add(number);
       }
     }
 
@@ -1309,16 +1330,14 @@ class ReceiptRegistrationNotifier
     }
 
     String selectedPattern = patternGroups.entries
-        .reduce((a, b) => a.value.length > b.value.length ? a : b)
+        .reduce((a, b) => a.value.numbers.length > b.value.numbers.length ? a : b)
         .key;
 
-    List<Map<String, dynamic>> selectedList = patternGroups[selectedPattern]!;
+    final selectedGroup = patternGroups[selectedPattern]!;
 
-    List<int> numbers = selectedList.map((e) => e["number"] as int).toList();
-    numbers = numbers.toSet().toList();
-    numbers.sort();
+    List<int> numbers = selectedGroup.numbers.toList()..sort();
 
-    int length = selectedList.first["length"];
+    int length = selectedGroup.firstLength;
 
     int expected = numbers.first;
     int nextNumber = numbers.last + 1;

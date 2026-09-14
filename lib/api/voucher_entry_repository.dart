@@ -106,6 +106,32 @@ class VoucherEntryRepository {
         .toList();
   }
 
+  /// Server-computed suggested next voucher number for [voucherTypeMasterId]
+  /// - replaces downloading the full [voucherNumbers] list and running the
+  /// pattern-matching locally (`generateNextVchNo` in each registration
+  /// notifier), which meant re-scanning a company's entire voucher history
+  /// on every entry screen open. Same `from`/`to` semantics as
+  /// [voucherNumbers].
+  Future<String> nextVoucherNumber({
+    required int voucherTypeMasterId,
+    required String from,
+    String? to,
+  }) async {
+    final query = <String, String>{
+      'voucherTypeMasterId': '$voucherTypeMasterId',
+      'from': from,
+      if (to != null) 'to': to,
+    };
+    final queryString = query.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final result = await _client.getForCompany(
+      '/voucher-entries/next-voucher-number?$queryString',
+    );
+    final data = result.data as Map<String, dynamic>;
+    return data['voucherNumber'] as String? ?? '1';
+  }
+
   /// Bill allocations against [ledgerMasterId] from this app's own
   /// not-yet-synced-to-Tally entries (`GET .../voucher-entries/pending-bills`)
   /// - e.g. a Sales entry created in FincoreGo that hasn't reached Tally

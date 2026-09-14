@@ -608,6 +608,13 @@ class _DeliverynoteregistrationPageState
   final TextEditingController _refdateController = TextEditingController();
 
   final TextEditingController _vchnoController = TextEditingController();
+  // Guards the one-time initial-load voucher-number auto-fill below so it
+  // doesn't re-trigger every time the notifier's state changes afterward -
+  // `_vchnoController.text.isEmpty` alone isn't a safe guard, since an
+  // admin manually clearing the field to type their own number would look
+  // identical to "never filled yet" and get silently overwritten back to
+  // the suggested number on the very next unrelated state change.
+  bool _vchNoAutoFillTriggered = false;
 
   void checkVchNoExistence(String vchNo) {
     _notifier.checkVchNoExistence(vchNo);
@@ -5891,6 +5898,29 @@ class _DeliverynoteregistrationPageState
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _initWidgetPrefs();
+
+    // `loadData()` (the notifier's own, run from `_init()`) already
+    // fetches/computes the voucher-number suggestion into `vchnos`, but
+    // nothing ever wrote it into `_vchnoController` on initial load -
+    // only the widget-side `fetchvchnos()` wrapper does that, and that's
+    // only ever called from manual interactions (changing the
+    // voucher-type dropdown, the vchno date-range picker), never on
+    // first load. `generateNextVchNo` is pure/derives from the
+    // already-loaded `vchnos` list, so this doesn't re-fetch anything.
+    // Gated on `_vchNoAutoFillTriggered` (a one-shot flag, not text
+    // emptiness) so this can't re-fire and stomp an admin's manual
+    // clear/edit on a later, unrelated state change.
+    ref.listenManual<DeliveryNoteRegistrationState>(
+      deliveryNoteRegistrationNotifierProvider,
+      (previous, next) {
+        if (!_vchNoAutoFillTriggered && next.isInitialDataLoaded) {
+          _vchNoAutoFillTriggered = true;
+          _vchnoController.text = _notifier.nextVchNoSuggestion ??
+              _notifier.generateNextVchNo(_notifier.vchnos);
+        }
+      },
+      fireImmediately: true,
+    );
   }
 
   @override
@@ -6086,8 +6116,15 @@ class _DeliverynoteregistrationPageState
                                   ],
                                   controller: _dateController,
                                   readOnly: true,
-                                  enabled: !isUniGasSerial(serial_no),
-                                  suffixIcon: isUniGasSerial(serial_no)
+                                  // Locked for a restricted (e.g. driver)
+                                  // company-user, same admin check
+                                  // canEditVoucherNo uses - NOT
+                                  // isUniGasSerial, which is a
+                                  // company-wide flag true for every user
+                                  // (including admins) of a UniGas-format
+                                  // company.
+                                  enabled: canEditVoucherNo,
+                                  suffixIcon: !canEditVoucherNo
                                       ? Icon(
                                           Icons.lock,
                                           color: Theme.of(
@@ -6095,7 +6132,7 @@ class _DeliverynoteregistrationPageState
                                           ).colorScheme.onSurfaceVariant,
                                         )
                                       : null,
-                                  onTap: isUniGasSerial(serial_no)
+                                  onTap: !canEditVoucherNo
                                       ? null
                                       : () {
                                           _selectsaleDate(context);
@@ -6706,6 +6743,9 @@ class _DeliverynoteregistrationPageState
                                     signatureBytes: bulkReceiverSignatureBytes,
                                     onCaptured: (bytes) => setState(() {
                                       bulkReceiverSignatureBytes = bytes;
+                                    }),
+                                    onRemove: () => setState(() {
+                                      bulkReceiverSignatureBytes = null;
                                     }),
                                   ),
                                 ],

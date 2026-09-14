@@ -1,6 +1,7 @@
 import 'package:FincoreGo/Items.dart';
 import 'package:FincoreGo/constants.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -107,6 +108,25 @@ class _ModifyReceiptEntryPageState extends ConsumerState<ModifyReceiptEntry> {
   /// voucher number" button's `onPressed` is a no-op) - kept exactly as-is,
   /// not fixed (see `modify_receipt_entry_notifier.dart`'s doc-comment).
   bool isVchEditable = false;
+
+  /// Same `secbtnaccess` admin-role flag app_bottom_nav.dart/the
+  /// registration screens read - used only to lock the Date field for a
+  /// restricted (e.g. driver) company-user, since this screen has no
+  /// other admin-check available. NOT the same thing as `isUniGasSerial`,
+  /// which is a company-wide flag true for every user (including admins)
+  /// of a UniGas-format company - using that for a per-user lock was the
+  /// original bug.
+  bool _canEditDate = false;
+
+  Future<void> _loadCanEditDate() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _canEditDate = (prefs.getString('secbtnaccess') ?? 'False')
+          .toLowerCase() ==
+          'true';
+    });
+  }
 
   Future<void> _selectDateRangeVchNo(BuildContext context) async {
     final vm = _s;
@@ -3116,6 +3136,7 @@ class _ModifyReceiptEntryPageState extends ConsumerState<ModifyReceiptEntry> {
       _onStateChange,
       fireImmediately: true,
     );
+    _loadCanEditDate();
   }
 
   @override
@@ -3281,7 +3302,8 @@ class _ModifyReceiptEntryPageState extends ConsumerState<ModifyReceiptEntry> {
                             ],
                             controller: _dateController,
                             readOnly: true,
-                            suffixIcon: isUniGasSerial(serial_no)
+                            enabled: _canEditDate,
+                            suffixIcon: !_canEditDate
                                 ? Icon(
                                     Icons.lock,
                                     color: Theme.of(
@@ -3289,7 +3311,7 @@ class _ModifyReceiptEntryPageState extends ConsumerState<ModifyReceiptEntry> {
                                     ).colorScheme.onSurfaceVariant,
                                   )
                                 : null,
-                            onTap: isUniGasSerial(serial_no)
+                            onTap: !_canEditDate
                                 ? null
                                 : () {
                                     _selectreceiptDate(context);

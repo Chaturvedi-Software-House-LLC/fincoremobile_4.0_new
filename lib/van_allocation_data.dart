@@ -21,11 +21,13 @@ import 'api/tally_api_client.dart';
 /// screen already fully replaces via a single value each). Restricting
 /// `LEDGER` to *just* the chosen Sales/Cash ledger would also hide every
 /// customer/party ledger from that user everywhere else in the app (the
-/// registration screens' Party Ledger picker, reports, etc.), so the
-/// allow-list this writes is always [salesLedger, cashLedger, ...every
-/// SUNDRY_DEBTORS ledger in the company] - preserving normal party-ledger
-/// visibility while still pinning a van-sales default. See
-/// [_listAllPartyLedgerMasterIds]/[saveAllocation].
+/// registration screens' Party Ledger picker, reports, etc.) - and every
+/// `DUTIES` (VAT) ledger too, so the allow-list this writes is always
+/// [salesLedger, cashLedger, ...every SUNDRY_DEBTORS ledger, ...every
+/// DUTIES ledger in the company] - preserving normal party-ledger and
+/// VAT-ledger visibility while still pinning a van-sales default. See
+/// [_listAllPartyLedgerMasterIds]/[_listAllVatLedgerMasterIds]/
+/// [saveAllocation].
 
 /// A tally-oauth CompanyUser, as returned by `IdentityRepository.
 /// listCompanyUsers()` - `{id, user: {firstName, lastName, email,
@@ -168,6 +170,19 @@ class VanAllocationData {
         .toList();
   }
 
+  /// Every `DUTIES` ledger's masterId (VAT/Output-Input VAT ledgers) -
+  /// merged into the `LEDGER` restriction allow-list ([saveAllocation])
+  /// alongside party ledgers, so a restricted (e.g. driver) user can still
+  /// pick a VAT ledger on entry screens instead of the VAT dropdown coming
+  /// back empty.
+  static Future<List<int>> _listAllVatLedgerMasterIds() async {
+    final ledgers = await _fetchAllLedgersWithGroup();
+    return ledgers
+        .where((l) => l['groupReservedName'] == 'DUTIES')
+        .map((l) => l['masterId'] as int)
+        .toList();
+  }
+
   /// The company-user's currently-restricted Sales/Cash ledger, re-derived
   /// from their `LEDGER` restriction by intersecting it against
   /// [listSalesLedgers]/[listCashLedgers] - the restriction itself also
@@ -239,8 +254,10 @@ class VanAllocationData {
 
     if (salesLedgerMasterId != null || cashLedgerMasterId != null) {
       final partyLedgerIds = await _listAllPartyLedgerMasterIds();
+      final vatLedgerIds = await _listAllVatLedgerMasterIds();
       final ledgerIds = <int>{
         ...partyLedgerIds,
+        ...vatLedgerIds,
         if (salesLedgerMasterId != null) salesLedgerMasterId,
         if (cashLedgerMasterId != null) cashLedgerMasterId,
       };
