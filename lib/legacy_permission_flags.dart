@@ -84,6 +84,9 @@ const Map<String, String> legacyFlagToPermission = {
 
   // Van allocation
   'vanallocation': 'VAN_ALLOCATION:READ',
+  'vanallocation_add': 'VAN_ALLOCATION:CREATE',
+  'vanallocation_modify': 'VAN_ALLOCATION:UPDATE',
+  'vanallocation_delete': 'VAN_ALLOCATION:DELETE',
 
   // Settings
   'settings_currency': 'SETTINGS_CURRENCY:UPDATE',

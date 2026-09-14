@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
@@ -45,7 +46,23 @@ class _VanAllocationScreenState extends ConsumerState<VanAllocationScreen> {
     ref.read(vanAllocationNotifierProvider.notifier).resetForm();
   }
 
+  // Server-enforced defense in depth for the `vanallocation_add`
+  // permission - `viewVanAllocations.dart` already hides the way here when
+  // it's missing, but this screen is still directly reachable (deep link,
+  // back-stack), so the actual save is gated too.
+  Future<bool> _hasAddPermission() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getString('vanallocation_add') ?? 'False').toLowerCase() ==
+        'true';
+  }
+
   Future<void> _saveAllocation() async {
+    if (!await _hasAddPermission()) {
+      if (mounted) {
+        showAppMessage(context, "You don't have permission to create a Van Allocation.");
+      }
+      return;
+    }
     final error = await ref
         .read(vanAllocationNotifierProvider.notifier)
         .saveAllocation();

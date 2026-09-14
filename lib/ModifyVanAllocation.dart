@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
@@ -49,7 +50,24 @@ class _ModifyVanAllocationScreenState
         cashLedgerMasterId: widget.allocation['cashLedgerMasterId'] as int?,
       );
 
+  // Server-enforced defense in depth for the `vanallocation_modify`
+  // permission - `viewVanAllocations.dart` already hides the way here when
+  // it's missing, but this screen is still directly reachable (deep link,
+  // back-stack), so the actual update is gated too.
+  Future<bool> _hasModifyPermission() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getString('vanallocation_modify') ?? 'False')
+            .toLowerCase() ==
+        'true';
+  }
+
   Future<void> updateAllocation() async {
+    if (!await _hasModifyPermission()) {
+      if (mounted) {
+        showAppMessage(context, "You don't have permission to modify a Van Allocation.");
+      }
+      return;
+    }
     final notifier = ref.read(
       modifyVanAllocationNotifierProvider(_args).notifier,
     );

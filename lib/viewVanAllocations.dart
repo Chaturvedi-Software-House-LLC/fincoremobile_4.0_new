@@ -2,6 +2,7 @@ import 'package:FincoreGo/addVanAllocations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'constants.dart';
 import 'ModifyVanAllocation.dart';
@@ -33,7 +34,39 @@ class _ViewVanAllocationScreenState
 
   final TextEditingController searchController = TextEditingController();
 
+  // Full Add/Modify/Delete CRUD permissions for Van Allocation
+  // ('vanallocation_add'/'vanallocation_modify'/'vanallocation_delete',
+  // set from the company-user's JWT `permissions` claim via
+  // `legacy_permission_flags.dart`) - independent of `vanallocation`
+  // itself, which only gates whether this whole section is reachable at
+  // all. Defaults to false (fail closed) until loaded.
+  bool _canAdd = false;
+  bool _canModify = false;
+  bool _canDelete = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPermissions();
+  }
+
+  Future<void> _loadPermissions() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    bool granted(String key) =>
+        (prefs.getString(key) ?? 'False').toLowerCase() == 'true';
+    setState(() {
+      _canAdd = granted('vanallocation_add');
+      _canModify = granted('vanallocation_modify');
+      _canDelete = granted('vanallocation_delete');
+    });
+  }
+
   Future<void> deleteAllocation(Map<String, dynamic> allocation) async {
+    if (!_canDelete) {
+      showAppMessage(context, "You don't have permission to delete a Van Allocation.");
+      return;
+    }
     try {
       await ref
           .read(viewVanAllocationNotifierProvider.notifier)
@@ -220,7 +253,7 @@ class _ViewVanAllocationScreenState
                 },
               ),
             ),
-      floatingActionButton: state.filteredAllocations.isEmpty
+      floatingActionButton: (state.filteredAllocations.isEmpty || !_canAdd)
           ? null
           : FloatingActionButton.extended(
               backgroundColor: primaryColor,
@@ -382,22 +415,27 @@ class _ViewVanAllocationScreenState
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                onSelected: (value) {
-                  if (value == 'delete') showDeleteDialog(allocation);
-                  if (value == 'edit') {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => ModifyVanAllocationScreen(allocation: allocation)),
-                    );
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Modify')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete')),
-                ],
-              ),
+              if (_canModify || _canDelete)
+                PopupMenuButton<String>(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  onSelected: (value) {
+                    if (value == 'delete' && _canDelete) {
+                      showDeleteDialog(allocation);
+                    }
+                    if (value == 'edit' && _canModify) {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => ModifyVanAllocationScreen(allocation: allocation)),
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    if (_canModify)
+                      const PopupMenuItem(value: 'edit', child: Text('Modify')),
+                    if (_canDelete)
+                      const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -516,23 +554,25 @@ class _ViewVanAllocationScreenState
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(fontSize: 13, height: 1.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const VanAllocationScreen()),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              if (_canAdd) ...[
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const VanAllocationScreen()),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  icon: const Icon(Icons.add_rounded, color: Colors.white),
+                  label: Text("Create Allocation", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
                 ),
-                icon: const Icon(Icons.add_rounded, color: Colors.white),
-                label: Text("Create Allocation", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
-              ),
+              ],
             ],
           ),
         ),

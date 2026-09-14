@@ -16,21 +16,14 @@ import 'api/tally_api_client.dart';
 /// may use are that company-user's `VOUCHER_TYPE` master-restriction.
 ///
 /// Sales Ledger / Cash Ledger (legacy per-user fields) are stored as a
-/// `LEDGER` master-restriction - the one master-restriction type that's
-/// genuinely all-or-nothing per user (unlike GODOWN/VOUCHER_TYPE, which this
-/// screen already fully replaces via a single value each). Restricting
-/// `LEDGER` to *just* the chosen Sales/Cash ledger would also hide every
-/// customer/party ledger from that user everywhere else in the app (the
-/// registration screens' Party Ledger picker, reports, etc.), so the
-/// allow-list this writes is always [salesLedger, cashLedger, ...every
-/// SUNDRY_DEBTORS ledger in the company] - preserving normal party-ledger
-/// visibility while still pinning a van-sales default. VAT (`DUTIES`)
-/// ledgers are deliberately NOT part of this allow-list - tally-api's
-/// `voucher-entry-dropdowns` VAT-ledger query is itself unrestricted by the
-/// LEDGER master-restriction (see that repo's `salesData()`), so every
-/// company-user - restricted or not - always sees every VAT ledger
-/// regardless of Van Allocation. See
-/// [_listAllPartyLedgerMasterIds]/[saveAllocation].
+/// `LEDGER` master-restriction - the backend has no way to scope that
+/// restriction to just the SALES/CASH groups, so restricting `LEDGER` to
+/// *just* the chosen Sales/Cash ledger would also hide every other ledger
+/// (party, VAT, everything else) from that user everywhere else in the app.
+/// To make Sales/Cash Ledger the only thing this actually locks, the
+/// allow-list [saveAllocation] writes is every ledger in the company EXCEPT
+/// whichever other SALES-group and CASH/BANK/BANK_OD-group ledgers weren't
+/// chosen - every non-Sales/Cash ledger is always included, unconditionally.
 
 /// A tally-oauth CompanyUser, as returned by `IdentityRepository.
 /// listCompanyUsers()` - `{id, user: {firstName, lastName, email,
@@ -115,7 +108,7 @@ class VanAllocationData {
 
   /// Every ledger for the current company, each annotated with its own
   /// group's `reservedName` - the shared fetch behind [listSalesLedgers]/
-  /// [listCashLedgers]/[_listAllPartyLedgerMasterIds] (one `/ledgers` +
+  /// [listCashLedgers]/[saveAllocation] (one `/ledgers` +
   /// `/groups` pair, classified client-side, same pattern the registration
   /// screens used before they moved to the server-classified
   /// `voucher-entry-dropdowns` endpoint - not worth that endpoint's overhead
@@ -161,24 +154,13 @@ class VanAllocationData {
         .toList();
   }
 
-  /// Every `SUNDRY_DEBTORS` ledger's masterId - merged into the `LEDGER`
-  /// restriction allow-list ([saveAllocation]) so pinning a Sales/Cash
-  /// ledger for a user never hides their ability to pick a customer ledger
-  /// elsewhere in the app.
-  static Future<List<int>> _listAllPartyLedgerMasterIds() async {
-    final ledgers = await _fetchAllLedgersWithGroup();
-    return ledgers
-        .where((l) => l['groupReservedName'] == 'SUNDRY_DEBTORS')
-        .map((l) => l['masterId'] as int)
-        .toList();
-  }
-
   /// The company-user's currently-restricted Sales/Cash ledger, re-derived
   /// from their `LEDGER` restriction by intersecting it against
   /// [listSalesLedgers]/[listCashLedgers] - the restriction itself also
-  /// contains every party ledger (see the class doc-comment), so this is
-  /// how the two "real" selections are told apart from the merged-in party
-  /// ledgers. Both null when unrestricted (no Sales/Cash ledger chosen yet).
+  /// contains every non-Sales/Cash ledger (see the class doc-comment), so
+  /// this is how the two "real" selections are told apart from everything
+  /// else that's unconditionally included. Both null when unrestricted (no
+  /// Sales/Cash ledger chosen yet).
   static Future<({int? salesLedgerMasterId, int? cashLedgerMasterId})>
       currentLedgerSelection(String companyUserId) async {
     final restricted = await MasterRestrictionsRepository.instance.get(
@@ -226,10 +208,18 @@ class VanAllocationData {
   /// Saves a vehicle allocation: full-replaces the GODOWN (single
   /// masterId), VOUCHER_TYPE (the relevant Delivery Note/Sales/Receipt
   /// masterIds, deduped/nulls dropped), and - when either is given - LEDGER
-  /// (chosen Sales/Cash ledger plus every party ledger, see the class
-  /// doc-comment) restrictions for [companyUserId]. Omitting both
+  /// restrictions for [companyUserId]. Omitting both
   /// [salesLedgerMasterId]/[cashLedgerMasterId] clears any existing LEDGER
   /// restriction instead of leaving a stale one behind.
+  ///
+  /// The `LEDGER` restriction backend enforces is a flat allow-list with no
+  /// concept of "restrict only these groups" - so to make Sales/Cash Ledger
+  /// the *only* thing this actually locks (never party ledgers, VAT
+  /// ledgers, or anything else, with no backend change), the allow-list
+  /// written here is every ledger in the company EXCEPT whichever
+  /// SALES-group ledger(s) weren't chosen and whichever CASH/BANK/BANK_OD-
+  /// group ledger(s) weren't chosen. Every non-Sales/Cash ledger (party,
+  /// VAT, everything else) is always included, unconditionally.
   static Future<void> saveAllocation({
     required String companyUserId,
     required int godownMasterId,
@@ -243,9 +233,14 @@ class VanAllocationData {
     await repo.set(companyUserId, MasterRestrictionType.voucherType, vchIds);
 
     if (salesLedgerMasterId != null || cashLedgerMasterId != null) {
-      final partyLedgerIds = await _listAllPartyLedgerMasterIds();
+      final allLedgers = await _fetchAllLedgersWithGroup();
       final ledgerIds = <int>{
-        ...partyLedgerIds,
+        for (final l in allLedgers)
+          if (l['groupReservedName'] != 'SALES' ||
+              l['masterId'] == salesLedgerMasterId)
+            if (!_cashGroupReservedNames.contains(l['groupReservedName']) ||
+                l['masterId'] == cashLedgerMasterId)
+              l['masterId'] as int,
         if (salesLedgerMasterId != null) salesLedgerMasterId,
         if (cashLedgerMasterId != null) cashLedgerMasterId,
       };
