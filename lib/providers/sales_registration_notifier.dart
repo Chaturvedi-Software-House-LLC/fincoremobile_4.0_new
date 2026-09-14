@@ -541,11 +541,18 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
   }
 
   /// vatledgerdata[0] is always the synthetic "Not Applicable" entry added
-  /// ahead of the API's real VAT ledgers. For UniGas, default to the first
-  /// real ledger (vatledgerdata[1]) instead of "Not Applicable".
+  /// ahead of the API's real VAT ledgers. Defaults to the first real VAT
+  /// ledger (vatledgerdata[1], so its amount auto-calculates immediately)
+  /// whenever one is available - for every company (not just UniGas) and
+  /// every user regardless of any LEDGER master-restriction, since VAT
+  /// ledgers are always unrestricted server-side (see
+  /// `voucher-entry-dropdowns.service.ts`'s `salesData()`). Only falls
+  /// back to "Not Applicable" when the company genuinely has no VAT
+  /// ledger configured at all. Used both on initial screen load and by
+  /// [resetAfterSave] when the form clears for the next entry.
   String? _defaultVatLedger() {
     if (vatledgerdata.isEmpty) return null;
-    if (isUniGasSerial && vatledgerdata.length > 1) {
+    if (vatledgerdata.length > 1) {
       return vatledgerdata[1];
     }
     return vatledgerdata[0];
