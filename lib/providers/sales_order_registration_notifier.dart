@@ -78,6 +78,9 @@ class SalesOrderRegistrationState {
 
   final bool isVisibleItemHeading;
   final bool isVisibleLedgerHeading;
+  final bool isVoucherTypeLocked;
+  final bool isSalesLedgerLocked;
+  final bool isGodownLocked;
 
   final bool isLoading;
   final bool isInitialDataLoaded;
@@ -131,6 +134,9 @@ class SalesOrderRegistrationState {
     required this.formattedTotalAmount,
     required this.isVisibleItemHeading,
     required this.isVisibleLedgerHeading,
+    required this.isVoucherTypeLocked,
+    required this.isSalesLedgerLocked,
+    required this.isGodownLocked,
     required this.isLoading,
     required this.isInitialDataLoaded,
     required this.hostname,
@@ -218,6 +224,9 @@ class SalesOrderRegistrationNotifier
           formattedTotalAmount: '0',
           isVisibleItemHeading: false,
           isVisibleLedgerHeading: false,
+          isVoucherTypeLocked: false,
+          isSalesLedgerLocked: false,
+          isGodownLocked: false,
           isLoading: true,
           isInitialDataLoaded: false,
           hostname: '',
@@ -273,6 +282,9 @@ class SalesOrderRegistrationNotifier
     formattedTotalAmount: _formatDecimal(roundedtotalAmount),
     isVisibleItemHeading: isVisibleItemHeading,
     isVisibleLedgerHeading: isVisibleLedgerHeading,
+    isVoucherTypeLocked: isVoucherTypeLocked,
+    isSalesLedgerLocked: isSalesLedgerLocked,
+    isGodownLocked: isGodownLocked,
     isLoading: _isLoading,
     isInitialDataLoaded: _isInitialDataLoaded,
     hostname: hostname,
@@ -339,6 +351,9 @@ class SalesOrderRegistrationNotifier
 
   bool isVisibleItemHeading = false;
   bool isVisibleLedgerHeading = false;
+  bool isVoucherTypeLocked = false;
+  bool isSalesLedgerLocked = false;
+  bool isGodownLocked = false;
 
   bool _isLoading = true;
   bool _isInitialDataLoaded = false;
@@ -794,6 +809,7 @@ class SalesOrderRegistrationNotifier
       _commit(() {
         vchtypenamedata = salesOrderTypes.map((v) => v['name'] as String).toList();
         _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
+        isVoucherTypeLocked = vchtypenamedata.length == 1;
 
         partyledgerdata = partyLedgers.map((l) => l['name'] as String).toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
@@ -814,6 +830,7 @@ class SalesOrderRegistrationNotifier
 
         salesledger_data = salesLedgers.map((l) => l['name'] as String).toList();
         _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
+        isSalesLedgerLocked = salesledger_data.length == 1;
 
         ledgerdata = [
           for (final l in otherLedgersRaw)
@@ -853,6 +870,7 @@ class SalesOrderRegistrationNotifier
         }).toList();
 
         locationsdata = godowns.map((g) => g['name'] as String).toList();
+        isGodownLocked = locationsdata.length == 1;
       });
 
       if (_selectedvchtypename != null) {

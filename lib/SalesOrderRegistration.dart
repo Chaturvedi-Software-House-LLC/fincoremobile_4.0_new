@@ -4703,6 +4703,9 @@ class _SalesOrderRegistrationPageState
     final decimal = vm.decimal;
     final currencycode = vm.currencyCode;
     final vchtypenamedata = vm.vchTypeNameData;
+    final isVoucherTypeLocked = vm.isVoucherTypeLocked;
+    final isSalesLedgerLocked = vm.isSalesLedgerLocked;
+    final isGodownLocked = vm.isGodownLocked;
     final partyledgerdata = vm.partyLedgerData;
     final salesledger_data = vm.salesLedgerData;
     final vatledgerdata = vm.vatLedgerData;
@@ -5180,7 +5183,9 @@ class _SalesOrderRegistrationPageState
                                   ),
                                 ),
                                 hint: Text(
-                                  "Voucher Type Name",
+                                  isVoucherTypeLocked
+                                      ? "Voucher Type Locked"
+                                      : "Voucher Type Name",
                                   style: GoogleFonts.poppins(
                                     fontSize: 13,
                                     color: Theme.of(
@@ -5203,17 +5208,21 @@ class _SalesOrderRegistrationPageState
                                     ),
                                   );
                                 }).toList(),
-                                onChanged: (value) async {
-                                  _notifier.setSelectedVchType(value!);
-                                  fetchvchnos(value);
-                                },
-                                onTap: () {
-                                  setState(() {
-                                    _isFocused_vchno = false;
-                                    _isFocused_narration = false;
-                                    _isFocused_totalamt = false;
-                                  });
-                                },
+                                onChanged: isVoucherTypeLocked
+                                    ? null
+                                    : (value) async {
+                                        _notifier.setSelectedVchType(value!);
+                                        fetchvchnos(value);
+                                      },
+                                onTap: isVoucherTypeLocked
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          _isFocused_vchno = false;
+                                          _isFocused_narration = false;
+                                          _isFocused_totalamt = false;
+                                        });
+                                      },
                               ),
                             ),
 
@@ -5525,7 +5534,9 @@ class _SalesOrderRegistrationPageState
                               ),
                               child: SearchableSelectorField<String>(
                                 label: "Sales Ledger",
-                                hintText: "Sales Ledger",
+                                hintText: isSalesLedgerLocked
+                                    ? "Sales Ledger Locked"
+                                    : "Sales Ledger",
                                 icon: Icons.sell_outlined,
                                 iconGradient: const [
                                   Colors.blueAccent,
@@ -5534,6 +5545,7 @@ class _SalesOrderRegistrationPageState
                                 value: _selectedsalesledger,
                                 items: salesledger_data,
                                 itemLabel: (item) => item.toString(),
+                                enabled: !isSalesLedgerLocked,
                                 onChanged: (value) {
                                   _notifier.setSelectedSalesLedger(value!);
                                   setState(() {
