@@ -52,6 +52,20 @@ class _RolesViewPageState extends ConsumerState<RolesView>
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
 
+  final ScrollController _listScrollController = ScrollController();
+
+  void _onListScroll() {
+    final notifier = ref.read(rolesViewNotifierProvider.notifier);
+    final s = ref.read(rolesViewNotifierProvider);
+    if (s.isLoadingMore) return;
+    if (!notifier.canLoadMoreRoles) return;
+    if (!_listScrollController.hasClients) return;
+    final position = _listScrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      notifier.loadMoreRoles();
+    }
+  }
+
   void filterRoles(String query) {
     ref.read(rolesViewNotifierProvider.notifier).filterRoles(query);
   }
@@ -297,6 +311,13 @@ class _RolesViewPageState extends ConsumerState<RolesView>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.invalidate(rolesViewNotifierProvider);
     });
+    _listScrollController.addListener(_onListScroll);
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _refresh() => fetchRoles();
@@ -479,9 +500,25 @@ class _RolesViewPageState extends ConsumerState<RolesView>
                   ),
                   Expanded(
                     child: ListView.builder(
+                      controller: _listScrollController,
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                      itemCount: roles.length,
+                      itemCount: roles.length + (vm.isLoadingMore ? 1 : 0),
                       itemBuilder: (context, index) {
+                        if (index >= roles.length) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Center(
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: Colors.teal,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
                         final card = roles[index];
                         return Container(
                           margin: const EdgeInsets.only(bottom: 14),

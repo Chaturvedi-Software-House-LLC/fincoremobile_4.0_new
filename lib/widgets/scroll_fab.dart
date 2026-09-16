@@ -13,7 +13,6 @@ class _ScrollFabState extends State<ScrollFab>
     with SingleTickerProviderStateMixin {
   bool _scrollingDown = true;
   bool _visible = false;
-  double _lastOffset = 0;
   late AnimationController _animController;
   late Animation<double> _scaleAnim;
 
@@ -37,8 +36,14 @@ class _ScrollFabState extends State<ScrollFab>
     final max = widget.controller.position.maxScrollExtent;
 
     final bool newVisible = max > 120 && offset > 60;
-    final bool newDown = offset >= _lastOffset;
-    _lastOffset = offset;
+    // Based on *where the user currently is*, not which way they last
+    // scrolled - within 60px of the bottom shows the up-arrow (there's
+    // nowhere further down to go), otherwise the down-arrow. Using the
+    // last scroll delta instead (the previous behavior) meant pausing
+    // after scrolling down, or a small upward flick near the bottom,
+    // could leave the icon pointing the "wrong" way relative to where
+    // tapping it would actually take you.
+    final bool newDown = offset < max - 60;
 
     if (newVisible != _visible) {
       setState(() => _visible = newVisible);

@@ -51,4 +51,15 @@ class DashboardRepository {
     );
     return (result.data as List).cast<Map<String, dynamic>>();
   }
+
+  /// `reports/dashboard/insights` - week-over-week sales trend,
+  /// top-selling items, overdue receivables, and cash balance, all
+  /// computed server-side by raw SQL (never by the AI model - see
+  /// `smart-insights.service.ts`), plus a short AI-narrated summary of
+  /// those exact figures. Shape:
+  /// `{facts: {...}, narrative: [String, ...]}`.
+  Future<Map<String, dynamic>> insights() async {
+    final result = await _client.getForCompany('/reports/dashboard/insights');
+    return result.data as Map<String, dynamic>;
+  }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -89,6 +90,18 @@ abstract class BaseApiClient {
   // token refresh (fixed separately in token_refresher.dart, which bypasses
   // this client) and every `DELETE` call through this client (e.g. deleting
   // a company-user) the same way.
+  /// Logs every request's method/path/status/duration via [debugPrint] (so
+  /// it shows in `flutter run`'s console and DevTools, not just release
+  /// logs) - `null` statusCode means the request timed out rather than
+  /// getting a response at all. Debug-only ([kDebugMode]) since this fires
+  /// on every single API call the app makes and isn't meant to run in
+  /// production builds.
+  void _logApiTiming(String method, String path, int? statusCode, int ms) {
+    if (!kDebugMode) return;
+    final status = statusCode?.toString() ?? 'TIMEOUT';
+    debugPrint('[API] $method $apiRoot$path -> $status (${ms}ms)');
+  }
+
   Future<Map<String, String>> _headers(
     TokenScope scope, {
     required bool hasBody,
@@ -169,10 +182,13 @@ abstract class BaseApiClient {
       );
 
     late final http.Response response;
+    final stopwatch = Stopwatch()..start();
     try {
       final streamed = await _http.send(request).timeout(effectiveTimeout);
       response = await http.Response.fromStream(streamed);
+      _logApiTiming('POST', path, response.statusCode, stopwatch.elapsedMilliseconds);
     } on TimeoutException {
+      _logApiTiming('POST', path, null, stopwatch.elapsedMilliseconds);
       throw ApiException(
         statusCode: 0,
         code: 'TIMEOUT',
@@ -246,6 +262,7 @@ abstract class BaseApiClient {
     final encodedBody = body == null ? null : jsonEncode(body);
 
     late final http.Response response;
+    final stopwatch = Stopwatch()..start();
     try {
       switch (method) {
         case 'GET':
@@ -272,7 +289,9 @@ abstract class BaseApiClient {
         default:
           throw ArgumentError('Unsupported method: $method');
       }
+      _logApiTiming(method, path, response.statusCode, stopwatch.elapsedMilliseconds);
     } on TimeoutException {
+      _logApiTiming(method, path, null, stopwatch.elapsedMilliseconds);
       throw ApiException(
         statusCode: 0,
         code: 'TIMEOUT',

@@ -30,7 +30,7 @@ void main() {
 
   test('fetchRoles populates roles and filteredRoles identically when no '
       'search is active', () async {
-    when(() => repo.listRoles(limit: 100)).thenAnswer((_) async => ApiResult([
+    when(() => repo.listRoles(page: 1, limit: 20)).thenAnswer((_) async => ApiResult([
           {'id': '1', 'name': 'Admin', 'permissions': []},
           {'id': '2', 'name': 'Driver', 'permissions': []},
         ], null));
@@ -47,7 +47,7 @@ void main() {
   test('filterRoles narrows filteredRoles without touching roles - '
       'regression test for the bug where the UI rendered the unfiltered '
       'list and the search box appeared to do nothing', () async {
-    when(() => repo.listRoles(limit: 100)).thenAnswer((_) async => ApiResult([
+    when(() => repo.listRoles(page: 1, limit: 20)).thenAnswer((_) async => ApiResult([
           {'id': '1', 'name': 'Admin', 'permissions': []},
           {'id': '2', 'name': 'Driver', 'permissions': []},
         ], null));
@@ -66,7 +66,7 @@ void main() {
   });
 
   test('filterRoles with no matches shows the empty state', () async {
-    when(() => repo.listRoles(limit: 100)).thenAnswer((_) async => ApiResult([
+    when(() => repo.listRoles(page: 1, limit: 20)).thenAnswer((_) async => ApiResult([
           {'id': '1', 'name': 'Admin', 'permissions': []},
         ], null));
 
@@ -81,7 +81,7 @@ void main() {
   });
 
   test('clearing the search query restores the full list', () async {
-    when(() => repo.listRoles(limit: 100)).thenAnswer((_) async => ApiResult([
+    when(() => repo.listRoles(page: 1, limit: 20)).thenAnswer((_) async => ApiResult([
           {'id': '1', 'name': 'Admin', 'permissions': []},
           {'id': '2', 'name': 'Driver', 'permissions': []},
         ], null));
@@ -98,7 +98,7 @@ void main() {
   test('a disposed notifier does not throw when an in-flight fetch resolves '
       '- regression test for "Tried to use RolesViewNotifier after dispose '
       'was called"', () async {
-    when(() => repo.listRoles(limit: 100)).thenAnswer(
+    when(() => repo.listRoles(page: 1, limit: 20)).thenAnswer(
       (_) => Future.delayed(
         const Duration(milliseconds: 50),
         () => ApiResult([

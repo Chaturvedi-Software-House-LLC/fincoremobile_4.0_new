@@ -104,6 +104,18 @@ class _PendingSalesEntryPageState extends ConsumerState<PendingSalesEntry>
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  final ScrollController _listScrollController = ScrollController();
+
+  void _onListScroll() {
+    if (_s.isLoadingMore) return;
+    if (!_notifier.canLoadMoreSalesEntries) return;
+    if (!_listScrollController.hasClients) return;
+    final position = _listScrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      _notifier.loadMoreSalesEntries();
+    }
+  }
+
   final Set<int> expandedCards = {};
 
   Future<void> _showConfirmationDialogAndNavigate(
@@ -272,6 +284,13 @@ class _PendingSalesEntryPageState extends ConsumerState<PendingSalesEntry>
     // Trigger provider creation (and its _init()) eagerly, matching the
     // original's initState-time kickoff.
     _notifier;
+    _listScrollController.addListener(_onListScroll);
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
   }
 
   void searchSales(String query) {
@@ -650,9 +669,27 @@ class _PendingSalesEntryPageState extends ConsumerState<PendingSalesEntry>
 
                     if (!isVisibleNoSalesEntryFound)
                       ListView.builder(
+                        controller: _listScrollController,
                         padding: const EdgeInsets.fromLTRB(0, 8, 0, 100),
-                        itemCount: filteredSalesEntries.length,
+                        itemCount:
+                            filteredSalesEntries.length +
+                            (vm.isLoadingMore ? 1 : 0),
                         itemBuilder: (context, index) {
+                          if (index >= filteredSalesEntries.length) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.4,
+                                    color: Colors.teal,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
                           final card = filteredSalesEntries[index];
                           final partyLedger = card.data['PARTYLEDGERNAME'];
                           final dateStr = card.data['DATE'];

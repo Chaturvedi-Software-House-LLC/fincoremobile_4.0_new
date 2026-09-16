@@ -86,6 +86,11 @@ class StockRepository {
     required DateTime asOf,
     double? threshold,
     int? stockGroupMasterId,
+    // Callers making multiple movementAnalysis calls back-to-back (e.g.
+    // Moving Summary's FAST+SLOW pair) should fetch the catalog once via
+    // listStockItems() and pass the same map to every call, instead of
+    // letting each call redundantly re-fetch the whole catalog itself.
+    Map<int, Map<String, dynamic>>? itemsByMasterId,
   }) async {
     final query = StringBuffer(
       '?status=$status&asOf=${asOf.toIso8601String().split('T').first}',
@@ -100,12 +105,14 @@ class StockRepository {
       ),
     );
 
-    final itemsByMasterId = {
-      for (final i in await listStockItems()) i['masterId'] as int: i,
-    };
+    final resolvedItemsByMasterId =
+        itemsByMasterId ??
+        {
+          for (final i in await listStockItems()) i['masterId'] as int: i,
+        };
 
     return rows.map((row) {
-      final full = itemsByMasterId[row['masterId'] as int];
+      final full = resolvedItemsByMasterId[row['masterId'] as int];
       return {
         ...?full,
         ...row, // masterId/name/closingQuantity from the report win
@@ -113,6 +120,52 @@ class StockRepository {
         'totalAmountSold': row['totalAmountSold'],
       };
     }).toList();
+  }
+
+  /// One page of `reports/stock-items/movement-analysis` (see
+  /// [movementAnalysis]'s doc comment for the field-merge details) - for
+  /// callers wanting real incremental loading of a FAST/SLOW/INACTIVE list
+  /// instead of fetching every matching row up front. [itemsByMasterId] is
+  /// the same "full catalog for display-field merge" map [movementAnalysis]
+  /// builds internally on every call - callers doing multiple page fetches
+  /// for the same tab should build it once (via [listStockItems]) and pass
+  /// it in here each time, rather than re-fetching the whole catalog per
+  /// page.
+  Future<StockItemPage> movementAnalysisPage({
+    required int page,
+    int limit = 20,
+    required String status,
+    required DateTime asOf,
+    double? threshold,
+    int? stockGroupMasterId,
+    required Map<int, Map<String, dynamic>> itemsByMasterId,
+  }) async {
+    final query = StringBuffer(
+      '?status=$status&asOf=${asOf.toIso8601String().split('T').first}'
+      '&page=$page&limit=$limit',
+    );
+    if (threshold != null) query.write('&threshold=$threshold');
+    if (stockGroupMasterId != null) {
+      query.write('&stockGroupMasterId=$stockGroupMasterId');
+    }
+    final result = await _client.getForCompany(
+      '/reports/stock-items/movement-analysis$query',
+    );
+    final rows = (result.data as List).cast<Map<String, dynamic>>();
+    final merged = rows.map((row) {
+      final full = itemsByMasterId[row['masterId'] as int];
+      return {
+        ...?full,
+        ...row,
+        'totalQuantitySold': row['totalQuantitySold'],
+        'totalAmountSold': row['totalAmountSold'],
+      };
+    }).toList();
+    return StockItemPage(
+      items: merged,
+      page: page,
+      totalPages: (result.meta?['lastPage'] as int?) ?? 1,
+    );
   }
 
   /// `reports/stock-items/:stockItemMasterId/summary` - per-voucher-type

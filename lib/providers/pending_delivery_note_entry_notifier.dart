@@ -25,6 +25,7 @@ class PendingDeliveryNoteEntryState {
   final List<SalesModel> filteredDeliveryNoteEntries;
   final bool isVisibleNoDeliveryNoteEntryFound;
   final bool isLoading;
+  final bool isLoadingMore;
   final String? serialNo;
   final DateTime? selectedSingleDate;
   final DateTimeRange? selectedDateRange;
@@ -34,6 +35,7 @@ class PendingDeliveryNoteEntryState {
     required this.filteredDeliveryNoteEntries,
     required this.isVisibleNoDeliveryNoteEntryFound,
     required this.isLoading,
+    required this.isLoadingMore,
     required this.serialNo,
     required this.selectedSingleDate,
     required this.selectedDateRange,
@@ -49,6 +51,7 @@ class PendingDeliveryNoteEntryNotifier
           filteredDeliveryNoteEntries: [],
           isVisibleNoDeliveryNoteEntryFound: false,
           isLoading: false,
+          isLoadingMore: false,
           serialNo: '',
           selectedSingleDate: null,
           selectedDateRange: null,
@@ -69,6 +72,7 @@ class PendingDeliveryNoteEntryNotifier
     ),
     isVisibleNoDeliveryNoteEntryFound: isVisibleNoDeliveryNoteEntryFound,
     isLoading: _isLoading,
+    isLoadingMore: _isLoadingMore,
     serialNo: serial_no,
     selectedSingleDate: _selectedSingleDate,
     selectedDateRange: _selectedDateRange,
@@ -85,6 +89,17 @@ class PendingDeliveryNoteEntryNotifier
   String _searchQuery = '';
   DateTime? _selectedSingleDate;
   DateTimeRange? _selectedDateRange;
+
+  // ---- scroll-triggered pagination (server returns date DESC, id DESC) ----
+  static const int _pePageLimit = 20;
+  int _peRequestGen = 0;
+  bool _isLoadingMore = false;
+  int? _peNextPage = 2;
+  int _peTotalPages = 1;
+  Set<int> _peDeliveryNoteVoucherTypeMasterIds = {};
+  String? _peVoucherTypeNameFilter;
+
+  bool get canLoadMoreDeliveryNoteEntries => _peNextPage != null;
 
   /// Verbatim port of `entrydelete`, minus the `showAppMessage`/context
   /// calls.
@@ -104,10 +119,28 @@ class PendingDeliveryNoteEntryNotifier
     return error;
   }
 
+  SalesModel? _mapDeliveryNoteEntry(Map<String, dynamic> json) {
+    if (!_peDeliveryNoteVoucherTypeMasterIds.contains(
+      json['voucherTypeMasterId'],
+    )) {
+      return null;
+    }
+    final model = SalesModel.fromVoucherEntry(json);
+    final filterName = _peVoucherTypeNameFilter;
+    if (filterName != null &&
+        filterName.trim().isNotEmpty &&
+        (model.data['VOUCHERTYPENAME'] ?? '').toString() != filterName) {
+      return null;
+    }
+    return model;
+  }
+
   /// Verbatim port of `fetchDeliveryNoteEntries`, minus the
   /// `showAppMessage` context call and the `_searchController.clear()`/
-  /// `FocusManager` widget-local resets.
+  /// `FocusManager` widget-local resets - now fetches only page 1 up front
+  /// (see [loadMoreDeliveryNoteEntries] for the rest).
   Future<String?> fetchDeliveryNoteEntries() async {
+    final myGen = ++_peRequestGen;
     _commit(() => _isLoading = true);
 
     String? error;
@@ -134,60 +167,36 @@ class PendingDeliveryNoteEntryNotifier
       final deliveryNoteVoucherTypes = await VoucherTypeRepository.instance
           .byReservedName('DELIVERY_NOTE');
 
-      final Set<int> deliveryNoteVoucherTypeMasterIds =
-          deliveryNoteVoucherTypes
-              .map<int>((v) => (v['masterId'] as num).toInt())
-              .toSet();
+      _peDeliveryNoteVoucherTypeMasterIds = deliveryNoteVoucherTypes
+          .map<int>((v) => (v['masterId'] as num).toInt())
+          .toSet();
+      _peVoucherTypeNameFilter = voucherTypeName;
 
-      final allEntries = await VoucherEntryRepository.instance.listAll();
+      final firstPage = await VoucherEntryRepository.instance.listPage(
+        page: 1,
+        limit: _pePageLimit,
+      );
+      if (myGen != _peRequestGen) return null; // superseded while awaiting
 
-      final bool hasVoucherTypeNameFilter =
-          voucherTypeName != null && voucherTypeName.trim().isNotEmpty;
+      _peTotalPages = firstPage.totalPages;
+      _peNextPage = firstPage.totalPages > 1 ? 2 : null;
 
-      final mapped = allEntries
-          .where(
-            (json) => deliveryNoteVoucherTypeMasterIds.contains(
-              json['voucherTypeMasterId'],
-            ),
-          )
-          .map((json) => SalesModel.fromVoucherEntry(json))
-          .where(
-            (m) =>
-                !hasVoucherTypeNameFilter ||
-                (m.data['VOUCHERTYPENAME'] ?? '').toString() ==
-                    voucherTypeName,
-          )
+      final mapped = firstPage.items
+          .map(_mapDeliveryNoteEntry)
+          .whereType<SalesModel>()
           .toList();
 
       deliverynoteentries.clear();
       filteredDeliveryNoteEntries.clear();
-
-      isVisibleNoDeliveryNoteEntryFound = false;
-
       deliverynoteentries.addAll(mapped);
-
-      deliverynoteentries.sort((a, b) {
-        DateTime dateA = DateTime.parse(a.data['DATE'].toString());
-        DateTime dateB = DateTime.parse(b.data['DATE'].toString());
-        if (dateA != dateB) return dateB.compareTo(dateA);
-        final vchA =
-            int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        final vchB =
-            int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        return vchB.compareTo(vchA);
-      });
-
       filteredDeliveryNoteEntries = List.from(deliverynoteentries);
 
       _commit(() {
         _searchQuery = '';
         _selectedSingleDate = null;
         _selectedDateRange = null;
-
-        if (filteredDeliveryNoteEntries.isEmpty) {
-          isVisibleNoDeliveryNoteEntryFound = true;
-        }
-
+        isVisibleNoDeliveryNoteEntryFound =
+            filteredDeliveryNoteEntries.isEmpty && _peNextPage == null;
         _isLoading = false;
       });
       return null;
@@ -205,35 +214,80 @@ class PendingDeliveryNoteEntryNotifier
     return error;
   }
 
+  /// Fetches the next `/voucher-entries` page and appends the entries
+  /// matching this screen's Delivery-Note-voucher-type filter - called by
+  /// `PendingDeliveryNoteEntry.dart`'s `ScrollController` listener.
+  Future<void> loadMoreDeliveryNoteEntries() async {
+    if (_isLoadingMore) return;
+    final page = _peNextPage;
+    if (page == null || page > _peTotalPages) {
+      _peNextPage = null;
+      return;
+    }
+
+    final myGen = _peRequestGen;
+    _commit(() => _isLoadingMore = true);
+    try {
+      final result = await VoucherEntryRepository.instance.listPage(
+        page: page,
+        limit: _pePageLimit,
+      );
+      if (myGen != _peRequestGen) {
+        _commit(() => _isLoadingMore = false);
+        return;
+      }
+
+      final mapped = result.items
+          .map(_mapDeliveryNoteEntry)
+          .whereType<SalesModel>()
+          .toList();
+      deliverynoteentries.addAll(mapped);
+      _peNextPage = page + 1 <= _peTotalPages ? page + 1 : null;
+
+      _commit(() {
+        filteredDeliveryNoteEntries = _computeFilteredList();
+        isVisibleNoDeliveryNoteEntryFound =
+            filteredDeliveryNoteEntries.isEmpty && _peNextPage == null;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (myGen == _peRequestGen) {
+        _commit(() => _isLoadingMore = false);
+      }
+    }
+  }
+
   void searchSales(String query) {
     _searchQuery = query.trim().toLowerCase();
     _applyFilters();
   }
 
-  void _applyFilters() {
+  List<SalesModel> _computeFilteredList() {
     final query = _searchQuery;
+    return deliverynoteentries.where((entry) {
+      final data = entry.data;
 
+      final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
+      final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
+      final vchtype = (data['VOUCHERTYPENAME'] ?? '')
+          .toString()
+          .toLowerCase();
+
+      final bool matchesSearch =
+          query.isEmpty ||
+          party.contains(query) ||
+          vchno.contains(query) ||
+          vchtype.contains(query);
+
+      final bool matchesDate = _matchesDateFilter(entry);
+
+      return matchesSearch && matchesDate;
+    }).toList();
+  }
+
+  void _applyFilters() {
     _commit(() {
-      filteredDeliveryNoteEntries = deliverynoteentries.where((entry) {
-        final data = entry.data;
-
-        final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
-        final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
-        final vchtype = (data['VOUCHERTYPENAME'] ?? '')
-            .toString()
-            .toLowerCase();
-
-        final bool matchesSearch =
-            query.isEmpty ||
-            party.contains(query) ||
-            vchno.contains(query) ||
-            vchtype.contains(query);
-
-        final bool matchesDate = _matchesDateFilter(entry);
-
-        return matchesSearch && matchesDate;
-      }).toList();
-
+      filteredDeliveryNoteEntries = _computeFilteredList();
       isVisibleNoDeliveryNoteEntryFound = filteredDeliveryNoteEntries.isEmpty;
     });
   }

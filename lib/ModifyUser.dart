@@ -120,7 +120,7 @@ class _ModifyUserPageState extends ConsumerState<ModifyUser> {
         ),
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? buildSimpleFormSkeleton(context, fieldCount: 5)
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [

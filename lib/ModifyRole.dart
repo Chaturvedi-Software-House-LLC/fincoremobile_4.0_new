@@ -105,7 +105,7 @@ class _ModifyRolePageState extends ConsumerState<ModifyRole> {
         ),
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? buildRoleFormSkeleton(context)
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
               children: [

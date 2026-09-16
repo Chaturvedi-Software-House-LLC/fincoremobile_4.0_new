@@ -57,6 +57,14 @@ class ItemsState {
   final int itemsTotalPages;
   final bool isLoadingMoreItems;
 
+  final int activeItemsPage;
+  final int activeItemsTotalPages;
+  final bool isLoadingMoreActiveItems;
+
+  final int inactiveItemsPage;
+  final int inactiveItemsTotalPages;
+  final bool isLoadingMoreInactiveItems;
+
   final bool isVisibleNoDataFound;
   final bool isVisibleFilterby;
   final String? selectedFilter;
@@ -112,6 +120,12 @@ class ItemsState {
     this.itemsPage = 1,
     this.itemsTotalPages = 1,
     this.isLoadingMoreItems = false,
+    this.activeItemsPage = 1,
+    this.activeItemsTotalPages = 1,
+    this.isLoadingMoreActiveItems = false,
+    this.inactiveItemsPage = 1,
+    this.inactiveItemsTotalPages = 1,
+    this.isLoadingMoreInactiveItems = false,
     this.isVisibleNoDataFound = false,
     this.isVisibleFilterby = false,
     this.selectedFilter = 'qty',
@@ -167,6 +181,12 @@ class ItemsState {
     int? itemsPage,
     int? itemsTotalPages,
     bool? isLoadingMoreItems,
+    int? activeItemsPage,
+    int? activeItemsTotalPages,
+    bool? isLoadingMoreActiveItems,
+    int? inactiveItemsPage,
+    int? inactiveItemsTotalPages,
+    bool? isLoadingMoreInactiveItems,
     bool? isVisibleNoDataFound,
     bool? isVisibleFilterby,
     String? selectedFilter,
@@ -237,6 +257,16 @@ class ItemsState {
       itemsPage: itemsPage ?? this.itemsPage,
       itemsTotalPages: itemsTotalPages ?? this.itemsTotalPages,
       isLoadingMoreItems: isLoadingMoreItems ?? this.isLoadingMoreItems,
+      activeItemsPage: activeItemsPage ?? this.activeItemsPage,
+      activeItemsTotalPages:
+          activeItemsTotalPages ?? this.activeItemsTotalPages,
+      isLoadingMoreActiveItems:
+          isLoadingMoreActiveItems ?? this.isLoadingMoreActiveItems,
+      inactiveItemsPage: inactiveItemsPage ?? this.inactiveItemsPage,
+      inactiveItemsTotalPages:
+          inactiveItemsTotalPages ?? this.inactiveItemsTotalPages,
+      isLoadingMoreInactiveItems:
+          isLoadingMoreInactiveItems ?? this.isLoadingMoreInactiveItems,
       isVisibleNoDataFound: isVisibleNoDataFound ?? this.isVisibleNoDataFound,
       isVisibleFilterby: isVisibleFilterby ?? this.isVisibleFilterby,
       selectedFilter: selectedFilter ?? this.selectedFilter,
@@ -259,6 +289,28 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
   }
 
   final Map<String, int> _groupMasterIdByName = {};
+
+  // Full-catalog display-field cache for the paginated FAST/SLOW/INACTIVE
+  // "moving" tabs - see [movementAnalysisPage]'s doc comment for why this
+  // is needed once per tab-load rather than re-fetched per page. Keyed by
+  // nothing (single slot): cleared whenever a moving tab is (re)started,
+  // since it's specific to whichever `parent` group filter is active.
+  Map<int, Map<String, dynamic>>? _movingItemCatalog;
+  int _movingRequestGen = 0;
+
+  Future<Map<int, Map<String, dynamic>>> _movingItemCatalogFor(
+    String parent,
+  ) async {
+    final cached = _movingItemCatalog;
+    if (cached != null) return cached;
+    final groupMasterId = parent.isEmpty ? null : _groupMasterIdByName[parent];
+    final rows = await _ref
+        .read(stockRepositoryProvider)
+        .listStockItems(stockGroupMasterId: groupMasterId);
+    final map = {for (final row in rows) row['masterId'] as int: row};
+    _movingItemCatalog = map;
+    return map;
+  }
 
   static const int _itemsPageLimit = 30;
 
@@ -529,6 +581,8 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
   }
 
   Future<void> fetchactive_items(String parent, String filter) async {
+    _movingItemCatalog = null;
+    _movingRequestGen++;
     state = state.copyWith(
       isClicked_allitems: false,
       isClicked_fastmoving: true,
@@ -545,42 +599,30 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
       isVisibleFilterby: true,
       filteredItems_active_items: const [],
       active_items_list: const [],
+      activeItemsPage: 1,
+      activeItemsTotalPages: 1,
     );
-
-    List<items> parsed = const [];
-    String? error;
-    try {
-      parsed = await _fetchMovingList(parent, filter, 'FAST');
-    } on ApiException catch (e) {
-      error = e.message;
-    } catch (e) {
-      error = 'Could not reach the server. Please try again.';
-    }
-
-    if (error != null) {
-      state = state.copyWith(
-        errorMessage: error,
-        isInactiveList: false,
-        isAllList: false,
-        isActiveList: false,
-        isLoading: false,
-      );
-      return;
-    }
-
-    final isEmpty = parsed.isEmpty;
-    state = state.copyWith(
-      active_items_list: parsed,
-      filteredItems_active_items: parsed,
-      isInactiveList: false,
-      isAllList: false,
-      isActiveList: !isEmpty,
-      isVisibleNoDataFound: isEmpty,
-      isLoading: false,
+    await _loadNextMovingPage(
+      status: 'FAST',
+      parent: parent,
+      filter: filter,
+      isFirstPage: true,
     );
   }
 
+  /// Loads one more page (20 rows) into `active_items_list` - called by
+  /// `Items.dart`'s `ScrollController` listener on the Fast Moving tab.
+  Future<void> loadMoreActiveItems(String parent, String filter) =>
+      _loadNextMovingPage(
+        status: 'FAST',
+        parent: parent,
+        filter: filter,
+        isFirstPage: false,
+      );
+
   Future<void> fetchslow_items(String parent, String filter) async {
+    _movingItemCatalog = null;
+    _movingRequestGen++;
     state = state.copyWith(
       isClicked_allitems: false,
       isClicked_fastmoving: false,
@@ -597,49 +639,37 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
       isVisibleFilterby: true,
       filteredItems_active_items: const [],
       active_items_list: const [],
+      activeItemsPage: 1,
+      activeItemsTotalPages: 1,
     );
-
-    List<items> parsed = const [];
-    String? error;
-    try {
-      parsed = await _fetchMovingList(parent, filter, 'SLOW');
-    } on ApiException catch (e) {
-      error = e.message;
-    } catch (e) {
-      error = 'Could not reach the server. Please try again.';
-    }
-
-    if (error != null) {
-      state = state.copyWith(
-        errorMessage: error,
-        isInactiveList: false,
-        isAllList: false,
-        isActiveList: false,
-        isLoading: false,
-      );
-      return;
-    }
-
-    final isEmpty = parsed.isEmpty;
-    state = state.copyWith(
-      active_items_list: parsed,
-      filteredItems_active_items: parsed,
-      isInactiveList: false,
-      isAllList: false,
-      isActiveList: !isEmpty,
-      isVisibleNoDataFound: isEmpty,
-      isLoading: false,
+    await _loadNextMovingPage(
+      status: 'SLOW',
+      parent: parent,
+      filter: filter,
+      isFirstPage: true,
     );
   }
+
+  /// Loads one more page (20 rows) into `active_items_list` - called by
+  /// `Items.dart`'s `ScrollController` listener on the Slow Moving tab
+  /// (shares the same display state as Fast Moving - only one tab's data
+  /// is ever visible at a time).
+  Future<void> loadMoreSlowItems(String parent, String filter) =>
+      _loadNextMovingPage(
+        status: 'SLOW',
+        parent: parent,
+        filter: filter,
+        isFirstPage: false,
+      );
 
   /// `reports/stock-items/movement-analysis` only accepts a single
   /// quantity threshold - see the doc comment on the pre-migration
   /// equivalent for why a "value" filter mode is unsupported server-side.
-  Future<List<items>> _fetchMovingList(
-    String parent,
-    String filter,
-    String status,
-  ) async {
+  /// The threshold/`asOf` params `movementAnalysis`/`movementAnalysisPage`
+  /// need for a given [status] + "qty"/"value" [filter] mode - shared by
+  /// [_fetchMovingList] (the single-shot fetch [fetchMovingSummary] still
+  /// uses) and [_loadNextMovingPage] (the paginated Fast/Slow/Inactive tabs).
+  (double?, DateTime) _movingParams(String status, String filter) {
     String qtyStr = '';
     int days = 0;
     switch (status) {
@@ -654,17 +684,122 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
       default: // INACTIVE
         days = int.tryParse(state.inactivedays) ?? 0;
     }
-
     final asOf = DateTime.now().subtract(Duration(days: days));
+    return (double.tryParse(qtyStr), asOf);
+  }
+
+  Future<List<items>> _fetchMovingList(
+    String parent,
+    String filter,
+    String status, {
+    Map<int, Map<String, dynamic>>? itemsByMasterId,
+  }) async {
+    final (threshold, asOf) = _movingParams(status, filter);
     final groupMasterId = parent.isEmpty ? null : _groupMasterIdByName[parent];
 
     final rows = await _ref.read(stockRepositoryProvider).movementAnalysis(
       status: status,
       asOf: asOf,
-      threshold: double.tryParse(qtyStr),
+      threshold: threshold,
       stockGroupMasterId: groupMasterId,
+      itemsByMasterId: itemsByMasterId,
     );
     return rows.map(items.fromJson).toList();
+  }
+
+  /// Shared incremental page-loader for the Fast Moving/Slow Moving/
+  /// Inactive Items tabs - [status] picks which report classification to
+  /// request and which state slot to append into (FAST/SLOW share
+  /// `active_items_list`, INACTIVE uses its own `inactive_items_list` -
+  /// see the doc comments on [fetchactive_items]/[fetchslow_items]).
+  Future<void> _loadNextMovingPage({
+    required String status,
+    required String parent,
+    required String filter,
+    required bool isFirstPage,
+  }) async {
+    final isInactive = status == 'INACTIVE';
+    final currentPage =
+        isInactive ? state.inactiveItemsPage : state.activeItemsPage;
+    final totalPages =
+        isInactive ? state.inactiveItemsTotalPages : state.activeItemsTotalPages;
+    final isLoadingMore = isInactive
+        ? state.isLoadingMoreInactiveItems
+        : state.isLoadingMoreActiveItems;
+
+    if (!isFirstPage) {
+      if (isLoadingMore) return;
+      if (currentPage > totalPages) return;
+    }
+
+    final myGen = isFirstPage ? ++_movingRequestGen : _movingRequestGen;
+    state = state.copyWith(
+      isLoading: isFirstPage ? true : state.isLoading,
+      isLoadingMoreActiveItems: !isInactive ? true : state.isLoadingMoreActiveItems,
+      isLoadingMoreInactiveItems: isInactive ? true : state.isLoadingMoreInactiveItems,
+    );
+
+    try {
+      final (threshold, asOf) = _movingParams(status, filter);
+      final groupMasterId =
+          parent.isEmpty ? null : _groupMasterIdByName[parent];
+      final catalog = await _movingItemCatalogFor(parent);
+      final page = await _ref.read(stockRepositoryProvider).movementAnalysisPage(
+        page: currentPage,
+        status: status,
+        asOf: asOf,
+        threshold: threshold,
+        stockGroupMasterId: groupMasterId,
+        itemsByMasterId: catalog,
+      );
+      if (myGen != _movingRequestGen) return; // superseded while awaiting
+
+      final newItems = page.items.map(items.fromJson).toList();
+
+      if (isInactive) {
+        final merged = [...state.inactive_items_list, ...newItems];
+        state = state.copyWith(
+          inactive_items_list: merged,
+          filteredItems_inactive_items: merged,
+          inactiveItemsTotalPages: page.totalPages,
+          inactiveItemsPage: currentPage + 1,
+          isInactiveList: merged.isNotEmpty,
+          isActiveList: false,
+          isAllList: false,
+          isVisibleNoDataFound: merged.isEmpty,
+          isLoading: false,
+          isLoadingMoreInactiveItems: false,
+        );
+      } else {
+        final merged = [...state.active_items_list, ...newItems];
+        state = state.copyWith(
+          active_items_list: merged,
+          filteredItems_active_items: merged,
+          activeItemsTotalPages: page.totalPages,
+          activeItemsPage: currentPage + 1,
+          isActiveList: merged.isNotEmpty,
+          isInactiveList: false,
+          isAllList: false,
+          isVisibleNoDataFound: merged.isEmpty,
+          isLoading: false,
+          isLoadingMoreActiveItems: false,
+        );
+      }
+    } on ApiException catch (e) {
+      state = state.copyWith(
+        errorMessage: e.message,
+        isLoading: false,
+        isLoadingMoreActiveItems: false,
+        isLoadingMoreInactiveItems: false,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        errorMessage: 'Could not reach the server. Please try again.',
+        isLoading: false,
+        isLoadingMoreActiveItems: false,
+        isLoadingMoreInactiveItems: false,
+      );
+    }
   }
 
   Future<void> fetchMovingSummary(String parent) async {
@@ -689,12 +824,17 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
     );
 
     final resolvedParent = parent == 'All Items' ? '' : parent;
+    // Reset the shared catalog cache for this fresh load, then fetch it
+    // once up front - FAST and SLOW below hit the exact same item catalog,
+    // so without this each would otherwise redundantly re-fetch it.
+    _movingItemCatalog = null;
+    final catalog = await _movingItemCatalogFor(resolvedParent);
 
     try {
       final filter = state.selectedFilter!;
       final results = await Future.wait([
-        _fetchMovingList(resolvedParent, filter, 'FAST'),
-        _fetchMovingList(resolvedParent, filter, 'SLOW'),
+        _fetchMovingList(resolvedParent, filter, 'FAST', itemsByMasterId: catalog),
+        _fetchMovingList(resolvedParent, filter, 'SLOW', itemsByMasterId: catalog),
       ]);
 
       state = state.copyWith(
@@ -939,6 +1079,8 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
   }
 
   Future<void> fetchinactive_items(String parent) async {
+    _movingItemCatalog = null;
+    _movingRequestGen++;
     state = state.copyWith(
       isLoading: true,
       isAllList: false,
@@ -955,40 +1097,25 @@ class ItemsNotifier extends StateNotifier<ItemsState> {
       isClicked_inactiveitems: true,
       filteredItems_inactive_items: const [],
       inactive_items_list: const [],
+      inactiveItemsPage: 1,
+      inactiveItemsTotalPages: 1,
     );
-
-    List<items> parsed = const [];
-    String? error;
-    try {
-      parsed = await _fetchMovingList(parent, 'qty', 'INACTIVE');
-    } on ApiException catch (e) {
-      error = e.message;
-    } catch (e) {
-      error = 'Could not reach the server. Please try again.';
-    }
-
-    if (error != null) {
-      state = state.copyWith(
-        errorMessage: error,
-        isInactiveList: false,
-        isAllList: false,
-        isActiveList: false,
-        isLoading: false,
-      );
-      return;
-    }
-
-    final isEmpty = parsed.isEmpty;
-    state = state.copyWith(
-      inactive_items_list: parsed,
-      filteredItems_inactive_items: parsed,
-      isInactiveList: !isEmpty,
-      isActiveList: false,
-      isAllList: false,
-      isVisibleNoDataFound: isEmpty,
-      isLoading: false,
+    await _loadNextMovingPage(
+      status: 'INACTIVE',
+      parent: parent,
+      filter: 'qty',
+      isFirstPage: true,
     );
   }
+
+  /// Loads one more page (20 rows) into `inactive_items_list` - called by
+  /// `Items.dart`'s `ScrollController` listener on the Inactive Items tab.
+  Future<void> loadMoreInactiveItems(String parent) => _loadNextMovingPage(
+    status: 'INACTIVE',
+    parent: parent,
+    filter: 'qty',
+    isFirstPage: false,
+  );
 
   void setInactiveDays(String value) {
     state = state.copyWith(inactivedays: value);

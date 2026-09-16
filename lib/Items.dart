@@ -1159,12 +1159,39 @@ class _ItemsPageState extends ConsumerState<Items>
   }
 
   void _onItemsScroll() {
-    if (!_s.isClicked_allitems || !_s.isAllList) return;
-    if (_s.isLoadingMoreItems || _s.itemsPage > _s.itemsTotalPages) return;
     if (!_scrollFabController.hasClients) return;
     final position = _scrollFabController.position;
-    if (position.pixels >= position.maxScrollExtent - 400) {
+    if (position.pixels < position.maxScrollExtent - 400) return;
+
+    if (_s.isClicked_allitems && _s.isAllList) {
+      if (_s.isLoadingMoreItems || _s.itemsPage > _s.itemsTotalPages) return;
       _notifier.loadMoreItemsIfNeeded(searchController.text);
+      return;
+    }
+
+    // Fast/Slow Moving and Inactive Items resolve the same "parent" group
+    // filter `fetchItemData` does (`selectedItem == 'All Items'` -> '').
+    final resolved =
+        _s.selectedItem == 'All Items' ? '' : (_s.selectedItem ?? '');
+
+    if (_s.isClicked_fastmoving && _s.isActiveList) {
+      if (_s.isLoadingMoreActiveItems ||
+          _s.activeItemsPage > _s.activeItemsTotalPages) {
+        return;
+      }
+      _notifier.loadMoreActiveItems(resolved, _s.selectedFilter ?? 'qty');
+    } else if (_s.isClicked_slowmoving && _s.isActiveList) {
+      if (_s.isLoadingMoreActiveItems ||
+          _s.activeItemsPage > _s.activeItemsTotalPages) {
+        return;
+      }
+      _notifier.loadMoreSlowItems(resolved, _s.selectedFilter ?? 'qty');
+    } else if (_s.isClicked_inactiveitems && _s.isInactiveList) {
+      if (_s.isLoadingMoreInactiveItems ||
+          _s.inactiveItemsPage > _s.inactiveItemsTotalPages) {
+        return;
+      }
+      _notifier.loadMoreInactiveItems(resolved);
     }
   }
 
@@ -1635,10 +1662,15 @@ class _ItemsPageState extends ConsumerState<Items>
                   }, childCount: _getVisibleList().length),
                 ),
 
-              // Bottom-of-list spinner while the next page of the "All
-              // Items" tab loads - never shown for the other tabs, which
-              // always load their full result set in one go.
-              if (_s.isClicked_allitems && _s.isAllList && _s.isLoadingMoreItems)
+              // Bottom-of-list spinner while the next page of the current
+              // tab loads.
+              if ((_s.isClicked_allitems && _s.isAllList && _s.isLoadingMoreItems) ||
+                  ((_s.isClicked_fastmoving || _s.isClicked_slowmoving) &&
+                      _s.isActiveList &&
+                      _s.isLoadingMoreActiveItems) ||
+                  (_s.isClicked_inactiveitems &&
+                      _s.isInactiveList &&
+                      _s.isLoadingMoreInactiveItems))
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 16),

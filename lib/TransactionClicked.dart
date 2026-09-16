@@ -162,13 +162,6 @@ class _TransactionsClickedPageState
   TransactionClickedState get _s =>
       ref.read(transactionClickedNotifierProvider(masterid));
 
-  String handleGodown(String godown) {
-    if (godown == 'null' || godown.isEmpty) {
-      godown = 'Not Available';
-    }
-    return godown;
-  }
-
   String formatCostCenter(String costcenter) {
     String costcenter_string = "";
     if (costcenter == 'null') {
@@ -399,11 +392,21 @@ class _TransactionsClickedPageState
                                       ),
                                       buildInventoryRow(
                                         context,
-                                        'Godown',
-                                        handleGodown(card.godown),
+                                        card.godown == 'null' ||
+                                                card.godown.trim().isEmpty
+                                            ? ''
+                                            : 'Godown',
+                                        card.godown == 'null' ||
+                                                card.godown.trim().isEmpty
+                                            ? ''
+                                            : card.godown,
                                         'Amt',
                                         '',
-                                        leftIcon: Icons.store,
+                                        leftIcon:
+                                            card.godown == 'null' ||
+                                                card.godown.trim().isEmpty
+                                            ? null
+                                            : Icons.store,
                                         rightIcon: Icons.money,
                                         rightValueWidget: formatAmountRich(
                                           card.amount,
@@ -630,13 +633,13 @@ class _TransactionsClickedPageState
             "Voucher Date",
             formatDate(widget.vchdate),
           ),
-          if (widget.refno != 'null')
+          if (widget.refno.trim().isNotEmpty && widget.refno != 'null')
             _buildRow(
               Icons.confirmation_number_outlined,
               "Ref No",
               widget.refno,
             ),
-          if (widget.refdate != 'null')
+          if (widget.refdate.trim().isNotEmpty && widget.refdate != 'null')
             _buildRow(
               Icons.date_range_outlined,
               "Ref Date",

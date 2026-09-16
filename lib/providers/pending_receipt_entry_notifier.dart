@@ -26,6 +26,7 @@ class PendingReceiptEntryState {
   final List<ReceiptModel> filteredReceiptEntries;
   final bool isVisibleNoReceiptEntryFound;
   final bool isLoading;
+  final bool isLoadingMore;
   final String? serialNo;
   final DateTime? selectedSingleDate;
   final DateTimeRange? selectedDateRange;
@@ -35,6 +36,7 @@ class PendingReceiptEntryState {
     required this.filteredReceiptEntries,
     required this.isVisibleNoReceiptEntryFound,
     required this.isLoading,
+    required this.isLoadingMore,
     required this.serialNo,
     required this.selectedSingleDate,
     required this.selectedDateRange,
@@ -50,6 +52,7 @@ class PendingReceiptEntryNotifier
           filteredReceiptEntries: [],
           isVisibleNoReceiptEntryFound: false,
           isLoading: false,
+          isLoadingMore: false,
           serialNo: '',
           selectedSingleDate: null,
           selectedDateRange: null,
@@ -68,6 +71,7 @@ class PendingReceiptEntryNotifier
     filteredReceiptEntries: List.unmodifiable(filteredReceiptEntries),
     isVisibleNoReceiptEntryFound: isVisibleNoReceiptEntryFound,
     isLoading: _isLoading,
+    isLoadingMore: _isLoadingMore,
     serialNo: serial_no,
     selectedSingleDate: _selectedSingleDate,
     selectedDateRange: _selectedDateRange,
@@ -84,6 +88,16 @@ class PendingReceiptEntryNotifier
   String _searchQuery = '';
   DateTime? _selectedSingleDate;
   DateTimeRange? _selectedDateRange;
+
+  // ---- scroll-triggered pagination (server returns date DESC, id DESC) ----
+  static const int _pePageLimit = 20;
+  int _peRequestGen = 0;
+  bool _isLoadingMore = false;
+  int? _peNextPage = 2;
+  int _peTotalPages = 1;
+  Set<int> _peAllowedVoucherTypeMasterIds = {};
+
+  bool get canLoadMoreReceiptEntries => _peNextPage != null;
 
   /// Verbatim port of `entrydelete`, minus the `showAppMessage`/context
   /// calls.
@@ -120,10 +134,26 @@ class PendingReceiptEntryNotifier
         : null;
   }
 
+  ReceiptModel? _mapReceiptEntry(Map<String, dynamic> e) {
+    final masterId = e['voucherTypeMasterId'];
+    if (masterId is! int || !_peAllowedVoucherTypeMasterIds.contains(masterId)) {
+      return null;
+    }
+    return ReceiptModel(
+      id: e['id'].toString(),
+      data: e,
+      type: (e['voucherTypeName'] ?? 'Receipt').toString(),
+      isSynced: 0,
+      message: null,
+    );
+  }
+
   /// Verbatim port of `fetchReceiptEntries`, minus the `showAppMessage`
   /// context call and the `_searchController.clear()`/`FocusManager`
-  /// widget-local resets.
+  /// widget-local resets - now fetches only page 1 up front (see
+  /// [loadMoreReceiptEntries] for the rest).
   Future<String?> fetchReceiptEntries() async {
+    final myGen = ++_peRequestGen;
     _commit(() => _isLoading = true);
 
     final prefs = await SharedPreferences.getInstance();
@@ -163,53 +193,33 @@ class PendingReceiptEntryNotifier
           allowedVoucherTypeMasterIds = named;
         }
       }
+      _peAllowedVoucherTypeMasterIds = allowedVoucherTypeMasterIds;
 
-      final allEntries = await VoucherEntryRepository.instance.listAll();
+      final firstPage = await VoucherEntryRepository.instance.listPage(
+        page: 1,
+        limit: _pePageLimit,
+      );
+      if (myGen != _peRequestGen) return null; // superseded while awaiting
 
-      final receiptEntriesRaw = allEntries.where((e) {
-        final masterId = e['voucherTypeMasterId'];
-        return masterId is int && allowedVoucherTypeMasterIds.contains(masterId);
-      }).toList();
+      _peTotalPages = firstPage.totalPages;
+      _peNextPage = firstPage.totalPages > 1 ? 2 : null;
+
+      final mapped = firstPage.items
+          .map(_mapReceiptEntry)
+          .whereType<ReceiptModel>()
+          .toList();
 
       receiptentries.clear();
       filteredReceiptEntries.clear();
-
-      isVisibleNoReceiptEntryFound = false;
-
-      receiptentries.addAll(
-        receiptEntriesRaw.map(
-          (e) => ReceiptModel(
-            id: e['id'].toString(),
-            data: e,
-            type: (e['voucherTypeName'] ?? 'Receipt').toString(),
-            isSynced: 0,
-            message: null,
-          ),
-        ),
-      );
-
-      receiptentries.sort((a, b) {
-        DateTime dateA = DateTime.parse(a.data['date']);
-        DateTime dateB = DateTime.parse(b.data['date']);
-        if (dateA != dateB) return dateB.compareTo(dateA);
-        final vchA =
-            int.tryParse((a.data['voucherNumber'] ?? '').toString()) ?? 0;
-        final vchB =
-            int.tryParse((b.data['voucherNumber'] ?? '').toString()) ?? 0;
-        return vchB.compareTo(vchA);
-      });
+      receiptentries.addAll(mapped);
       filteredReceiptEntries = List.from(receiptentries);
 
       _commit(() {
         _searchQuery = '';
         _selectedSingleDate = null;
         _selectedDateRange = null;
-      });
-
-      _commit(() {
-        if (filteredReceiptEntries.isEmpty) {
-          isVisibleNoReceiptEntryFound = true;
-        }
+        isVisibleNoReceiptEntryFound =
+            filteredReceiptEntries.isEmpty && _peNextPage == null;
         _isLoading = false;
       });
       return null;
@@ -220,14 +230,50 @@ class PendingReceiptEntryNotifier
       error = 'Could not reach the server. Please try again.';
       _commit(() => _isLoading = false);
     }
-
-    _commit(() {
-      if (filteredReceiptEntries.isEmpty) {
-        isVisibleNoReceiptEntryFound = true;
-      }
-      _isLoading = false;
-    });
     return error;
+  }
+
+  /// Fetches the next `/voucher-entries` page and appends the entries
+  /// matching this screen's Receipt-voucher-type filter - called by
+  /// `PendingReceiptEntry.dart`'s `ScrollController` listener.
+  Future<void> loadMoreReceiptEntries() async {
+    if (_isLoadingMore) return;
+    final page = _peNextPage;
+    if (page == null || page > _peTotalPages) {
+      _peNextPage = null;
+      return;
+    }
+
+    final myGen = _peRequestGen;
+    _commit(() => _isLoadingMore = true);
+    try {
+      final result = await VoucherEntryRepository.instance.listPage(
+        page: page,
+        limit: _pePageLimit,
+      );
+      if (myGen != _peRequestGen) {
+        _commit(() => _isLoadingMore = false);
+        return;
+      }
+
+      final mapped = result.items
+          .map(_mapReceiptEntry)
+          .whereType<ReceiptModel>()
+          .toList();
+      receiptentries.addAll(mapped);
+      _peNextPage = page + 1 <= _peTotalPages ? page + 1 : null;
+
+      _commit(() {
+        filteredReceiptEntries = _computeFilteredList();
+        isVisibleNoReceiptEntryFound =
+            filteredReceiptEntries.isEmpty && _peNextPage == null;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (myGen == _peRequestGen) {
+        _commit(() => _isLoadingMore = false);
+      }
+    }
   }
 
   void searchReceipt(String query) {
@@ -235,35 +281,37 @@ class PendingReceiptEntryNotifier
     _applyFilters();
   }
 
-  void _applyFilters() {
+  List<ReceiptModel> _computeFilteredList() {
     final query = _searchQuery;
+    return receiptentries.where((entry) {
+      final data = entry.data;
+      final partyEntry = _partyLedgerEntry(data);
 
+      final party = (partyEntry?['ledgerName'] ?? '')
+          .toString()
+          .toLowerCase();
+      final vchno = (data['voucherNumber'] ?? '').toString().toLowerCase();
+      final vchtype = (data['voucherTypeName'] ?? '')
+          .toString()
+          .toLowerCase();
+      final amount = (partyEntry?['amount'] ?? '').toString().toLowerCase();
+
+      final bool matchesSearch =
+          query.isEmpty ||
+          party.contains(query) ||
+          vchno.contains(query) ||
+          vchtype.contains(query) ||
+          amount.contains(query);
+
+      final bool matchesDate = _matchesDateFilter(entry);
+
+      return matchesSearch && matchesDate;
+    }).toList();
+  }
+
+  void _applyFilters() {
     _commit(() {
-      filteredReceiptEntries = receiptentries.where((entry) {
-        final data = entry.data;
-        final partyEntry = _partyLedgerEntry(data);
-
-        final party = (partyEntry?['ledgerName'] ?? '')
-            .toString()
-            .toLowerCase();
-        final vchno = (data['voucherNumber'] ?? '').toString().toLowerCase();
-        final vchtype = (data['voucherTypeName'] ?? '')
-            .toString()
-            .toLowerCase();
-        final amount = (partyEntry?['amount'] ?? '').toString().toLowerCase();
-
-        final bool matchesSearch =
-            query.isEmpty ||
-            party.contains(query) ||
-            vchno.contains(query) ||
-            vchtype.contains(query) ||
-            amount.contains(query);
-
-        final bool matchesDate = _matchesDateFilter(entry);
-
-        return matchesSearch && matchesDate;
-      }).toList();
-
+      filteredReceiptEntries = _computeFilteredList();
       isVisibleNoReceiptEntryFound = filteredReceiptEntries.isEmpty;
     });
   }

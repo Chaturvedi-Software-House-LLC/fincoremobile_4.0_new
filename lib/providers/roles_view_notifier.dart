@@ -9,6 +9,7 @@ class RolesViewState {
   final bool isRolesVisible;
   final bool isUserVisible;
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isVisibleNoRoleFound;
   final List<RoleModel> roles;
   final List<RoleModel> filteredRoles;
@@ -19,6 +20,7 @@ class RolesViewState {
     this.isRolesVisible = true,
     this.isUserVisible = true,
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isVisibleNoRoleFound = false,
     this.roles = const [],
     this.filteredRoles = const [],
@@ -30,6 +32,7 @@ class RolesViewState {
     bool? isRolesVisible,
     bool? isUserVisible,
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isVisibleNoRoleFound,
     List<RoleModel>? roles,
     List<RoleModel>? filteredRoles,
@@ -41,6 +44,7 @@ class RolesViewState {
       isRolesVisible: isRolesVisible ?? this.isRolesVisible,
       isUserVisible: isUserVisible ?? this.isUserVisible,
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isVisibleNoRoleFound: isVisibleNoRoleFound ?? this.isVisibleNoRoleFound,
       roles: roles ?? this.roles,
       filteredRoles: filteredRoles ?? this.filteredRoles,
@@ -53,6 +57,13 @@ class RolesViewState {
 class RolesViewNotifier extends StateNotifier<RolesViewState> {
   final Ref _ref;
   String _searchQuery = '';
+
+  static const int _pageLimit = 20;
+  int _requestGen = 0;
+  int? _nextPage = 2;
+  int _totalPages = 1;
+
+  bool get canLoadMoreRoles => _nextPage != null;
 
   RolesViewNotifier(this._ref) : super(const RolesViewState()) {
     _init();
@@ -101,13 +112,19 @@ class RolesViewNotifier extends StateNotifier<RolesViewState> {
   /// `serialno` in the request body - no param needed here anymore.
   Future<void> fetchRoles() async {
     if (!mounted) return;
+    final myGen = ++_requestGen;
     state = state.copyWith(isLoading: true);
     try {
-      final result =
-          await _ref.read(identityRepositoryProvider).listRoles(limit: 100);
-      if (!mounted) return;
+      final result = await _ref
+          .read(identityRepositoryProvider)
+          .listRoles(page: 1, limit: _pageLimit);
+      if (!mounted || myGen != _requestGen) return;
       final items = (result.data as List).cast<Map<String, dynamic>>();
       final roles = items.map(RoleModel.fromJson).toList();
+
+      _totalPages = (result.meta?['lastPage'] as int?) ?? 1;
+      _nextPage = _totalPages > 1 ? 2 : null;
+
       final filtered = _searchQuery.trim().isEmpty
           ? List<RoleModel>.from(roles)
           : roles
@@ -117,7 +134,7 @@ class RolesViewNotifier extends StateNotifier<RolesViewState> {
       state = state.copyWith(
         roles: roles,
         filteredRoles: filtered,
-        isVisibleNoRoleFound: roles.isEmpty,
+        isVisibleNoRoleFound: filtered.isEmpty && _nextPage == null,
         isLoading: false,
       );
     } on ApiException catch (e) {
@@ -129,6 +146,50 @@ class RolesViewNotifier extends StateNotifier<RolesViewState> {
         isLoading: false,
         errorMessage: 'Could not reach the server. Please try again.',
       );
+    }
+  }
+
+  /// Fetches the next page of roles and appends it - called by
+  /// `RolesView.dart`'s `ScrollController` listener when the user scrolls
+  /// near the bottom.
+  Future<void> loadMoreRoles() async {
+    if (!mounted || state.isLoadingMore) return;
+    final page = _nextPage;
+    if (page == null || page > _totalPages) {
+      _nextPage = null;
+      return;
+    }
+    final myGen = _requestGen;
+    state = state.copyWith(isLoadingMore: true);
+    try {
+      final result = await _ref
+          .read(identityRepositoryProvider)
+          .listRoles(page: page, limit: _pageLimit);
+      if (!mounted || myGen != _requestGen) {
+        if (mounted) state = state.copyWith(isLoadingMore: false);
+        return;
+      }
+      final items = (result.data as List).cast<Map<String, dynamic>>();
+      final newRoles = items.map(RoleModel.fromJson).toList();
+      final roles = [...state.roles, ...newRoles];
+      _nextPage = page + 1 <= _totalPages ? page + 1 : null;
+
+      final filtered = _searchQuery.trim().isEmpty
+          ? List<RoleModel>.from(roles)
+          : roles
+              .where((r) =>
+                  r.name.toLowerCase().contains(_searchQuery.toLowerCase()))
+              .toList();
+      state = state.copyWith(
+        roles: roles,
+        filteredRoles: filtered,
+        isVisibleNoRoleFound: filtered.isEmpty && _nextPage == null,
+        isLoadingMore: false,
+      );
+    } catch (e) {
+      if (mounted && myGen == _requestGen) {
+        state = state.copyWith(isLoadingMore: false);
+      }
     }
   }
 

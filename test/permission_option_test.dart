@@ -19,7 +19,7 @@ Map<String, dynamic> _permission({
 
 void main() {
   group('PermissionOption.fromJson', () {
-    test('keeps group unchanged for non-Entries permissions', () {
+    test('keeps group unchanged for non-Entry permissions', () {
       final option = PermissionOption.fromJson(_permission(
         id: '1',
         displayName: 'View Item Rate',
@@ -30,26 +30,26 @@ void main() {
       expect(option.group, 'Items');
     });
 
-    test('splits Entries:READ into the "Transactions" display group', () {
+    test('splits Entry:READ into the "Transactions" display group', () {
       final option = PermissionOption.fromJson(_permission(
         id: '1',
-        displayName: 'View Ledger in Entries',
-        group: 'Entries',
+        displayName: 'View Ledger in Entry',
+        group: 'Entry',
         resource: 'ENTRY_LEDGER',
         action: 'READ',
       ));
       expect(option.group, 'Transactions');
     });
 
-    test('keeps Entries:CREATE in the "Entries" display group', () {
+    test('keeps Entry:CREATE in the "Entry" display group', () {
       final option = PermissionOption.fromJson(_permission(
         id: '1',
         displayName: 'Create Sales Entry',
-        group: 'Entries',
+        group: 'Entry',
         resource: 'ENTRY_SALES',
         action: 'CREATE',
       ));
-      expect(option.group, 'Entries');
+      expect(option.group, 'Entry');
     });
 
     test('overrides misleading backend display names', () {
@@ -119,13 +119,13 @@ void main() {
   });
 
   group('PermissionOption.groupByLegacyOrder', () {
-    test('orders groups Dashboard, Items, Party, Transactions, Entries, '
+    test('orders groups Dashboard, Items, Party, Transactions, Entry, '
         'Settings, Van Allocation regardless of input order', () {
       final permissions = [
         PermissionOption(
             id: '1', displayName: 'x', group: 'Van Allocation', resource: 'VAN_ALLOCATION'),
         PermissionOption(id: '2', displayName: 'x', group: 'Settings', resource: 'SETTINGS_X'),
-        PermissionOption(id: '3', displayName: 'x', group: 'Entries', resource: 'ENTRY_SALES'),
+        PermissionOption(id: '3', displayName: 'x', group: 'Entry', resource: 'ENTRY_SALES'),
         PermissionOption(
             id: '4', displayName: 'x', group: 'Transactions', resource: 'ENTRY_LEDGER'),
         PermissionOption(id: '5', displayName: 'x', group: 'Party', resource: 'PARTY_SALES'),
@@ -141,7 +141,7 @@ void main() {
         'Items',
         'Party',
         'Transactions',
-        'Entries',
+        'Entry',
         'Settings',
         'Van Allocation',
       ]);

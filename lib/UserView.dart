@@ -56,8 +56,34 @@ class _UserViewPageState extends ConsumerState<UserView>
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  final ScrollController _listScrollController = ScrollController();
+
+  void _onListScroll() {
+    final notifier = ref.read(userViewNotifierProvider.notifier);
+    final s = ref.read(userViewNotifierProvider);
+    if (s.isLoadingMore) return;
+    if (!notifier.canLoadMoreUsers) return;
+    if (!_listScrollController.hasClients) return;
+    final position = _listScrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      notifier.loadMoreUsers();
+    }
+  }
+
   void filterUsers(String query) {
     ref.read(userViewNotifierProvider.notifier).filterUsers(query);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _listScrollController.addListener(_onListScroll);
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _showConfirmationDialogAndNavigate(BuildContext context) async {
@@ -452,10 +478,27 @@ class _UserViewPageState extends ConsumerState<UserView>
 
                   Expanded(
                     child: ListView.builder(
+                      controller: _listScrollController,
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                      itemCount: filteredUsers.length,
+                      itemCount:
+                          filteredUsers.length + (vm.isLoadingMore ? 1 : 0),
 
                       itemBuilder: (context, index) {
+                        if (index >= filteredUsers.length) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Center(
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: Colors.teal,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
                         final card = filteredUsers[index];
                         return Container(
                           margin: const EdgeInsets.only(bottom: 5),

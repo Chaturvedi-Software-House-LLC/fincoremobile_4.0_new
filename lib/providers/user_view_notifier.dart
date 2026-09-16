@@ -11,6 +11,7 @@ class UserViewState {
   final bool isRolesVisible;
   final bool isUserVisible;
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isVisibleNoUserFound;
   final List<UserModel> users;
   final List<UserModel> filteredUsers;
@@ -21,6 +22,7 @@ class UserViewState {
     this.isRolesVisible = true,
     this.isUserVisible = true,
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isVisibleNoUserFound = false,
     this.users = const [],
     this.filteredUsers = const [],
@@ -32,6 +34,7 @@ class UserViewState {
     bool? isRolesVisible,
     bool? isUserVisible,
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isVisibleNoUserFound,
     List<UserModel>? users,
     List<UserModel>? filteredUsers,
@@ -43,6 +46,7 @@ class UserViewState {
       isRolesVisible: isRolesVisible ?? this.isRolesVisible,
       isUserVisible: isUserVisible ?? this.isUserVisible,
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isVisibleNoUserFound: isVisibleNoUserFound ?? this.isVisibleNoUserFound,
       users: users ?? this.users,
       filteredUsers: filteredUsers ?? this.filteredUsers,
@@ -62,6 +66,13 @@ class UserViewActionResult {
 class UserViewNotifier extends StateNotifier<UserViewState> {
   final Ref _ref;
   String _searchQuery = '';
+
+  static const int _pageLimit = 20;
+  int _requestGen = 0;
+  int? _nextPage = 2;
+  int _totalPages = 1;
+
+  bool get canLoadMoreUsers => _nextPage != null;
 
   UserViewNotifier(this._ref) : super(const UserViewState()) {
     _init();
@@ -104,30 +115,40 @@ class UserViewNotifier extends StateNotifier<UserViewState> {
   /// Company scoping now comes from the company-user session's token (see
   /// company-user.controller.ts's `findAll`), not a `serialno` in the
   /// request body - no param needed here anymore.
+  List<UserModel> _filtered(List<UserModel> users) {
+    final filtered = (_searchQuery.trim().isEmpty
+        ? List<UserModel>.from(users)
+        : users.where((u) {
+            final lower = _searchQuery.toLowerCase();
+            return u.name.toLowerCase().contains(lower) ||
+                u.email.toLowerCase().contains(lower) ||
+                u.roleName.toLowerCase().contains(lower);
+          }).toList())
+      ..sort(_compareUsers);
+    return filtered;
+  }
+
   Future<void> fetchUsers() async {
+    final myGen = ++_requestGen;
     state = state.copyWith(isLoading: true);
     try {
       final result = await _ref
           .read(identityRepositoryProvider)
-          .listCompanyUsers(limit: 100);
+          .listCompanyUsers(page: 1, limit: _pageLimit);
+      if (myGen != _requestGen) return; // superseded while awaiting
       final items = (result.data as List).cast<Map<String, dynamic>>();
+
+      _totalPages = (result.meta?['lastPage'] as int?) ?? 1;
+      _nextPage = _totalPages > 1 ? 2 : null;
 
       final users = items.map(UserModel.fromJson).toList()
         ..sort(_compareUsers);
-      final filtered = (_searchQuery.trim().isEmpty
-          ? List<UserModel>.from(users)
-          : users.where((u) {
-              final lower = _searchQuery.toLowerCase();
-              return u.name.toLowerCase().contains(lower) ||
-                  u.email.toLowerCase().contains(lower) ||
-                  u.roleName.toLowerCase().contains(lower);
-            }).toList())
-        ..sort(_compareUsers);
+      final filtered = _filtered(users);
 
       state = state.copyWith(
         users: users,
         filteredUsers: filtered,
-        isVisibleNoUserFound: filtered.isEmpty,
+        isVisibleNoUserFound: filtered.isEmpty && _nextPage == null,
         isLoading: false,
       );
     } on ApiException catch (e) {
@@ -137,6 +158,44 @@ class UserViewNotifier extends StateNotifier<UserViewState> {
         isLoading: false,
         errorMessage: 'Could not reach the server. Please try again.',
       );
+    }
+  }
+
+  /// Fetches the next page of company users and appends it - called by
+  /// `UserView.dart`'s `ScrollController` listener.
+  Future<void> loadMoreUsers() async {
+    if (state.isLoadingMore) return;
+    final page = _nextPage;
+    if (page == null || page > _totalPages) {
+      _nextPage = null;
+      return;
+    }
+    final myGen = _requestGen;
+    state = state.copyWith(isLoadingMore: true);
+    try {
+      final result = await _ref
+          .read(identityRepositoryProvider)
+          .listCompanyUsers(page: page, limit: _pageLimit);
+      if (myGen != _requestGen) {
+        state = state.copyWith(isLoadingMore: false);
+        return;
+      }
+      final items = (result.data as List).cast<Map<String, dynamic>>();
+      final newUsers = items.map(UserModel.fromJson).toList();
+      final users = [...state.users, ...newUsers]..sort(_compareUsers);
+      _nextPage = page + 1 <= _totalPages ? page + 1 : null;
+
+      final filtered = _filtered(users);
+      state = state.copyWith(
+        users: users,
+        filteredUsers: filtered,
+        isVisibleNoUserFound: filtered.isEmpty && _nextPage == null,
+        isLoadingMore: false,
+      );
+    } catch (e) {
+      if (myGen == _requestGen) {
+        state = state.copyWith(isLoadingMore: false);
+      }
     }
   }
 

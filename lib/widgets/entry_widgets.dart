@@ -1932,6 +1932,139 @@ Widget buildRoleFormCard({
   );
 }
 
+/// Generic skeleton placeholder for a simple single-card form screen (a
+/// title + a handful of labeled fields) - for screens whose initial data
+/// load (e.g. Modify User fetching the existing user + roles list) gated
+/// the whole body behind a bare spinner instead of a shimmer matching the
+/// form it's about to show.
+Widget buildSimpleFormSkeleton(BuildContext context, {int fieldCount = 4}) {
+  final theme = Theme.of(context);
+  return ShimmerLoading(
+    child: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const ShimmerBox(height: 18, width: 160),
+              const SizedBox(height: 20),
+              for (int i = 0; i < fieldCount; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      ShimmerBox(height: 12, width: 110),
+                      SizedBox(height: 8),
+                      ShimmerBox(height: 50, borderRadius: 14),
+                    ],
+                  ),
+                ),
+              const ShimmerBox(height: 46, borderRadius: 14),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Skeleton placeholder for [buildRoleFormCard] - shown by Add/Modify Role
+/// while the permission catalog (and, for Modify, the role's own granted
+/// set) is still loading, instead of a bare centered spinner. Mirrors the
+/// real card's shape (name field + a few permission-group cards of
+/// pill-shaped chips) so the loading state doesn't visually jump once the
+/// real content swaps in.
+Widget buildRoleFormSkeleton(BuildContext context) {
+  final theme = Theme.of(context);
+  Widget card(Widget child) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: theme.brightness == Brightness.dark
+              ? Border.all(color: Colors.white.withOpacity(0.10), width: 1)
+              : null,
+          boxShadow: const [
+            BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: child,
+        ),
+      );
+
+  return ShimmerLoading(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      children: [
+        card(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const ShimmerBox(width: 36, height: 36, borderRadius: 18),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        ShimmerBox(height: 15, width: 160),
+                        SizedBox(height: 8),
+                        ShimmerBox(height: 11, width: 210),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const ShimmerBox(height: 52, borderRadius: 22),
+            ],
+          ),
+        ),
+        for (int i = 0; i < 3; i++)
+          card(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: const [
+                        ShimmerBox(width: 36, height: 36, borderRadius: 18),
+                        SizedBox(width: 12),
+                        ShimmerBox(height: 15, width: 100),
+                      ],
+                    ),
+                    const ShimmerBox(width: 40, height: 22, borderRadius: 12),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (int j = 0; j < 4; j++)
+                      const ShimmerBox(width: 110, height: 38, borderRadius: 20),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class _PermissionGroupCard extends StatelessWidget {
   final String groupName;
   final List<PermissionOption> permissions;

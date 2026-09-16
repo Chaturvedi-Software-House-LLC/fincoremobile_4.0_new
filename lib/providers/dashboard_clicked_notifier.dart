@@ -93,6 +93,8 @@ class DashboardClickedState {
   final String selectedVoucher;
   final List<String> spinnerList;
 
+  final bool isLoadingMoreSalePurcCash;
+
   const DashboardClickedState({
     required this.startDateString,
     required this.endDateString,
@@ -131,6 +133,7 @@ class DashboardClickedState {
     required this.isLoading,
     required this.selectedVoucher,
     required this.spinnerList,
+    required this.isLoadingMoreSalePurcCash,
   });
 }
 
@@ -203,6 +206,7 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
           isLoading: false,
           selectedVoucher: '',
           spinnerList: const [],
+          isLoadingMoreSalePurcCash: false,
         ),
       ) {
     _init();
@@ -253,6 +257,7 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
     isLoading: _isLoading,
     selectedVoucher: _selectedvoucher is String ? _selectedvoucher : '',
     spinnerList: List.unmodifiable(spinner_list),
+    isLoadingMoreSalePurcCash: _isLoadingMoreSalePurcCash,
   );
 
   // ---- verbatim-ported mutable fields (same names as the original State) ----
@@ -306,6 +311,32 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
   String? company = "";
 
   bool _isLoading = false;
+
+  // ---- Sales/Purchase/Cash list: scroll-triggered pagination ----
+  //
+  // `/vouchers` is paginated server-side (`page`/`limit`), but a single KPI
+  // tile (e.g. "Purchase") can map to more than one `voucherTypeMasterId`
+  // (Purchase + Debit Note) - there's no single paginated stream for "all
+  // of these types together". Each active type gets its own independent
+  // page cursor in `_dcTypeCursors`; one "load a chunk" step asks every
+  // still-open cursor for its next page (limit [_dcPageLimit] each),
+  // merges + date-sorts the combined batch, and appends it - so a scroll
+  // step can add up to `limit * <active type count>` raw rows pre-filter,
+  // not exactly `limit`, but each individual server page stays at the
+  // requested size. `null` cursor value = that type's pages are exhausted.
+  static const int _dcPageLimit = 20;
+  int _dcRequestGen = 0;
+  bool _isLoadingMoreSalePurcCash = false;
+  Map<int, int?>? _dcTypeCursors; // voucherTypeMasterId -> next page or null
+  Map<int, int>? _dcTypeTotalPages;
+  DateTime? _dcFrom;
+  DateTime? _dcTo;
+  String _dcLedgerFilter = '';
+  String _dcVchNameFilter = '';
+  Set<String>? _dcAllowedTypeNames;
+
+  bool get canLoadMoreSalePurcCash =>
+      _dcTypeCursors?.values.any((c) => c != null) ?? false;
 
   dynamic _selectedvoucher = "";
   List<String> spinner_list = [];
@@ -1010,6 +1041,82 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
     );
   }
 
+  /// [voucher] -> [Sale_purc_cash] mapping shared by the initial page load
+  /// and every subsequent [loadMoreSalesPurchaseCash] chunk, applying the
+  /// same `allowedTypes`/`vchname`/`ledger` client-side filters the
+  /// original single-shot fetch used (server-side `voucherTypeMasterId`
+  /// narrows which vouchers we ask for at all, but a KPI tile's
+  /// `allowedTypes` set and the ledger-name filter still need to be
+  /// re-checked per row here).
+  Sale_purc_cash? _mapSalePurcCash(
+    Map<String, dynamic> voucher, {
+    required String vchname,
+    required String ledger,
+  }) {
+    final allowedTypes = _dcAllowedTypeNames;
+    final voucherType = (voucher['voucherTypeName'] as String? ?? '')
+        .replaceAll(' ', '');
+    if (allowedTypes != null && !allowedTypes.contains(voucherType)) {
+      return null;
+    }
+    if (vchname.isNotEmpty && voucher['voucherTypeName'] != vchname) {
+      return null;
+    }
+
+    final entries =
+        (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+        const [];
+    if (entries.isEmpty) return null;
+
+    if (ledger.isNotEmpty && !entries.any((e) => e['ledgerName'] == ledger)) {
+      return null;
+    }
+
+    final debitTotal = entries
+        .where((e) => e['isDebit'] == true)
+        .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+
+    return Sale_purc_cash.fromJson({
+      'vchname': voucher['voucherTypeName'] ?? '',
+      'vchno': voucher['number'] ?? '',
+      'amount': debitTotal,
+      'vchdate': voucher['date'] ?? '',
+      'ledger': entries.first['ledgerName'] ?? '',
+      'isoptional': voucher['isOptional'] ?? false,
+      'ispostdated': voucher['isPostDated'] ?? false,
+      'refno': voucher['reference'] ?? '',
+      'refdate': voucher['referenceDate'] ?? '',
+      'masterid': voucher['masterId'] ?? '',
+      'ledgers': [
+        for (final e in entries)
+          {
+            'ledgername': e['ledgerName'] ?? '',
+            'amount': parseMoneyField(e['amount']),
+          },
+      ],
+    });
+  }
+
+  void _applySalePurcCashSort() {
+    if (filteredItems_sale_purc_cash.isEmpty) return;
+    switch (selectedSortOption) {
+      case 'Default':
+        sortByDefault();
+      case 'Newest to Oldest':
+        sortByDateHightoLow();
+      case 'Oldest to Newest':
+        sortByDateLowtoHigh();
+      case 'A->Z':
+        sortByAlphabetAtoZ();
+      case 'Z->A':
+        sortByAlphabetZtoA();
+      case 'Amount High to Low':
+        sortByAmountHightoLow();
+      case 'Amount Low to High':
+        sortByAmountLowtoHigh();
+    }
+  }
+
   Future<void> _fetchSalesPurchaseCashTallyApi({
     required String ledgroup,
     required String startdate,
@@ -1017,6 +1124,7 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
     required String vchname,
     required String ledger,
   }) async {
+    final myGen = ++_dcRequestGen;
     _commit(() {
       _isLoading = true;
       isSortVisible = false;
@@ -1039,77 +1147,59 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
           ? purchaseTypes
           : null;
 
-      final List<Map<String, dynamic>> vouchers;
+      _dcFrom = from;
+      _dcTo = to;
+      _dcLedgerFilter = ledger;
+      _dcVchNameFilter = vchname;
+      _dcAllowedTypeNames = allowedTypes;
+
+      // One page-cursor per active voucher type - a single explicit
+      // `vchname` narrows to exactly one type; otherwise every type whose
+      // reserved name is in `allowedTypes` gets its own cursor (or, with
+      // no tile filter at all, a single `null`-type "everything" cursor).
+      final Set<int?> typeIds;
       if (vchname.isNotEmpty &&
           _voucherTypeMasterIdByName.containsKey(vchname)) {
-        vouchers = await _voucherRepository.listInRange(
-          from: from,
-          to: to,
-          voucherTypeMasterId: _voucherTypeMasterIdByName[vchname],
-        );
+        typeIds = {_voucherTypeMasterIdByName[vchname]};
       } else if (allowedTypes != null) {
         final ids = _voucherTypeMasterIdByName.entries
             .where((e) => allowedTypes.contains(e.key.replaceAll(' ', '')))
-            .map((e) => e.value)
+            .map<int?>((e) => e.value)
             .toSet();
-        vouchers = ids.isEmpty
-            ? await _voucherRepository.listInRange(from: from, to: to)
-            : await _voucherRepository.listInRangeForTypes(
-                from: from,
-                to: to,
-                voucherTypeMasterIds: ids,
-              );
+        typeIds = ids.isEmpty ? {null} : ids;
       } else {
-        vouchers = await _voucherRepository.listInRange(from: from, to: to);
+        typeIds = {null};
       }
 
+      final cursors = <int, int?>{};
+      final totals = <int, int>{};
       final items = <Sale_purc_cash>[];
-      for (final voucher in vouchers) {
-        final voucherType = (voucher['voucherTypeName'] as String? ?? '')
-            .replaceAll(' ', '');
-        if (allowedTypes != null && !allowedTypes.contains(voucherType)) {
-          continue;
-        }
-        if (vchname.isNotEmpty && voucher['voucherTypeName'] != vchname) {
-          continue;
-        }
 
-        final entries =
-            (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-            const [];
-        if (entries.isEmpty) continue;
-
-        if (ledger.isNotEmpty &&
-            !entries.any((e) => e['ledgerName'] == ledger)) {
-          continue;
-        }
-
-        final debitTotal = entries
-            .where((e) => e['isDebit'] == true)
-            .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-
-        items.add(
-          Sale_purc_cash.fromJson({
-            'vchname': voucher['voucherTypeName'] ?? '',
-            'vchno': voucher['number'] ?? '',
-            'amount': debitTotal,
-            'vchdate': voucher['date'] ?? '',
-            'ledger': entries.first['ledgerName'] ?? '',
-            'isoptional': voucher['isOptional'] ?? false,
-            'ispostdated': voucher['isPostDated'] ?? false,
-            'refno': voucher['reference'] ?? '',
-            'refdate': voucher['referenceDate'] ?? '',
-            'masterid': voucher['masterId'] ?? '',
-            'ledgers': [
-              for (final e in entries)
-                {
-                  'ledgername': e['ledgerName'] ?? '',
-                  'amount': parseMoneyField(e['amount']),
-                },
-            ],
-          }),
+      for (final typeId in typeIds) {
+        final key = typeId ?? -1;
+        final page = await _voucherRepository.listPage(
+          page: 1,
+          limit: _dcPageLimit,
+          voucherTypeMasterId: typeId,
+          from: from,
+          to: to,
         );
+        totals[key] = page.totalPages;
+        cursors[key] = page.totalPages > 1 ? 2 : null;
+        for (final voucher in page.items) {
+          final mapped = _mapSalePurcCash(
+            voucher,
+            vchname: vchname,
+            ledger: ledger,
+          );
+          if (mapped != null) items.add(mapped);
+        }
       }
+
+      if (myGen != _dcRequestGen) return; // superseded while awaiting
+
+      _dcTypeCursors = cursors;
+      _dcTypeTotalPages = totals;
 
       if (!mounted) return;
       _commit(() {
@@ -1118,29 +1208,13 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
           ..clear()
           ..addAll(items);
         filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
-        isVisibleNoDataFound = filteredItems_sale_purc_cash.isEmpty;
+        isVisibleNoDataFound =
+            filteredItems_sale_purc_cash.isEmpty && !canLoadMoreSalePurcCash;
         isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
         _isLoading = false;
       });
 
-      if (filteredItems_sale_purc_cash.isNotEmpty) {
-        switch (selectedSortOption) {
-          case 'Default':
-            sortByDefault();
-          case 'Newest to Oldest':
-            sortByDateHightoLow();
-          case 'Oldest to Newest':
-            sortByDateLowtoHigh();
-          case 'A->Z':
-            sortByAlphabetAtoZ();
-          case 'Z->A':
-            sortByAlphabetZtoA();
-          case 'Amount High to Low':
-            sortByAmountHightoLow();
-          case 'Amount Low to High':
-            sortByAmountLowtoHigh();
-        }
-      }
+      _applySalePurcCashSort();
       if (_isTopPartiesView) _computeTopParties();
     } catch (e) {
       if (!mounted) return;
@@ -1149,6 +1223,74 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
         isSortVisible = false;
         _isLoading = false;
       });
+    }
+  }
+
+  /// Fetches the next page for every voucher-type stream still open
+  /// (see the field doc-comment above [_dcTypeCursors]), merges the
+  /// combined batch in date order, and appends it - called by
+  /// `DashboardClicked.dart`'s sales/purchase/cash `ScrollController`
+  /// listener when the user scrolls near the bottom of the list.
+  Future<void> loadMoreSalesPurchaseCash() async {
+    if (_isLoadingMoreSalePurcCash) return;
+    if (!canLoadMoreSalePurcCash) return;
+    final cursors = _dcTypeCursors;
+    final from = _dcFrom;
+    final to = _dcTo;
+    if (cursors == null || from == null || to == null) return;
+
+    final myGen = _dcRequestGen;
+    _commit(() => _isLoadingMoreSalePurcCash = true);
+
+    try {
+      final batch = <Sale_purc_cash>[];
+      final nextCursors = Map<int, int?>.from(cursors);
+
+      for (final entry in cursors.entries) {
+        final page = entry.value;
+        if (page == null) continue;
+        final typeId = entry.key == -1 ? null : entry.key;
+        final result = await _voucherRepository.listPage(
+          page: page,
+          limit: _dcPageLimit,
+          voucherTypeMasterId: typeId,
+          from: from,
+          to: to,
+        );
+        if (myGen != _dcRequestGen) {
+          _commit(() => _isLoadingMoreSalePurcCash = false);
+          return;
+        }
+        final totalPages = _dcTypeTotalPages?[entry.key] ?? page;
+        nextCursors[entry.key] = page + 1 <= totalPages ? page + 1 : null;
+        for (final voucher in result.items) {
+          final mapped = _mapSalePurcCash(
+            voucher,
+            vchname: _dcVchNameFilter,
+            ledger: _dcLedgerFilter,
+          );
+          if (mapped != null) batch.add(mapped);
+        }
+      }
+
+      batch.sort((a, b) => a.vchdate.compareTo(b.vchdate));
+      _dcTypeCursors = nextCursors;
+
+      if (!mounted) return;
+      _commit(() {
+        sales_purc_cash_list.addAll(batch);
+        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
+        isVisibleNoDataFound =
+            filteredItems_sale_purc_cash.isEmpty && !canLoadMoreSalePurcCash;
+        isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
+        _isLoadingMoreSalePurcCash = false;
+      });
+      _applySalePurcCashSort();
+      if (_isTopPartiesView) _computeTopParties();
+    } catch (e) {
+      if (myGen == _dcRequestGen) {
+        _commit(() => _isLoadingMoreSalePurcCash = false);
+      }
     }
   }
 

@@ -1699,10 +1699,25 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
     }
   }
 
+  /// Fires on every scroll of the page's outer [CustomScrollView]
+  /// ([_scrollFabController]) - triggers loading the next page of the
+  /// sales/purchase/cash list once the user scrolls near the bottom,
+  /// mirroring `Transactions.dart`'s `_onTransactionsScroll`.
+  void _onDashboardClickedScroll() {
+    if (_s.isLoadingMoreSalePurcCash) return;
+    if (!_notifier.canLoadMoreSalePurcCash) return;
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      _notifier.loadMoreSalesPurchaseCash();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+    _scrollFabController.addListener(_onDashboardClickedScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
@@ -1974,6 +1989,19 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                         color: Colors.white,
                         size: 24,
                       ),
+              ),
+            if (isSortVisible)
+              IconButton(
+                tooltip: selectedSortOption.isEmpty ||
+                        selectedSortOption == 'Default'
+                    ? 'Sort'
+                    : selectedSortOption,
+                onPressed: () => _showSelectionWindow(context),
+                icon: const Icon(
+                  Icons.swap_vert_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
             IconButton(
               onPressed: () {
@@ -2861,6 +2889,23 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                                   );
                                 },
                               ),
+
+                              // Bottom-of-list spinner while the next page
+                              // of sales/purchase/cash vouchers loads.
+                              if (_s.isLoadingMoreSalePurcCash)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 16),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.4,
+                                        color: Colors.teal,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
 
@@ -3174,68 +3219,6 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                 ),
               ],
             ),
-
-            if (isSortVisible)
-              Positioned(
-                bottom: 15,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () => _showSelectionWindow(context),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              app_color,
-                              app_color.withValues(alpha: 0.85),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: app_color.withValues(alpha: 0.35),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.swap_vert_rounded,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              selectedSortOption.isEmpty ||
-                                      selectedSortOption == 'Default'
-                                  ? 'Sort'
-                                  : selectedSortOption,
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
 
             if (_isLoading)
               Positioned.fill(

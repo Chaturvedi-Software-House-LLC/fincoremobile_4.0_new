@@ -141,7 +141,7 @@ class _ModifyVanAllocationScreenState
         ),
       ),
       body: state.isLoading
-          ? const Center(child: CircularProgressIndicator.adaptive())
+          ? _buildSkeletonForm()
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Container(
@@ -318,6 +318,40 @@ class _ModifyVanAllocationScreenState
       boxShadow: [
         BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 18, offset: const Offset(0, 8)),
       ],
+    );
+  }
+
+  Widget _buildSkeletonForm() {
+    return ShimmerLoading(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: _cardDecoration(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const ShimmerBox(height: 18, width: 180),
+                const SizedBox(height: 24),
+                for (int i = 0; i < 5; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        ShimmerBox(height: 12, width: 120),
+                        SizedBox(height: 8),
+                        ShimmerBox(height: 52, borderRadius: 22),
+                      ],
+                    ),
+                  ),
+                const ShimmerBox(height: 48, borderRadius: 22),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

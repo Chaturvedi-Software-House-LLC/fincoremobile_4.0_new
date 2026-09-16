@@ -1,6 +1,22 @@
 import 'pagination_helper.dart';
 import 'tally_api_client.dart';
 
+/// One page of a `/voucher-entries` list call - see [VoucherRepository]'s
+/// `VoucherPage` (the same shape) for why a caller wanting real incremental
+/// (infinite-scroll) loading needs this instead of [VoucherEntryRepository.listAll]'s
+/// "fetch every page up front" behavior.
+class VoucherEntryPage {
+  VoucherEntryPage({
+    required this.items,
+    required this.page,
+    required this.totalPages,
+  });
+
+  final List<Map<String, dynamic>> items;
+  final int page;
+  final int totalPages;
+}
+
 /// `tally-data/companies/:companyId/voucher-entries` - the app-originated
 /// voucher family tally-api added alongside its Tally-synced `Voucher`
 /// table (see tally-api's CLAUDE.md, "App-originated vouchers: the
@@ -71,6 +87,25 @@ class VoucherEntryRepository {
   Future<List<Map<String, dynamic>>> listAll() => fetchAllPages(
         (page) => _client.getForCompany('/voucher-entries?page=$page&limit=100'),
       );
+
+  /// One raw page of `/voucher-entries` (server's own `date DESC, id DESC`
+  /// order - no server-side `voucherTypeMasterId` filter exists on this
+  /// endpoint, unlike `/vouchers`, so a caller narrowing to one voucher
+  /// type - the Pending*Entry screens' "my drafts of this type" view -
+  /// must still filter client-side per page, same as before [listAll] was
+  /// an option; this just lets that happen incrementally instead of
+  /// fetching every page up front).
+  Future<VoucherEntryPage> listPage({required int page, int limit = 20}) async {
+    final result = await _client.getForCompany(
+      '/voucher-entries?page=$page&limit=$limit',
+    );
+    return VoucherEntryPage(
+      items: (result.data as List).cast<Map<String, dynamic>>(),
+      page: page,
+      // Same `lastPage`-not-`totalPages` naming quirk as VoucherRepository.listPage.
+      totalPages: (result.meta?['lastPage'] as int?) ?? 1,
+    );
+  }
 
   /// `GET .../voucher-entries/voucher-numbers` - server-side "voucher
   /// numbers already in use" for [voucherTypeMasterId] in `[from, to]`,

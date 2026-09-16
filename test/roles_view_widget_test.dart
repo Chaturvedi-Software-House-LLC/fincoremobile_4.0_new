@@ -31,10 +31,11 @@ void main() {
       'company_name': 'Test Co',
       'secbtnaccess': 'True',
     });
-    when(() => repo.listRoles(limit: 100)).thenAnswer((_) async => ApiResult([
-          {'id': '1', 'name': 'Admin', 'permissions': []},
-          {'id': '2', 'name': 'Driver', 'permissions': []},
-        ], null));
+    when(() => repo.listRoles(page: 1, limit: 20))
+        .thenAnswer((_) async => ApiResult([
+              {'id': '1', 'name': 'Admin', 'permissions': []},
+              {'id': '2', 'name': 'Driver', 'permissions': []},
+            ], null));
   });
 
   Widget buildApp() {

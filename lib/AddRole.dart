@@ -72,14 +72,20 @@ class PermissionOption {
     final rawGroup = json['group'] as String;
     final resource = json['resource'] as String;
     final action = json['action'] as String?;
-    // The legacy app split what this catalog calls a single "Entries"
-    // group into two separate sections: "Transactions Access" (viewing
+    // The legacy app split what this catalog calls a single "Entry" group
+    // into two separate sections: "Transactions Access" (viewing
     // ledger/bills/inventory/cost-centre/post-dated entries - the READ
-    // half) and "Entry Access" (actually creating a sales/receipt/sales
-    // order/delivery note voucher - the CREATE half). Mirrored here by
-    // display group so the UI matches the legacy app exactly, even though
-    // the backend only has one "Entries" group.
-    final displayGroup = (rawGroup == 'Entries' && action == 'READ')
+    // half, none of which have a matching creation screen in this app) and
+    // "Entry Access" (actually creating a sales/receipt/sales order/
+    // delivery note voucher - the CREATE half). Mirrored here by display
+    // group so the UI matches the legacy app exactly, even though the
+    // backend only has one "Entry" group. The backend's raw group name is
+    // "Entry" (singular) - comparing against "Entries" here previously
+    // never matched, so every READ permission (Postdated Transactions,
+    // Cost Centre/Inventory/Ledger/Bills Entries) wrongly stayed mixed
+    // into the CREATE-only "Entry" section shown on Add/Modify Role
+    // instead of moving to "Transactions".
+    final displayGroup = (rawGroup == 'Entry' && action == 'READ')
         ? 'Transactions'
         : rawGroup;
     return PermissionOption(
@@ -101,7 +107,7 @@ class PermissionOption {
     'Items',
     'Party',
     'Transactions',
-    'Entries',
+    'Entry',
     'Settings',
     'Van Allocation',
   ];
@@ -211,7 +217,7 @@ class _AddRolePageState extends ConsumerState<AddRole> {
         ),
       ),
       body: isLoadingPermissions
-          ? const Center(child: CircularProgressIndicator())
+          ? buildRoleFormSkeleton(context)
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
               children: [

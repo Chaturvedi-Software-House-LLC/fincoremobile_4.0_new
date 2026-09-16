@@ -225,6 +225,31 @@ class LedgerRepository {
     );
   }
 
+  /// One page of [outstandingBills] - used by callers that want real
+  /// incremental (infinite-scroll) loading of the bill-wise outstanding
+  /// list instead of [outstandingBills]'s "fetch every page up front"
+  /// behavior (mirrors [VoucherRepository.listPage]).
+  Future<LedgerPage> outstandingBillsPage({
+    required int page,
+    int limit = 30,
+    int? ledgerMasterId,
+    bool overdueOnly = false,
+  }) async {
+    final query = StringBuffer('?overdueOnly=$overdueOnly&page=$page&limit=$limit');
+    if (ledgerMasterId != null) query.write('&ledgerMasterId=$ledgerMasterId');
+    final result = await _client.getForCompany(
+      '/reports/ledgers/outstanding-bills$query',
+    );
+    return LedgerPage(
+      items: (result.data as List).cast<Map<String, dynamic>>(),
+      page: page,
+      // tally-api's pagination meta names this field `lastPage`, not
+      // `totalPages` - see this file's other `...Page` method for the same
+      // note.
+      totalPages: (result.meta?['lastPage'] as int?) ?? 1,
+    );
+  }
+
   /// `reports/ledgers/:ledgerMasterId/item-summary` - stock items transacted
   /// with this ledger as counterparty. PartyClicked.dart's Items Sold/
   /// Purchased list (legacy's `getItemSummary`).

@@ -4,12 +4,12 @@
 // line is active per environment until these move to a real build-time
 // config (--dart-define / flavors).
 //
-// NOT YET DEPLOYED: these currently point at localhost, matching each
-// repo's own PORT (tally-admin-api/.env.example: PORT=3000,
-// tally-api/.env.example: PORT=3001). Replace with the real deployed URLs
-// before testing against anything other than a local backend.
-const String tallyOauthBaseUrl = 'http://localhost:3000';
-const String tallyApiBaseUrl = 'http://localhost:3001';
+// Deployed on the Comhard cloud VM behind Caddy (reverse proxy + real
+// Let's Encrypt cert reusing fincorego.duckdns.org's DNS, but on separate
+// ports so the existing legacy IIS site on 80/443 stays untouched):
+// tally-admin-api (identity/auth) -> :8444, tally-api (Tally data) -> :8443.
+const String tallyOauthBaseUrl = 'https://fincorego.duckdns.org:8444';
+const String tallyApiBaseUrl = 'https://fincorego.duckdns.org:8443';
 
 // Both backends share the same global prefix + URI versioning scheme
 // (APP_PREFIX=api, defaultVersion: '1' - see each repo's main.ts).

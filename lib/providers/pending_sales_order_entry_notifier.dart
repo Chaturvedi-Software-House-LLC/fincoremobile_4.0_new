@@ -26,6 +26,7 @@ class PendingSalesOrderEntryState {
   final List<SalesOrderModel> filteredSalesOrderEntries;
   final bool isVisibleNoSalesOrderEntryFound;
   final bool isLoading;
+  final bool isLoadingMore;
   final String? serialNo;
   final DateTime? selectedSingleDate;
   final DateTimeRange? selectedDateRange;
@@ -35,6 +36,7 @@ class PendingSalesOrderEntryState {
     required this.filteredSalesOrderEntries,
     required this.isVisibleNoSalesOrderEntryFound,
     required this.isLoading,
+    required this.isLoadingMore,
     required this.serialNo,
     required this.selectedSingleDate,
     required this.selectedDateRange,
@@ -50,6 +52,7 @@ class PendingSalesOrderEntryNotifier
           filteredSalesOrderEntries: [],
           isVisibleNoSalesOrderEntryFound: false,
           isLoading: false,
+          isLoadingMore: false,
           serialNo: '',
           selectedSingleDate: null,
           selectedDateRange: null,
@@ -68,6 +71,7 @@ class PendingSalesOrderEntryNotifier
     filteredSalesOrderEntries: List.unmodifiable(filteredSalesOrderEntries),
     isVisibleNoSalesOrderEntryFound: isVisibleNoSalesOrderEntryFound,
     isLoading: _isLoading,
+    isLoadingMore: _isLoadingMore,
     serialNo: serial_no,
     selectedSingleDate: _selectedSingleDate,
     selectedDateRange: _selectedDateRange,
@@ -84,6 +88,18 @@ class PendingSalesOrderEntryNotifier
   String _searchQuery = '';
   DateTime? _selectedSingleDate;
   DateTimeRange? _selectedDateRange;
+
+  // ---- scroll-triggered pagination (server returns date DESC, id DESC) ----
+  static const int _pePageLimit = 20;
+  int _peRequestGen = 0;
+  bool _isLoadingMore = false;
+  int? _peNextPage = 2;
+  int _peTotalPages = 1;
+  Set<dynamic> _peAllowedMasterIds = {};
+  String? _peVoucherTypeNameFilter;
+  int _peSeq = 0;
+
+  bool get canLoadMoreSalesOrderEntries => _peNextPage != null;
 
   /// Verbatim port of `entrydelete`, minus the `showAppMessage`/context
   /// calls.
@@ -104,10 +120,23 @@ class PendingSalesOrderEntryNotifier
     return error;
   }
 
+  SalesOrderModel? _mapSalesOrderEntry(Map<String, dynamic> e) {
+    if (!_peAllowedMasterIds.contains(e['voucherTypeMasterId'])) return null;
+    final filterName = _peVoucherTypeNameFilter;
+    if (filterName != null &&
+        filterName.trim().isNotEmpty &&
+        (e['voucherTypeName'] ?? '').toString() != filterName) {
+      return null;
+    }
+    return SalesOrderModel.fromEntry(e, _peSeq++);
+  }
+
   /// Verbatim port of `fetchSalesOrderEntries`, minus the `showAppMessage`
   /// context call and the `_searchController.clear()`/`FocusManager`
-  /// widget-local resets.
+  /// widget-local resets - now fetches only page 1 up front (see
+  /// [loadMoreSalesOrderEntries] for the rest).
   Future<String?> fetchSalesOrderEntries() async {
+    final myGen = ++_peRequestGen;
     _commit(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
 
@@ -132,48 +161,37 @@ class PendingSalesOrderEntryNotifier
     try {
       final salesOrderVoucherTypes = await VoucherTypeRepository.instance
           .byReservedName('SALES_ORDER');
-      final allowedMasterIds = salesOrderVoucherTypes
+      _peAllowedMasterIds = salesOrderVoucherTypes
           .map((v) => v['masterId'])
           .toSet();
+      _peVoucherTypeNameFilter = voucherTypeName;
+      _peSeq = 0;
 
-      final entries = await VoucherEntryRepository.instance.listAll();
+      final firstPage = await VoucherEntryRepository.instance.listPage(
+        page: 1,
+        limit: _pePageLimit,
+      );
+      if (myGen != _peRequestGen) return null; // superseded while awaiting
 
-      final matching = entries.where((e) {
-        if (!allowedMasterIds.contains(e['voucherTypeMasterId'])) {
-          return false;
-        }
-        if (voucherTypeName != null && voucherTypeName!.trim().isNotEmpty) {
-          return (e['voucherTypeName'] ?? '').toString() == voucherTypeName;
-        }
-        return true;
-      }).toList();
+      _peTotalPages = firstPage.totalPages;
+      _peNextPage = firstPage.totalPages > 1 ? 2 : null;
+
+      final mapped = firstPage.items
+          .map(_mapSalesOrderEntry)
+          .whereType<SalesOrderModel>()
+          .toList();
 
       salesorderentries.clear();
       filteredSalesOrderEntries.clear();
-
-      int seq = 0;
-      salesorderentries.addAll(
-        matching.map((e) => SalesOrderModel.fromEntry(e, seq++)),
-      );
-
-      salesorderentries.sort((a, b) {
-        DateTime dateA = DateTime.parse(a.data['DATE']);
-        DateTime dateB = DateTime.parse(b.data['DATE']);
-        if (dateA != dateB) return dateB.compareTo(dateA);
-        final vchA =
-            int.tryParse((a.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        final vchB =
-            int.tryParse((b.data['VOUCHERNUMBER'] ?? '').toString()) ?? 0;
-        return vchB.compareTo(vchA);
-      });
-
+      salesorderentries.addAll(mapped);
       filteredSalesOrderEntries = List.from(salesorderentries);
 
       _commit(() {
         _searchQuery = '';
         _selectedSingleDate = null;
         _selectedDateRange = null;
-        isVisibleNoSalesOrderEntryFound = filteredSalesOrderEntries.isEmpty;
+        isVisibleNoSalesOrderEntryFound =
+            filteredSalesOrderEntries.isEmpty && _peNextPage == null;
         _isLoading = false;
       });
       return null;
@@ -197,37 +215,82 @@ class PendingSalesOrderEntryNotifier
     return error;
   }
 
+  /// Fetches the next `/voucher-entries` page and appends the entries
+  /// matching this screen's Sales-Order-voucher-type filter - called by
+  /// `PendingSalesOrderEntry.dart`'s `ScrollController` listener.
+  Future<void> loadMoreSalesOrderEntries() async {
+    if (_isLoadingMore) return;
+    final page = _peNextPage;
+    if (page == null || page > _peTotalPages) {
+      _peNextPage = null;
+      return;
+    }
+
+    final myGen = _peRequestGen;
+    _commit(() => _isLoadingMore = true);
+    try {
+      final result = await VoucherEntryRepository.instance.listPage(
+        page: page,
+        limit: _pePageLimit,
+      );
+      if (myGen != _peRequestGen) {
+        _commit(() => _isLoadingMore = false);
+        return;
+      }
+
+      final mapped = result.items
+          .map(_mapSalesOrderEntry)
+          .whereType<SalesOrderModel>()
+          .toList();
+      salesorderentries.addAll(mapped);
+      _peNextPage = page + 1 <= _peTotalPages ? page + 1 : null;
+
+      _commit(() {
+        filteredSalesOrderEntries = _computeFilteredList();
+        isVisibleNoSalesOrderEntryFound =
+            filteredSalesOrderEntries.isEmpty && _peNextPage == null;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (myGen == _peRequestGen) {
+        _commit(() => _isLoadingMore = false);
+      }
+    }
+  }
+
   void searchSalesOrder(String query) {
     _searchQuery = query.trim().toLowerCase();
     _applyFilters();
   }
 
-  void _applyFilters() {
+  List<SalesOrderModel> _computeFilteredList() {
     final query = _searchQuery;
+    return salesorderentries.where((entry) {
+      final data = entry.data;
 
+      final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
+      final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
+      final vchtype = (data['VOUCHERTYPENAME'] ?? '')
+          .toString()
+          .toLowerCase();
+      final amount = (data['totalAmount'] ?? '').toString().toLowerCase();
+
+      final bool matchesSearch =
+          query.isEmpty ||
+          party.contains(query) ||
+          vchno.contains(query) ||
+          vchtype.contains(query) ||
+          amount.contains(query);
+
+      final bool matchesDate = _matchesDateFilter(entry);
+
+      return matchesSearch && matchesDate;
+    }).toList();
+  }
+
+  void _applyFilters() {
     _commit(() {
-      filteredSalesOrderEntries = salesorderentries.where((entry) {
-        final data = entry.data;
-
-        final party = (data['PARTYLEDGERNAME'] ?? '').toString().toLowerCase();
-        final vchno = (data['VOUCHERNUMBER'] ?? '').toString().toLowerCase();
-        final vchtype = (data['VOUCHERTYPENAME'] ?? '')
-            .toString()
-            .toLowerCase();
-        final amount = (data['totalAmount'] ?? '').toString().toLowerCase();
-
-        final bool matchesSearch =
-            query.isEmpty ||
-            party.contains(query) ||
-            vchno.contains(query) ||
-            vchtype.contains(query) ||
-            amount.contains(query);
-
-        final bool matchesDate = _matchesDateFilter(entry);
-
-        return matchesSearch && matchesDate;
-      }).toList();
-
+      filteredSalesOrderEntries = _computeFilteredList();
       isVisibleNoSalesOrderEntryFound = filteredSalesOrderEntries.isEmpty;
     });
   }
