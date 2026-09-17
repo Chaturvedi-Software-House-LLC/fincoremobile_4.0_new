@@ -1641,12 +1641,13 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
 
                           // 🧾 Bills List or Empty State
                           _filteredBills.isNotEmpty
-                              ? Column(
-                                  children: _filteredBills.asMap().entries.map((
-                                    entry,
-                                  ) {
-                                    final index = entry.key + 1;
-                                    final bill = entry.value;
+                              ? ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: _filteredBills.length,
+                                  itemBuilder: (context, i) {
+                                    final index = i + 1;
+                                    final bill = _filteredBills[i];
 
                                     // 🎨 Bill type color scheme
                                     final bool isDark =
@@ -1809,7 +1810,7 @@ class _LedgerExpandableTileState extends State<LedgerExpandableTile>
                                         ],
                                       ),
                                     );
-                                  }).toList(),
+                                  },
                                 )
                               : Center(
                                   child: Padding(

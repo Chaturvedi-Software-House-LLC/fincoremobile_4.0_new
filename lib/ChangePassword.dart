@@ -21,6 +21,14 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePassword> {
 
   dynamic _formKey = GlobalKey<FormState>();
 
+  @override
+  void dispose() {
+    oldPassController.dispose();
+    newPassController.dispose();
+    confirmPassController.dispose();
+    super.dispose();
+  }
+
   void validateNewPassword(String value) {
     ref
         .read(changePasswordNotifierProvider.notifier)

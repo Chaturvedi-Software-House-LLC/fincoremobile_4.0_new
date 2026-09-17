@@ -1383,37 +1383,54 @@ class _LoginPageState extends ConsumerState<Login>
                       builder: (context, constraints) {
                         final isWide = constraints.maxWidth >= 820;
 
-                        return Center(
-                          child: SingleChildScrollView(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isWide ? 40 : 20,
-                              vertical: isWide ? 34 : 22,
-                            ),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: isWide ? 920 : 460,
-                              ),
-                              child: isWide
-                                  ? Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
-                                      children: [
-                                        Expanded(child: _buildBrandPanel()),
-                                        const SizedBox(width: 36),
-                                        SizedBox(
-                                          width: 430,
-                                          child: _buildAnimatedAuthForm(),
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      children: [
-                                        _buildBrandPanel(compact: true),
-                                        const SizedBox(height: 22),
-                                        _buildAnimatedAuthForm(),
-                                      ],
+                        return SingleChildScrollView(
+                          padding: EdgeInsets.only(
+                            top: isWide ? 34 : 22,
+                          ),
+                          child: Column(
+                            children: [
+                              Center(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: isWide ? 40 : 20,
+                                  ),
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: isWide ? 920 : 460,
                                     ),
-                            ),
+                                    child: isWide
+                                        ? Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.center,
+                                            children: [
+                                              Expanded(
+                                                child: _buildBrandPanel(),
+                                              ),
+                                              const SizedBox(width: 36),
+                                              SizedBox(
+                                                width: 430,
+                                                child:
+                                                    _buildAnimatedAuthForm(),
+                                              ),
+                                            ],
+                                          )
+                                        : Column(
+                                            children: [
+                                              _buildBrandPanel(compact: true),
+                                              const SizedBox(height: 22),
+                                              _buildAnimatedAuthForm(),
+                                            ],
+                                          ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              // Full device width (not constrained/padded
+                              // like the content above) - only the top
+                              // corners are rounded, so it reads as a
+                              // page-wide footer rather than another card.
+                              _buildTallySyncBadge(compact: !isWide),
+                            ],
                           ),
                         );
                       },
@@ -1514,6 +1531,80 @@ class _LoginPageState extends ConsumerState<Login>
           ),
         ),
       ],
+    );
+  }
+
+  /// "Fincore logo <-> TallyPrime logo" pairing - clarifies to a
+  /// first-time user that this app pulls its data from their Tally
+  /// installation rather than being a standalone bookkeeping app. Uses
+  /// each brand's full logo (own wordmark included) rather than a
+  /// cropped icon, so no separate text label is needed alongside them.
+  ///
+  /// Both logo files are cropped tight to their own visible content
+  /// (fincorego_logo_transparent.png already is; tallyprime_logo.webp
+  /// wasn't - it had a lot of transparent padding baked in, stripped by
+  /// tallyprime_logo_trimmed.png), but their aspect ratios still differ a
+  /// lot (Fincore's wordmark is wide ~1.3:1, TallyPrime's icon-over-text
+  /// mark is narrow ~0.9:1) - matching just the *height* left Fincore's
+  /// logo visibly wider/heavier than TallyPrime's at the same height. Both
+  /// are pinned to the same WIDTH box instead (via BoxFit.contain) so they
+  /// occupy equal horizontal footprint and read as a matched pair.
+  Widget _buildTallySyncBadge({required bool compact}) {
+    final logoWidth = compact ? 60.0 : 66.0;
+    final logoHeight = compact ? 44.0 : 48.0;
+    Widget logo(String asset) => SizedBox(
+      width: logoWidth,
+      height: logoHeight,
+      child: Image.asset(asset, fit: BoxFit.contain),
+    );
+
+    // A full device-width footer at the bottom of the scrollable page
+    // content (scrolls along with the login form, not pinned) - only the
+    // top corners are rounded, edge-to-edge on the sides, so it reads as
+    // a page-wide footer rather than another card floating in from the
+    // sides like the login card above it.
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14101828),
+            blurRadius: 20,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              logo('assets/fincorego_logo_transparent.png'),
+              const SizedBox(width: 10),
+              Icon(
+                Icons.sync_alt_rounded,
+                size: 20,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              logo('assets/tallyprime_logo_trimmed.png'),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '© 2023-2026 CSH LLC. All Rights Reserved.',
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

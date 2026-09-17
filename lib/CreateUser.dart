@@ -39,6 +39,15 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  @override
+  void dispose() {
+    controller_username.dispose();
+    controller_password.dispose();
+    controller_firstname.dispose();
+    controller_lastname.dispose();
+    super.dispose();
+  }
+
   bool isEmail(String value) {
     return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim());
   }

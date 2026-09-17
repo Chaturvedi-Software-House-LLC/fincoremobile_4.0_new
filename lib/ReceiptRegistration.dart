@@ -153,6 +153,27 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
 
   final FocusNode _textFieldFocusNodeNarration = FocusNode();
 
+  @override
+  void dispose() {
+    _partyController.dispose();
+    receiverNameController.dispose();
+    receiverMobileController.dispose();
+    _bankcashnameController.dispose();
+    _vchnoController.dispose();
+    billNoController.dispose();
+    _banknameController.dispose();
+    controller_narration.dispose();
+    _textFieldFocusNodeNarration.dispose();
+    controller_totalamt.dispose();
+    billAmountController.dispose();
+    _dateController.dispose();
+    _billduedateController.dispose();
+    instDateController.dispose();
+    instNoController.dispose();
+    chequeAmountController.dispose();
+    super.dispose();
+  }
+
   bool get isUniGasSerial => _notifier.isUniGasSerial;
 
   /// Thin wrapper - the notifier owns the bill removal/total recompute, the
@@ -393,8 +414,12 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
                     else
                       Column(
                         children: [
-                          Column(
-                            children: visibleBills.map((bill) {
+                          ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: visibleBills.length,
+                            itemBuilder: (context, index) {
+                              final bill = visibleBills[index];
                               final double billOutstanding =
                                   double.tryParse(
                                     bill["outstanding"].toString(),
@@ -587,7 +612,7 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
                                   ),
                                 ),
                               );
-                            }).toList(),
+                            },
                           ),
 
                           if (totalBills > 5)
@@ -2035,6 +2060,13 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
+    // iOS refuses to present the native share sheet while the confirmation
+    // dialog's own dismissal transition (from the Navigator.pop() that
+    // triggered this) is still animating - it silently drops the
+    // presentation request instead of queuing it, which looked like
+    // "clicking Share just closes the dialog and does nothing". Giving the
+    // pop animation time to finish first avoids that race.
+    await Future.delayed(const Duration(milliseconds: 350));
     await Share.shareXFiles([
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Receipt Voucher for $_selectedparty');

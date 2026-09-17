@@ -327,6 +327,20 @@ class _ModifyReceiptEntryPageState extends ConsumerState<ModifyReceiptEntry> {
   final TextEditingController instNoController = TextEditingController();
   final TextEditingController chequeAmountController = TextEditingController();
 
+  @override
+  void dispose() {
+    controller_narration.dispose();
+    _vchnoController.dispose();
+    controller_totalamt.dispose();
+    billAmountController.dispose();
+    _dateController.dispose();
+    _billduedateController.dispose();
+    instDateController.dispose();
+    instNoController.dispose();
+    chequeAmountController.dispose();
+    super.dispose();
+  }
+
   /// Verbatim port of `_deleteBill`'s confirmation-free delete (the
   /// `_confirmBillDeletion` dialog wrapper that used to exist around this
   /// had zero call sites and was dropped - see this screen's notifier

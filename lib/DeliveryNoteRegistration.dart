@@ -2076,6 +2076,10 @@ class _DeliverynoteregistrationPageState
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
+    // See the matching comment in ReceiptRegistration.dart's share call -
+    // iOS drops a share-sheet presentation requested while the triggering
+    // dialog's own pop transition is still animating.
+    await Future.delayed(const Duration(milliseconds: 350));
     await Share.shareXFiles([
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Delivery Note for $_selectedpartyledger');

@@ -34,6 +34,12 @@ class _ViewVanAllocationScreenState
 
   final TextEditingController searchController = TextEditingController();
 
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
   // Full Add/Modify/Delete CRUD permissions for Van Allocation
   // ('vanallocation_add'/'vanallocation_modify'/'vanallocation_delete',
   // set from the company-user's JWT `permissions` claim via

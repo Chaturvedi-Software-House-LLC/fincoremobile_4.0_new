@@ -7,6 +7,8 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Fincore Go uses Face ID to let you sign in quickly and securely.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Fincore Go needs access to your photo library so you can attach documents and images to entries.</string>
 	<key>UIFileSharingEnabled</key>
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>

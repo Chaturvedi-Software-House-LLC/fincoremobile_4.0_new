@@ -2502,6 +2502,10 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     final file = File(filePath);
     await file.writeAsBytes(pdfData);
 
+    // See the matching comment in ReceiptRegistration.dart's share call -
+    // iOS drops a share-sheet presentation requested while the triggering
+    // dialog's own pop transition is still animating.
+    await Future.delayed(const Duration(milliseconds: 350));
     await Share.shareXFiles([
       XFile(filePath, mimeType: 'application/pdf'),
     ], text: 'Sharing Sale Invoice for $_selectedpartyledger');
@@ -3485,6 +3489,10 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     await file.writeAsBytes(pdfData);
 
     // ✅ Share using ShareXFiles (modern API)
+    // See the matching comment in ReceiptRegistration.dart's share call -
+    // iOS drops a share-sheet presentation requested while the triggering
+    // dialog's own pop transition is still animating.
+    await Future.delayed(const Duration(milliseconds: 350));
     final xfile = XFile(tempFilePath);
     await Share.shareXFiles(
       [xfile],
