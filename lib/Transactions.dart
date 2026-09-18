@@ -1556,9 +1556,9 @@ class _TransactionsPageState extends ConsumerState<Transactions>
                         child: SizedBox(
                           width: 22,
                           height: 22,
-                          child: CircularProgressIndicator(
+                          child: CircularProgressIndicator.adaptive(
                             strokeWidth: 2.4,
-                            color: Colors.teal,
+                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.teal),
                           ),
                         ),
                       ),

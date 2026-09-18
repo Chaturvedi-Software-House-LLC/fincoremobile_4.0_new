@@ -241,6 +241,17 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     _init();
   }
 
+  // Bumped at the start of every `_fetchSummaryDataTallyApi` call - lets a
+  // still-in-flight call detect it's been superseded (e.g. the user tapped
+  // the summary's refresh action, or changed the date filter, while the
+  // previous full-year `listInRange` fetch was still running) and drop its
+  // result instead of applying stale data. Without this, two overlapping
+  // calls both paginate through the SAME date range concurrently - doubles
+  // the network work and made the screen look permanently stuck (observed:
+  // duplicate concurrent `/vouchers?page=N` requests for the same page in
+  // the API debug log).
+  int _summaryRequestGen = 0;
+
   void _commit(void Function() fn) {
     fn();
     state = _snapshot();
@@ -914,6 +925,8 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     final ledgerMasterId = args.ledgerMasterId;
     if (ledgerMasterId == null) return;
 
+    final myGen = ++_summaryRequestGen;
+
     months_list_sales.clear();
     months_list_purchase.clear();
     months_list_receipt.clear();
@@ -967,13 +980,26 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
         from: from,
         to: to,
       );
+      // A newer call (e.g. the summary's refresh tap fired again, or the
+      // date filter changed) started while this one was still awaiting -
+      // stop touching shared state and let that newer call own the result.
+      if (myGen != _summaryRequestGen) return;
 
       if (summaryRows.isEmpty) {
         _commit(() => isVisibleNoDataFound = true);
       }
 
+      // Collected alongside the loop below - the exact voucherTypeMasterIds
+      // this ledger actually has entries for (per this ledgerSummary call),
+      // so the month-wise bucketing fetch further down can ask tally-api
+      // for only these types instead of paginating through every voucher
+      // type in the whole company. Uses only the existing, already-deployed
+      // `/vouchers?voucherTypeMasterId=` filter - no backend change needed.
+      final visibleTypeMasterIds = <int>{};
+
       for (final row in summaryRows) {
         final vchtype = (row['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
+        final vchtypeMasterId = row['voucherTypeMasterId'] as int?;
         final totalAmount = (row['totalAmount'] ?? '0').toString();
         final averageAmount = (row['averageAmount'] ?? '0').toString();
         final invoiceCount = (row['invoiceCount'] ?? 0).toString();
@@ -983,6 +1009,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Sales':
             if (salesparty != 'True') continue;
             _commit(() => SalesVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totalsaleamt = totalAmount;
             avgsalesinvoiceamt = averageAmount;
             noofsalesinvoice = invoiceCount;
@@ -990,6 +1017,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Purchase':
             if (purchaseparty != 'True') continue;
             _commit(() => PurchaseVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totalpurchaseamt = totalAmount;
             avgpurchaseinvoiceamt = averageAmount;
             noofpurchaseinvoice = invoiceCount;
@@ -997,6 +1025,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Receipt':
             if (receiptparty != 'True') continue;
             _commit(() => ReceiptVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totalreceiptamt = totalAmount;
             avgreceiptinvoiceamt = averageAmount;
             noofreceiptinvoice = invoiceCount;
@@ -1004,6 +1033,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Payment':
             if (paymentparty != 'True') continue;
             _commit(() => PaymentVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totalpaymentamt = totalAmount;
             avgpaymentinvoiceamt = averageAmount;
             noofpaymentinvoice = invoiceCount;
@@ -1011,6 +1041,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'CreditNote':
             if (creditnoteparty != 'True') continue;
             _commit(() => CreditnoteVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totalcreditnoteamt = totalAmount;
             avgcreditnoteinvoiceamt = averageAmount;
             noofcreditnoteinvoice = invoiceCount;
@@ -1018,6 +1049,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'DebitNote':
             if (debitnoteparty != 'True') continue;
             _commit(() => DebitnoteVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totaldebitnoteamt = totalAmount;
             avgdebitnoteinvoiceamt = averageAmount;
             noofdebitnoteinvoice = invoiceCount;
@@ -1025,6 +1057,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Journal':
             if (journalparty != 'True') continue;
             _commit(() => JournalVisibility = true);
+            if (vchtypeMasterId != null) visibleTypeMasterIds.add(vchtypeMasterId);
             totaljournalamt = totalAmount;
             avgjournalinvoiceamt = averageAmount;
             noofjournalinvoice = invoiceCount;
@@ -1041,10 +1074,19 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           CreditnoteVisibility ||
           DebitnoteVisibility ||
           JournalVisibility) {
-        final vouchers = await _ref.read(voucherRepositoryProvider).listInRange(
-              from: from,
-              to: to,
-            );
+        // Scoped to only the voucher types this ledger actually has entries
+        // for (collected above from ledgerSummary's own rows) instead of
+        // every voucher type in the whole company - `/vouchers` has no
+        // ledger-level filter, so this is the cheapest available narrowing
+        // with the existing (unmodified) backend.
+        final vouchers = visibleTypeMasterIds.isEmpty
+            ? const <Map<String, dynamic>>[]
+            : await _ref.read(voucherRepositoryProvider).listInRangeForTypes(
+                  from: from,
+                  to: to,
+                  voucherTypeMasterIds: visibleTypeMasterIds,
+                );
+        if (myGen != _summaryRequestGen) return;
 
         void bucketInto(List<months> target, String vchtypeKey) {
           final rows = <Map<String, dynamic>>[];
@@ -1099,9 +1141,11 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
         _currentPayableOnAccount = 0;
 
         final totals = await ledgerRepo.outstandingTotal(ledgerMasterId);
+        if (myGen != _summaryRequestGen) return;
         formatRecPayTotal((totals['outstanding'] ?? '0').toString());
 
         final bills = await ledgerRepo.outstandingBills(ledgerMasterId: ledgerMasterId);
+        if (myGen != _summaryRequestGen) return;
         for (final bill in bills) {
           final outstanding = (bill['finalBalance'] ?? '0').toString();
           final overdueDays = bill['overdueDays'] as int?;
@@ -1116,6 +1160,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           from: from,
           to: to,
         );
+        if (myGen != _summaryRequestGen) return;
         formatSalePurc((row?['totalAmount'] ?? 'null').toString(), 'SalesOrder');
       }
       if (pendingpurchaseorderparty == 'True') {
@@ -1125,11 +1170,13 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           from: from,
           to: to,
         );
+        if (myGen != _summaryRequestGen) return;
         formatSalePurc((row?['totalAmount'] ?? 'null').toString(), 'PurcOrder');
       }
 
       _commit(() => _isLoading = false);
     } catch (e) {
+      if (myGen != _summaryRequestGen) return;
       _commit(() => _isLoading = false);
       debugPrint('PartyClicked tally-api summary fetch failed: $e');
     }

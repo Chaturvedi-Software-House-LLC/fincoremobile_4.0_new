@@ -485,15 +485,15 @@ class _UserViewPageState extends ConsumerState<UserView>
 
                       itemBuilder: (context, index) {
                         if (index >= filteredUsers.length) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                             child: Center(
                               child: SizedBox(
                                 width: 22,
                                 height: 22,
-                                child: CircularProgressIndicator(
+                                child: CircularProgressIndicator.adaptive(
                                   strokeWidth: 2.4,
-                                  color: Colors.teal,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.teal),
                                 ),
                               ),
                             ),

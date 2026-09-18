@@ -505,15 +505,15 @@ class _RolesViewPageState extends ConsumerState<RolesView>
                       itemCount: roles.length + (vm.isLoadingMore ? 1 : 0),
                       itemBuilder: (context, index) {
                         if (index >= roles.length) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                             child: Center(
                               child: SizedBox(
                                 width: 22,
                                 height: 22,
-                                child: CircularProgressIndicator(
+                                child: CircularProgressIndicator.adaptive(
                                   strokeWidth: 2.4,
-                                  color: Colors.teal,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.teal),
                                 ),
                               ),
                             ),

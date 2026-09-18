@@ -1678,9 +1678,9 @@ class _ItemsPageState extends ConsumerState<Items>
                       child: SizedBox(
                         width: 22,
                         height: 22,
-                        child: CircularProgressIndicator(
+                        child: CircularProgressIndicator.adaptive(
                           strokeWidth: 2.4,
-                          color: app_color,
+                          valueColor: const AlwaysStoppedAnimation<Color>(app_color),
                         ),
                       ),
                     ),

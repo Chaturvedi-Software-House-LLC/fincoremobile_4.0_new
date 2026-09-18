@@ -1948,7 +1948,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                     ? SizedBox(
                         width: 22,
                         height: 22,
-                        child: CircularProgressIndicator(
+                        child: CircularProgressIndicator.adaptive(
                           strokeWidth: 2.4,
                           valueColor: const AlwaysStoppedAnimation<Color>(
                             Colors.white,
@@ -1975,7 +1975,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                     ? SizedBox(
                         width: 22,
                         height: 22,
-                        child: CircularProgressIndicator(
+                        child: CircularProgressIndicator.adaptive(
                           strokeWidth: 2.4,
                           valueColor: const AlwaysStoppedAnimation<Color>(
                             Colors.white,
@@ -2893,15 +2893,15 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                               // Bottom-of-list spinner while the next page
                               // of sales/purchase/cash vouchers loads.
                               if (_s.isLoadingMoreSalePurcCash)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 16),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
                                   child: Center(
                                     child: SizedBox(
                                       width: 22,
                                       height: 22,
-                                      child: CircularProgressIndicator(
+                                      child: CircularProgressIndicator.adaptive(
                                         strokeWidth: 2.4,
-                                        color: Colors.teal,
+                                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.teal),
                                       ),
                                     ),
                                   ),
