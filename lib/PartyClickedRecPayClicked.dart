@@ -665,9 +665,26 @@ class _PartyTotalClickedRecPayClickedPageState
   }
 
   @override
+  void initState() {
+    super.initState();
+    _scrollFabController.addListener(_maybeLoadMore);
+  }
+
+  @override
   void dispose() {
+    _scrollFabController.removeListener(_maybeLoadMore);
     _scrollFabController.dispose();
     super.dispose();
+  }
+
+  /// Triggers the next page once the user scrolls within 300px of the
+  /// bottom - see `ItemsDrillDown.dart`'s identical listener.
+  void _maybeLoadMore() {
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 300) {
+      _notifier.loadMore();
+    }
   }
 
   @override
@@ -1349,6 +1366,21 @@ class _PartyTotalClickedRecPayClickedPageState
                               ),
                             );
                     }, childCount: vm.filteredItems.length),
+                  ),
+                ),
+              if (vm.isLoadingMore)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2.4,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
             ],

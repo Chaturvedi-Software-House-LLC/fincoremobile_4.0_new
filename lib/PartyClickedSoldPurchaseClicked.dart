@@ -55,6 +55,7 @@ String _stripUnitSuffix(String value) {
 class PartyClickedSoldPurchaseClicked extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, item, unit;
   final int? ledgerMasterId;
+  final int? itemMasterId;
 
   const PartyClickedSoldPurchaseClicked({
     required this.startdate_string,
@@ -64,6 +65,7 @@ class PartyClickedSoldPurchaseClicked extends ConsumerStatefulWidget {
     required this.item,
     required this.unit,
     this.ledgerMasterId,
+    this.itemMasterId,
   });
   @override
   ConsumerState<PartyClickedSoldPurchaseClicked> createState() =>
@@ -92,6 +94,7 @@ class _PartyClickedSoldPurchaseClickedPageState
         ledger: widget.ledger,
         item: widget.item,
         ledgerMasterId: widget.ledgerMasterId,
+        itemMasterId: widget.itemMasterId,
       );
 
   void _showSelectionWindow(BuildContext context) {
@@ -586,12 +589,26 @@ class _PartyClickedSoldPurchaseClickedPageState
     super.initState();
     startdate_text = convertDateFormat(widget.startdate_string);
     enddate_text = convertDateFormat(widget.enddate_string);
+    _scrollFabController.addListener(_maybeLoadMore);
   }
 
   @override
   void dispose() {
+    _scrollFabController.removeListener(_maybeLoadMore);
     _scrollFabController.dispose();
     super.dispose();
+  }
+
+  /// Triggers the next page once the user scrolls within 300px of the
+  /// bottom - see `ItemsDrillDown.dart`'s identical listener.
+  void _maybeLoadMore() {
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 300) {
+      ref
+          .read(partyClickedSoldPurchaseClickedNotifierProvider(_args).notifier)
+          .loadMore();
+    }
   }
 
   @override
@@ -1267,6 +1284,21 @@ class _PartyClickedSoldPurchaseClickedPageState
                               ),
                             );
                     }, childCount: state.filteredItems.length),
+                  ),
+                ),
+              if (state.isLoadingMore)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2.4,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
             ],

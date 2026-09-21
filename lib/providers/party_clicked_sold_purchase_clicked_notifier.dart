@@ -3,14 +3,16 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../PartyClickedSoldPurchaseClicked.dart';
-import '../api/voucher_drilldown_helper.dart';
+import '../api/ledger_repository.dart';
+import '../api/voucher_type_repository.dart';
 import '../api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 
 /// Riverpod migration of `PartyClickedSoldPurchaseClicked.dart`'s
-/// `_PartyClickedSoldPurchaseClickedPageState`. Closest sibling:
-/// `party_total_clicked_rest_notifier.dart` (same tally-api drilldown
-/// fetch and sort-list shape, minus the Amount sort options this screen
-/// never had).
+/// `_PartyClickedSoldPurchaseClickedPageState`. Fetches via
+/// `LedgerRepository.ledgerReportPage(view: 'normal', ...)`, scoped to both
+/// this ledger and this item server-side, with real incremental scroll-
+/// pagination - see `items_drill_down_notifier.dart`/
+/// `party_total_clicked_rest_notifier.dart` for the general pattern.
 class PartyClickedSoldPurchaseClickedArgs {
   final String startDateString;
   final String endDateString;
@@ -18,6 +20,7 @@ class PartyClickedSoldPurchaseClickedArgs {
   final String ledger;
   final String item;
   final int? ledgerMasterId;
+  final int? itemMasterId;
 
   const PartyClickedSoldPurchaseClickedArgs({
     required this.startDateString,
@@ -26,6 +29,7 @@ class PartyClickedSoldPurchaseClickedArgs {
     required this.ledger,
     required this.item,
     this.ledgerMasterId,
+    this.itemMasterId,
   });
 
   @override
@@ -36,7 +40,8 @@ class PartyClickedSoldPurchaseClickedArgs {
       other.type == type &&
       other.ledger == ledger &&
       other.item == item &&
-      other.ledgerMasterId == ledgerMasterId;
+      other.ledgerMasterId == ledgerMasterId &&
+      other.itemMasterId == itemMasterId;
 
   @override
   int get hashCode => Object.hash(
@@ -46,6 +51,7 @@ class PartyClickedSoldPurchaseClickedArgs {
         ledger,
         item,
         ledgerMasterId,
+        itemMasterId,
       );
 }
 
@@ -59,6 +65,7 @@ const kPartyClickedSoldPurchaseClickedSortOptions = [
 
 class PartyClickedSoldPurchaseClickedState {
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isListVisible;
   final bool isSortVisible;
   final bool isVisibleNoDataFound;
@@ -72,6 +79,7 @@ class PartyClickedSoldPurchaseClickedState {
 
   const PartyClickedSoldPurchaseClickedState({
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isListVisible = false,
     this.isSortVisible = false,
     this.isVisibleNoDataFound = false,
@@ -86,6 +94,7 @@ class PartyClickedSoldPurchaseClickedState {
 
   PartyClickedSoldPurchaseClickedState copyWith({
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isListVisible,
     bool? isSortVisible,
     bool? isVisibleNoDataFound,
@@ -99,6 +108,7 @@ class PartyClickedSoldPurchaseClickedState {
   }) {
     return PartyClickedSoldPurchaseClickedState(
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isListVisible: isListVisible ?? this.isListVisible,
       isSortVisible: isSortVisible ?? this.isSortVisible,
       isVisibleNoDataFound: isVisibleNoDataFound ?? this.isVisibleNoDataFound,
@@ -116,6 +126,10 @@ class PartyClickedSoldPurchaseClickedState {
 class PartyClickedSoldPurchaseClickedNotifier
     extends StateNotifier<PartyClickedSoldPurchaseClickedState> {
   final PartyClickedSoldPurchaseClickedArgs args;
+
+  int _page = 1;
+  bool _hasMore = true;
+  int? _typeMasterId;
 
   PartyClickedSoldPurchaseClickedNotifier(this.args)
       : super(const PartyClickedSoldPurchaseClickedState()) {
@@ -219,37 +233,70 @@ class PartyClickedSoldPurchaseClickedNotifier
       selectedSortOption: selectedSortOption,
     );
 
+    _typeMasterId = await _resolveTypeMasterId();
     await fetchData();
   }
 
-  /// tally-api path: filters [VoucherRepository]-backed vouchers to this
-  /// ledger + item + voucher type via [fetchDrilldownVouchers], then reads
-  /// the matching inventory entry's qty/rate straight off each voucher -
-  /// this is exactly the per-invoice history legacy's `getTotalAmount`
-  /// (`select: 'true'`) returned.
+  Future<int?> _resolveTypeMasterId() async {
+    final reservedName = args.type == 'Sales' ? 'SALES' : 'PURCHASE';
+    final matches =
+        await VoucherTypeRepository.instance.byReservedName(reservedName);
+    return matches.isNotEmpty ? matches.first['masterId'] as int? : null;
+  }
+
   Future<void> fetchData() async {
+    _page = 1;
+    _hasMore = true;
     state = state.copyWith(
-      isLoading: true,
+      itemList: const [],
+      filteredItems: const [],
       isListVisible: true,
       isSortVisible: false,
     );
+    await _fetchPage(append: false);
+  }
+
+  /// Called by the widget's scroll-near-bottom listener.
+  Future<void> loadMore() async {
+    if (state.isLoadingMore || state.isLoading || !_hasMore) return;
+    await _fetchPage(append: true);
+  }
+
+  /// tally-api path: `LedgerRepository.ledgerReportPage(view: 'normal', ...)`
+  /// scoped server-side to both this ledger and this item, then reads the
+  /// matching inventory entry's qty/rate straight off each row - this is
+  /// exactly the per-invoice history legacy's `getTotalAmount`
+  /// (`select: 'true'`) returned, now genuinely paginated instead of
+  /// fetching every voucher in the company up front.
+  Future<void> _fetchPage({required bool append}) async {
+    if (args.ledgerMasterId == null) {
+      state = state.copyWith(isLoading: false, isVisibleNoDataFound: true);
+      return;
+    }
+
+    state = state.copyWith(isLoading: !append, isLoadingMore: append);
 
     try {
       final from = parseCompactDate(args.startDateString);
       final to = parseCompactDate(args.endDateString);
-      final vouchers = await fetchDrilldownVouchers(
+      final nextPage = append ? _page + 1 : 1;
+      final result = await LedgerRepository.instance.ledgerReportPage(
+        view: 'normal',
+        page: nextPage,
+        limit: 30,
+        ledgerMasterId: args.ledgerMasterId,
+        stockItemMasterId: args.itemMasterId,
+        voucherTypeMasterId: _typeMasterId,
         from: from,
         to: to,
-        partyLedgerName: args.ledger,
-        itemName: args.item,
-        voucherTypeName: args.type,
       );
+      _page = nextPage;
+      _hasMore = result.hasMore;
 
       final rows = <Data>[];
-      for (final voucher in vouchers) {
+      for (final row in result.items) {
         final inventoryEntries =
-            (voucher['inventoryEntries'] as List?)
-                ?.cast<Map<String, dynamic>>() ??
+            (row['inventoryEntries'] as List?)?.cast<Map<String, dynamic>>() ??
             const [];
         final matching = inventoryEntries.where(
           (e) => e['stockItemName'] == args.item,
@@ -257,27 +304,29 @@ class PartyClickedSoldPurchaseClickedNotifier
         for (final entry in matching) {
           rows.add(
             Data.fromJson({
-              'vchno': voucher['number'] ?? '',
-              'vchdate': voucher['date'] ?? '',
+              'vchno': row['voucherNumber'] ?? '',
+              'vchdate': row['date'] ?? '',
               'rate': parseMoneyField(entry['rate']),
               'qty': parseMoneyField(entry['quantity']),
             }),
           );
         }
       }
+      final items = append ? [...state.itemList, ...rows] : rows;
 
       state = state.copyWith(
-        itemList: rows,
-        filteredItems: rows,
-        isVisibleNoDataFound: rows.isEmpty,
-        isSortVisible: rows.isNotEmpty,
+        itemList: items,
+        filteredItems: items,
+        isVisibleNoDataFound: items.isEmpty,
+        isSortVisible: items.isNotEmpty,
         isLoading: false,
+        isLoadingMore: false,
       );
-      if (rows.isNotEmpty) {
+      if (items.isNotEmpty) {
         _applySort(state.selectedSortOption);
       }
     } catch (e) {
-      state = state.copyWith(isLoading: false);
+      state = state.copyWith(isLoading: false, isLoadingMore: false);
     }
   }
 }

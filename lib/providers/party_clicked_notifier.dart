@@ -819,6 +819,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
             unit: (row['unitSymbol'] ?? '').toString(),
             lastdate: (row['lastDate'] ?? '').toString(),
             rate: (row['lastRate'] ?? '0').toString(),
+            stockItemMasterId: row['stockItemMasterId'] as int?,
           ),
       ];
 

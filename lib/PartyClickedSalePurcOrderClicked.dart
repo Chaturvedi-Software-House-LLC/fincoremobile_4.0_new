@@ -119,6 +119,29 @@ class _PartyClickedSalePurcOrderClickedPageState
   PartyClickedSalePurcOrderClickedState get _s =>
       ref.read(partyClickedSalePurcOrderClickedNotifierProvider(_args));
 
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_maybeLoadMore);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_maybeLoadMore);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// Triggers the next page once the user scrolls within 300px of the
+  /// bottom - see `ItemsDrillDown.dart`'s identical listener.
+  void _maybeLoadMore() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 300) {
+      _notifier.loadMore();
+    }
+  }
+
   void _scrollToTop() {
     _scrollController.animateTo(
       0.0,
@@ -812,8 +835,28 @@ class _PartyClickedSalePurcOrderClickedPageState
                                       horizontal: 16,
                                       vertical: 12,
                                     ),
-                                    itemCount: vm.filteredItems.length,
+                                    itemCount:
+                                        vm.filteredItems.length +
+                                        (vm.isLoadingMore ? 1 : 0),
                                     itemBuilder: (context, index) {
+                                      if (index >= vm.filteredItems.length) {
+                                        return const Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            vertical: 16,
+                                          ),
+                                          child: Center(
+                                            child: SizedBox(
+                                              width: 22,
+                                              height: 22,
+                                              child:
+                                                  CircularProgressIndicator
+                                                      .adaptive(
+                                                    strokeWidth: 2.4,
+                                                  ),
+                                            ),
+                                          ),
+                                        );
+                                      }
                                       final card = vm.filteredItems[index];
 
                                       return Container(

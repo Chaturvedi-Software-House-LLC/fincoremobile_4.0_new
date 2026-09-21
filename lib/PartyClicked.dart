@@ -53,6 +53,7 @@ class Summary {
 
 class Sold_Purchased {
   final String item, qty, unit, lastdate, rate;
+  final int? stockItemMasterId;
 
   Sold_Purchased({
     required this.item,
@@ -60,6 +61,7 @@ class Sold_Purchased {
     required this.unit,
     required this.lastdate,
     required this.rate,
+    this.stockItemMasterId,
   });
 
   factory Sold_Purchased.fromJson(Map<String, dynamic> json) {
@@ -69,6 +71,7 @@ class Sold_Purchased {
       unit: json['unit'].toString(),
       lastdate: json['lastdate'].toString(),
       rate: json['rate'].toString(),
+      stockItemMasterId: json['stockItemMasterId'] as int?,
     );
   }
 }
@@ -2219,6 +2222,8 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                                     ledger: partyname,
                                                     ledgerMasterId:
                                                         ledgerMasterId,
+                                                    itemMasterId:
+                                                        card.stockItemMasterId,
                                                   ),
                                             ),
                                           );
@@ -2424,6 +2429,8 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                                       ledger: partyname,
                                                       ledgerMasterId:
                                                           ledgerMasterId,
+                                                      itemMasterId:
+                                                          card.stockItemMasterId,
                                                     ),
                                               ),
                                             );

@@ -325,33 +325,42 @@ class LedgerRepository {
   /// `closingQuantity`/`closingAmount`/`date` - `closingQuantity`/
   /// `closingAmount` are this order's still-outstanding/"pending" balance,
   /// per `Order`'s own schema doc-comment).
-  Future<List<Map<String, dynamic>>> pendingOrdersByVoucher(
-    int ledgerMasterId,
-    int stockItemMasterId, {
+  /// One page (real incremental scroll-pagination, not the previous
+  /// "fetch every page up front" behavior) of this same order-wise
+  /// breakdown - backs `PartyClickedSalePurcOrderClicked.dart`.
+  Future<LedgerPage> pendingOrdersByVoucherPage({
+    required int ledgerMasterId,
+    required int stockItemMasterId,
     required bool isSales,
+    required int page,
+    int limit = 30,
     DateTime? from,
     DateTime? to,
   }) async {
     final query = StringBuffer(
       '?trackLedgerMasterId=$ledgerMasterId&stockMasterId=$stockItemMasterId'
-      '&orderType=${Uri.encodeQueryComponent(isSales ? 'Sales Order' : 'Purchase Order')}',
+      '&orderType=${Uri.encodeQueryComponent(isSales ? 'Sales Order' : 'Purchase Order')}'
+      '&page=$page&limit=$limit',
     );
     if (from != null) query.write('&from=${_dateOnly(from)}');
     if (to != null) query.write('&to=${_dateOnly(to)}');
-    final rows = await fetchAllPages(
-      (page) => _client.getForCompany(
-        '/reports/orders$query&page=$page&limit=100',
-      ),
+    final result = await _client.getForCompany('/reports/orders$query');
+    final items = (result.data as List)
+        .cast<Map<String, dynamic>>()
+        .map(
+          (row) => {
+            'voucherNumber': row['name'],
+            'pendingQuantity': row['closingQuantity'],
+            'pendingAmount': row['closingAmount'],
+            'date': row['date'],
+          },
+        )
+        .toList();
+    return LedgerPage(
+      items: items,
+      page: page,
+      totalPages: (result.meta?['lastPage'] as int?) ?? 1,
     );
-    return [
-      for (final row in rows)
-        {
-          'voucherNumber': row['name'],
-          'pendingQuantity': row['closingQuantity'],
-          'pendingAmount': row['closingAmount'],
-          'date': row['date'],
-        },
-    ];
   }
 
   /// `reports/orders/summary?groupBy=ledger` scoped to one party - the

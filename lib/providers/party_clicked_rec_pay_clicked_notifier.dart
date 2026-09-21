@@ -46,6 +46,7 @@ class PartyClickedRecPayClickedArgs {
 
 class PartyClickedRecPayClickedState {
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isListVisible;
   final bool isSortVisible;
   final bool isVisibleNoDataFound;
@@ -66,6 +67,7 @@ class PartyClickedRecPayClickedState {
 
   const PartyClickedRecPayClickedState({
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isListVisible = true,
     this.isSortVisible = false,
     this.isVisibleNoDataFound = false,
@@ -99,6 +101,7 @@ class PartyClickedRecPayClickedState {
 
   PartyClickedRecPayClickedState copyWith({
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isListVisible,
     bool? isSortVisible,
     bool? isVisibleNoDataFound,
@@ -120,6 +123,7 @@ class PartyClickedRecPayClickedState {
   }) {
     return PartyClickedRecPayClickedState(
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isListVisible: isListVisible ?? this.isListVisible,
       isSortVisible: isSortVisible ?? this.isSortVisible,
       isVisibleNoDataFound: isVisibleNoDataFound ?? this.isVisibleNoDataFound,
@@ -148,6 +152,9 @@ class PartyClickedRecPayClickedNotifier
   final Ref _ref;
   final PartyClickedRecPayClickedArgs args;
   String _searchQuery = '';
+  String _isDebit = '';
+  int _page = 1;
+  bool _hasMore = true;
 
   PartyClickedRecPayClickedNotifier(this._ref, this.args)
       : super(const PartyClickedRecPayClickedState()) {
@@ -322,21 +329,47 @@ class PartyClickedRecPayClickedNotifier
   /// balance; the Payable tile (isDebit == '') keeps the rest - matching
   /// `DashboardClicked.dart`'s `_fetchReceivablePayableTallyApi` convention.
   Future<void> fetchData(String isDebit) async {
+    _isDebit = isDebit;
+    _page = 1;
+    _hasMore = true;
     state = state.copyWith(
-      isLoading: true,
+      itemList: const [],
+      filteredItems: const [],
       isListVisible: true,
       isSortVisible: false,
       clearSelectedAgeingBucket: true,
     );
+    await _fetchPage(append: false);
+  }
+
+  /// Called by the widget's scroll-near-bottom listener. The Receivable/
+  /// Payable split (`isDebit`) is applied per already-server-paginated
+  /// page rather than needing the full dataset, since it's a plain
+  /// positive/negative balance check on each row - unlike a grouped total,
+  /// filtering doesn't change what "the next page" means.
+  Future<void> loadMore() async {
+    if (state.isLoadingMore || state.isLoading || !_hasMore) return;
+    await _fetchPage(append: true);
+  }
+
+  Future<void> _fetchPage({required bool append}) async {
+    state = state.copyWith(isLoading: !append, isLoadingMore: append);
 
     try {
-      final bills = await _ref
+      final nextPage = append ? _page + 1 : 1;
+      final result = await _ref
           .read(ledgerRepositoryProvider)
-          .outstandingBills(ledgerMasterId: args.ledgerMasterId!);
+          .outstandingBillsPage(
+            page: nextPage,
+            limit: 30,
+            ledgerMasterId: args.ledgerMasterId,
+          );
+      _page = nextPage;
+      _hasMore = result.hasMore;
 
-      final rows = bills.where((bill) {
+      final page = result.items.where((bill) {
         final balance = parseMoneyField(bill['finalBalance']);
-        return isDebit == 'true' ? balance > 0 : balance <= 0;
+        return _isDebit == 'true' ? balance > 0 : balance <= 0;
       }).map((bill) {
         return Data.fromJson({
           'billno': bill['name'] ?? '',
@@ -346,26 +379,21 @@ class PartyClickedRecPayClickedNotifier
           'duedate': bill['dueDate'] ?? 'null',
         });
       }).toList();
+      final items = append ? [...state.itemList, ...page] : page;
 
       state = state.copyWith(
-        itemList: rows,
-        filteredItems: rows,
-        isVisibleNoDataFound: false,
-      );
-    } catch (e) {
-      state = state.copyWith(isLoading: false);
-      return;
-    }
-
-    if (state.itemList.isEmpty) {
-      state = state.copyWith(
-        isVisibleNoDataFound: true,
-        isSortVisible: false,
+        itemList: items,
+        filteredItems: items,
+        isVisibleNoDataFound: items.isEmpty,
+        isSortVisible: items.isNotEmpty,
         isLoading: false,
+        isLoadingMore: false,
       );
-    } else {
-      state = state.copyWith(isSortVisible: true, isLoading: false);
-      _applySort(state.selectedSortOption);
+      if (items.isNotEmpty) {
+        _applySort(state.selectedSortOption);
+      }
+    } catch (e) {
+      state = state.copyWith(isLoading: false, isLoadingMore: false);
     }
   }
 

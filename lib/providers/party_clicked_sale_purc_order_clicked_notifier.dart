@@ -48,6 +48,7 @@ class PartyClickedSalePurcOrderClickedArgs {
 
 class PartyClickedSalePurcOrderClickedState {
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isListVisible;
   final bool isSortVisible;
   final bool isVisibleNoDataFound;
@@ -60,6 +61,7 @@ class PartyClickedSalePurcOrderClickedState {
 
   const PartyClickedSalePurcOrderClickedState({
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isListVisible = false,
     this.isSortVisible = false,
     this.isVisibleNoDataFound = false,
@@ -73,6 +75,7 @@ class PartyClickedSalePurcOrderClickedState {
 
   PartyClickedSalePurcOrderClickedState copyWith({
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isListVisible,
     bool? isSortVisible,
     bool? isVisibleNoDataFound,
@@ -85,6 +88,7 @@ class PartyClickedSalePurcOrderClickedState {
   }) {
     return PartyClickedSalePurcOrderClickedState(
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isListVisible: isListVisible ?? this.isListVisible,
       isSortVisible: isSortVisible ?? this.isSortVisible,
       isVisibleNoDataFound: isVisibleNoDataFound ?? this.isVisibleNoDataFound,
@@ -102,6 +106,10 @@ class PartyClickedSalePurcOrderClickedNotifier
     extends StateNotifier<PartyClickedSalePurcOrderClickedState> {
   final Ref _ref;
   final PartyClickedSalePurcOrderClickedArgs args;
+
+  int _page = 1;
+  bool _hasMore = true;
+  int _activeStockItemMasterId = 0;
 
   PartyClickedSalePurcOrderClickedNotifier(this._ref, this.args)
       : super(const PartyClickedSalePurcOrderClickedState()) {
@@ -211,29 +219,52 @@ class PartyClickedSalePurcOrderClickedNotifier
   /// [stockItemMasterId] drives the request; `args.item`'s name-string
   /// param is legacy-shaped but no longer used to select data (the
   /// dropdown/initial value resolve their own `stockItemMasterId` via
-  /// [Data.stockItemMasterId] instead).
+  /// [Data.stockItemMasterId] instead). Starts (or restarts, e.g. when the
+  /// top-value dropdown changes) real incremental scroll-pagination for
+  /// this item.
   Future<void> fetchOrderDetail(int stockItemMasterId) async {
+    _activeStockItemMasterId = stockItemMasterId;
+    _page = 1;
+    _hasMore = true;
     state = state.copyWith(
-      isLoading: true,
+      itemList: const [],
+      filteredItems: const [],
       isListVisible: true,
       isSortVisible: false,
       isVisibleNoDataFound: false,
     );
+    await _fetchPage(append: false);
+  }
+
+  /// Called by the widget's scroll-near-bottom listener.
+  Future<void> loadMore() async {
+    if (state.isLoadingMore || state.isLoading || !_hasMore) return;
+    await _fetchPage(append: true);
+  }
+
+  Future<void> _fetchPage({required bool append}) async {
+    state = state.copyWith(isLoading: !append, isLoadingMore: append);
 
     try {
       final from = parseCompactDate(args.startDateString);
       final to = parseCompactDate(args.endDateString);
-      final rows =
-          await _ref.read(ledgerRepositoryProvider).pendingOrdersByVoucher(
-                args.ledgerMasterId,
-                stockItemMasterId,
-                isSales: args.vchtype == 'sales',
-                from: from,
-                to: to,
-              );
+      final nextPage = append ? _page + 1 : 1;
+      final result = await _ref
+          .read(ledgerRepositoryProvider)
+          .pendingOrdersByVoucherPage(
+            ledgerMasterId: args.ledgerMasterId,
+            stockItemMasterId: _activeStockItemMasterId,
+            isSales: args.vchtype == 'sales',
+            page: nextPage,
+            limit: 30,
+            from: from,
+            to: to,
+          );
+      _page = nextPage;
+      _hasMore = result.hasMore;
 
-      final items = [
-        for (final row in rows)
+      final page = [
+        for (final row in result.items)
           Data_List(
             orderno: (row['voucherNumber'] ?? '').toString(),
             pendingQty: parseMoneyField(row['pendingQuantity']).toString(),
@@ -241,6 +272,7 @@ class PartyClickedSalePurcOrderClickedNotifier
             vchdate: (row['date'] ?? '').toString(),
           ),
       ];
+      final items = append ? [...state.itemList, ...page] : page;
 
       state = state.copyWith(
         itemList: items,
@@ -248,12 +280,13 @@ class PartyClickedSalePurcOrderClickedNotifier
         isVisibleNoDataFound: items.isEmpty,
         isSortVisible: items.isNotEmpty,
         isLoading: false,
+        isLoadingMore: false,
       );
       if (items.isNotEmpty) {
         _applySort(state.selectedSortOption);
       }
     } catch (e) {
-      state = state.copyWith(isLoading: false);
+      state = state.copyWith(isLoading: false, isLoadingMore: false);
     }
   }
 }

@@ -2,15 +2,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../PartyTotalClickedRest.dart';
-import '../api/voucher_drilldown_helper.dart';
-import '../api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import '../api/ledger_repository.dart';
+import '../api/voucher_type_repository.dart';
+import '../api/monthly_bucket_helper.dart' show parseCompactDate;
 
 /// Riverpod migration of `PartyTotalClickedRest.dart`'s
-/// `_PartyTotalClickedRestPageState`. Closest sibling: the tally-api
-/// drilldown fetch this screen already used (`_fetchDataTallyApi`, backed
-/// by [fetchDrilldownVouchers]) is ported verbatim; only the state
-/// container and sorting are moved into a [StateNotifier], following the
-/// same shape as `party_clicked_sale_purc_order_clicked_notifier.dart`.
+/// `_PartyTotalClickedRestPageState`. Fetches via
+/// `LedgerRepository.ledgerReportPage(view: 'normal', ...)` - ledger-scoped
+/// and genuinely paginated (30 rows/page, loaded incrementally as the user
+/// scrolls), replacing the previous company-wide `fetchDrilldownVouchers`
+/// fetch. This screen is a flat, ungrouped voucher list (no further
+/// drill-down from a row), so unlike `ItemsDrillDown.dart`/
+/// `PartyDrillDown.dart` there's only ever the one "Bills"-shaped view -
+/// see those files for the general pattern this mirrors.
 class PartyTotalClickedRestArgs {
   final String startDateString;
   final String endDateString;
@@ -61,6 +65,7 @@ const kPartyTotalClickedRestSortOptions = [
 
 class PartyTotalClickedRestState {
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isListVisible;
   final bool isSortVisible;
   final bool isVisibleNoDataFound;
@@ -72,6 +77,7 @@ class PartyTotalClickedRestState {
 
   const PartyTotalClickedRestState({
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isListVisible = false,
     this.isSortVisible = false,
     this.isVisibleNoDataFound = false,
@@ -84,6 +90,7 @@ class PartyTotalClickedRestState {
 
   PartyTotalClickedRestState copyWith({
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isListVisible,
     bool? isSortVisible,
     bool? isVisibleNoDataFound,
@@ -95,6 +102,7 @@ class PartyTotalClickedRestState {
   }) {
     return PartyTotalClickedRestState(
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isListVisible: isListVisible ?? this.isListVisible,
       isSortVisible: isSortVisible ?? this.isSortVisible,
       isVisibleNoDataFound: isVisibleNoDataFound ?? this.isVisibleNoDataFound,
@@ -110,6 +118,10 @@ class PartyTotalClickedRestState {
 class PartyTotalClickedRestNotifier
     extends StateNotifier<PartyTotalClickedRestState> {
   final PartyTotalClickedRestArgs args;
+
+  int _page = 1;
+  bool _hasMore = true;
+  int? _typeMasterId;
 
   PartyTotalClickedRestNotifier(this.args)
       : super(const PartyTotalClickedRestState()) {
@@ -187,48 +199,94 @@ class PartyTotalClickedRestNotifier
       selectedSortOption: selectedSortOption,
     );
 
+    _typeMasterId = await _resolveTypeMasterId();
     await fetchData();
   }
 
+  /// `args.type` only ever arrives as a display name (`'Receipt'`/
+  /// `'Payment'`/`'Journal'` for this screen) - resolved to a
+  /// `voucherTypeMasterId` once here so the paginated fetch below can
+  /// filter server-side, same approach as
+  /// `items_drill_down_notifier.dart`'s identical lookup.
+  Future<int?> _resolveTypeMasterId() async {
+    const reservedNames = {
+      'Sales': 'SALES',
+      'Purchase': 'PURCHASE',
+      'Receipt': 'RECEIPT',
+      'Payment': 'PAYMENT',
+      'CreditNote': 'CREDIT_NOTE',
+      'DebitNote': 'DEBIT_NOTE',
+      'Journal': 'JOURNAL',
+    };
+    final reservedName = reservedNames[args.type];
+    if (reservedName == null) return null;
+    final matches =
+        await VoucherTypeRepository.instance.byReservedName(reservedName);
+    return matches.isNotEmpty ? matches.first['masterId'] as int? : null;
+  }
+
   Future<void> fetchData() async {
+    _page = 1;
+    _hasMore = true;
+    state = state.copyWith(
+      itemList: const [],
+      filteredItems: const [],
+      isListVisible: true,
+      isSortVisible: false,
+    );
+    await _fetchPage(append: false);
+  }
+
+  /// Called by the widget's scroll-near-bottom listener.
+  Future<void> loadMore() async {
+    if (state.isLoadingMore || state.isLoading || !_hasMore) return;
+    await _fetchPage(append: true);
+  }
+
+  Future<void> _fetchPage({required bool append}) async {
     if (args.ledgerMasterId == null) {
       state = state.copyWith(isLoading: false, isVisibleNoDataFound: true);
       return;
     }
 
     state = state.copyWith(
-      isLoading: true,
-      isListVisible: true,
-      isSortVisible: false,
+      isLoading: !append,
+      isLoadingMore: append,
     );
 
     try {
       final from = parseCompactDate(args.startDateString);
       final to = parseCompactDate(args.endDateString);
-      final vouchers = await fetchDrilldownVouchers(
+      final nextPage = append ? _page + 1 : 1;
+      final result = await LedgerRepository.instance.ledgerReportPage(
+        view: 'normal',
+        page: nextPage,
+        limit: 30,
+        ledgerMasterId: args.ledgerMasterId,
+        voucherTypeMasterId: _typeMasterId,
         from: from,
         to: to,
-        partyLedgerName: args.ledger,
-        voucherTypeName: args.type,
       );
+      _page = nextPage;
+      _hasMore = result.hasMore;
 
-      final items = vouchers.map((voucher) {
-        final entries =
-            (voucher['ledgerEntries'] as List?)
-                ?.cast<Map<String, dynamic>>() ??
-            const [];
-        final ledgerEntry = entries.firstWhere(
-          (e) => e['ledgerName'] == args.ledger,
-          orElse: () => entries.isNotEmpty ? entries.first : const {},
-        );
-        return Data.fromJson({
-          'vchno': voucher['number'] ?? '',
-          'vchdate': voucher['date'] ?? '',
-          'amount': parseMoneyField(ledgerEntry['amount']),
-          'ispostdated': voucher['isPostDated'] ?? false,
-          'isoptional': voucher['isOptional'] ?? false,
-        });
-      }).toList();
+      final page = result.items
+          .map(
+            (j) => Data.fromJson({
+              'vchno': j['voucherNumber'] ?? '',
+              'vchdate': j['date'] ?? '',
+              'amount': j['amount'],
+              // `Data.ispostdated`/`isoptional` are checked against the
+              // literal string '1' downstream (a legacy boolean-flag
+              // convention) - `isoptional` is always '0' since the
+              // ledger-report query already filters out optional vouchers
+              // entirely.
+              'ispostdated': j['isPostDated'] == true ? '1' : '0',
+              'isoptional': '0',
+            }),
+          )
+          .toList();
+      final items = append ? [...state.itemList, ...page] : page;
 
       state = state.copyWith(
         itemList: items,
@@ -236,12 +294,13 @@ class PartyTotalClickedRestNotifier
         isVisibleNoDataFound: items.isEmpty,
         isSortVisible: items.isNotEmpty,
         isLoading: false,
+        isLoadingMore: false,
       );
       if (items.isNotEmpty) {
         _applySort(state.selectedSortOption);
       }
     } catch (e) {
-      state = state.copyWith(isLoading: false);
+      state = state.copyWith(isLoading: false, isLoadingMore: false);
     }
   }
 }
