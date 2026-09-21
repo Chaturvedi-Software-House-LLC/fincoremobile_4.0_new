@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../PartyClicked.dart';
 import '../api/monthly_bucket_helper.dart';
-import '../api/voucher_drilldown_helper.dart';
 import '../currencyFormat.dart';
 import 'repository_providers.dart';
 
@@ -766,8 +765,11 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     }
   }
 
-  /// A single `GET vouchers` drilldown + client-side aggregation - see
-  /// `fetchDrilldownVouchers` (unchanged, was already tally-api-backed).
+  /// `reports/ledgers/ledger-report` (ledger-scoped, see
+  /// `LedgerRepository.ledgerReportDetail`'s doc comment) instead of the
+  /// previous company-wide `fetchDrilldownVouchers` fetch - this tab was
+  /// still on the old full-company pattern even after `PartyDrillDown.dart`/
+  /// the Monthly Breakdown above were moved off it.
   Future<void> fetchSoldPurchase(String vchtype) async {
     final ledgerMasterId = args.ledgerMasterId;
     if (ledgerMasterId == null) return;
@@ -794,19 +796,21 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     try {
       final from = parseCompactDate(startDateString);
       final to = parseCompactDate(endDateString);
-      final vouchers = await fetchDrilldownVouchers(
-        from: from,
-        to: to,
-        partyLedgerName: args.partyname,
-        voucherTypeName: vchtype,
-      );
+      final rows = await _ref.read(ledgerRepositoryProvider).ledgerReportDetail(
+            ledgerMasterId: ledgerMasterId,
+            from: from,
+            to: to,
+          );
 
       final totals = <String, Map<String, dynamic>>{};
-      for (final voucher in vouchers) {
+      for (final row in rows) {
+        final voucherType =
+            (row['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
+        if (voucherType != vchtype) continue;
         final inventoryEntries =
-            (voucher['inventoryEntries'] as List?)?.cast<Map<String, dynamic>>() ??
+            (row['inventoryEntries'] as List?)?.cast<Map<String, dynamic>>() ??
                 const [];
-        final date = voucher['date']?.toString() ?? '';
+        final date = row['date']?.toString() ?? '';
         for (final entry in inventoryEntries) {
           final name = (entry['stockItemName'] ?? '').toString();
           final bucket = totals.putIfAbsent(
@@ -989,8 +993,16 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
         _commit(() => isVisibleNoDataFound = true);
       }
 
+      // voucherTypeMasterId per visible type - lets the month-wise fetch
+      // below scope each `ledger-report` call to one type server-side
+      // (`view=monthly-aggregate`, a plain GROUP BY with no per-row
+      // subqueries) instead of fetching every detail row for the whole
+      // ledger and bucketing client-side.
+      final typeMasterIdByKey = <String, int>{};
+
       for (final row in summaryRows) {
         final vchtype = (row['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
+        final vchtypeMasterId = row['voucherTypeMasterId'] as int?;
         final totalAmount = (row['totalAmount'] ?? '0').toString();
         final averageAmount = (row['averageAmount'] ?? '0').toString();
         final invoiceCount = (row['invoiceCount'] ?? 0).toString();
@@ -1000,6 +1012,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Sales':
             if (salesparty != 'True') continue;
             _commit(() => SalesVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['Sales'] = vchtypeMasterId;
             totalsaleamt = totalAmount;
             avgsalesinvoiceamt = averageAmount;
             noofsalesinvoice = invoiceCount;
@@ -1007,6 +1020,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Purchase':
             if (purchaseparty != 'True') continue;
             _commit(() => PurchaseVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['Purchase'] = vchtypeMasterId;
             totalpurchaseamt = totalAmount;
             avgpurchaseinvoiceamt = averageAmount;
             noofpurchaseinvoice = invoiceCount;
@@ -1014,6 +1028,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Receipt':
             if (receiptparty != 'True') continue;
             _commit(() => ReceiptVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['Receipt'] = vchtypeMasterId;
             totalreceiptamt = totalAmount;
             avgreceiptinvoiceamt = averageAmount;
             noofreceiptinvoice = invoiceCount;
@@ -1021,6 +1036,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Payment':
             if (paymentparty != 'True') continue;
             _commit(() => PaymentVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['Payment'] = vchtypeMasterId;
             totalpaymentamt = totalAmount;
             avgpaymentinvoiceamt = averageAmount;
             noofpaymentinvoice = invoiceCount;
@@ -1028,6 +1044,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'CreditNote':
             if (creditnoteparty != 'True') continue;
             _commit(() => CreditnoteVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['CreditNote'] = vchtypeMasterId;
             totalcreditnoteamt = totalAmount;
             avgcreditnoteinvoiceamt = averageAmount;
             noofcreditnoteinvoice = invoiceCount;
@@ -1035,6 +1052,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'DebitNote':
             if (debitnoteparty != 'True') continue;
             _commit(() => DebitnoteVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['DebitNote'] = vchtypeMasterId;
             totaldebitnoteamt = totalAmount;
             avgdebitnoteinvoiceamt = averageAmount;
             noofdebitnoteinvoice = invoiceCount;
@@ -1042,6 +1060,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
           case 'Journal':
             if (journalparty != 'True') continue;
             _commit(() => JournalVisibility = true);
+            if (vchtypeMasterId != null) typeMasterIdByKey['Journal'] = vchtypeMasterId;
             totaljournalamt = totalAmount;
             avgjournalinvoiceamt = averageAmount;
             noofjournalinvoice = invoiceCount;
@@ -1051,55 +1070,58 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
         }
       }
 
-      if (SalesVisibility ||
-          PurchaseVisibility ||
-          ReceiptVisibility ||
-          PaymentVisibility ||
-          CreditnoteVisibility ||
-          DebitnoteVisibility ||
-          JournalVisibility) {
-        // `reports/ledgers/ledger-report` (view=normal) - every
-        // voucher-ledger-entry row for this ledger, of any voucher type, in
-        // one ledger-scoped call. Replaces the previous approach of fetching
-        // every voucher of only the visible types company-wide
-        // (`listInRangeForTypes`) and filtering client-side by ledgerMasterId
-        // - now the backend does both the ledger scoping and the type
-        // inclusion in the same query.
-        final rows = await ledgerRepo.ledgerReportDetail(
-          ledgerMasterId: ledgerMasterId,
-          from: from,
-          to: to,
-        );
-        if (myGen != _summaryRequestGen) return;
-
-        void bucketInto(List<months> target, String vchtypeKey) {
-          final bucketRows = <Map<String, dynamic>>[];
-          for (final row in rows) {
-            final voucherType =
-                (row['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
-            if (voucherType != vchtypeKey) continue;
-            bucketRows.add({
-              'date': row['date'],
-              'amount': parseMoneyField(row['amount']).abs(),
-            });
-          }
-          final buckets = bucketByMonth(
-            bucketRows,
-            dateOf: (r) => DateTime.parse(r['date'] as String),
-            amountOf: (r) => r['amount'] as double,
-          );
-          target.addAll([
-            for (final b in buckets) months(mname: b.label, total: b.total.toString()),
-          ]);
+      if (typeMasterIdByKey.isNotEmpty) {
+        // One lightweight `reports/ledgers/ledger-report?view=monthly-
+        // aggregate` call per visible voucher type, run concurrently - the
+        // backend does the month-wise GROUP BY/SUM itself (no per-row
+        // detail fetch, no client-side bucketing), replacing the previous
+        // approach of paginating through every ledger-entry row for the
+        // whole ledger and bucketing client-side, which got slow once a
+        // ledger had a full year of activity (hundreds of paginated rows,
+        // each carrying resolved inventoryEntries/costCentreAllocations
+        // this screen never even uses).
+        String monthLabel(String yyyyMM) {
+          final year = int.parse(yyyyMM.substring(0, 4));
+          final month = int.parse(yyyyMM.substring(5, 7));
+          const names = [
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          ];
+          return '${names[month - 1]} $year';
         }
 
-        if (SalesVisibility) bucketInto(months_list_sales, 'Sales');
-        if (PurchaseVisibility) bucketInto(months_list_purchase, 'Purchase');
-        if (ReceiptVisibility) bucketInto(months_list_receipt, 'Receipt');
-        if (PaymentVisibility) bucketInto(months_list_payment, 'Payment');
-        if (CreditnoteVisibility) bucketInto(months_list_creditnote, 'CreditNote');
-        if (DebitnoteVisibility) bucketInto(months_list_debitnote, 'DebitNote');
-        if (JournalVisibility) bucketInto(months_list_journal, 'Journal');
+        final targets = <String, List<months>>{
+          'Sales': months_list_sales,
+          'Purchase': months_list_purchase,
+          'Receipt': months_list_receipt,
+          'Payment': months_list_payment,
+          'CreditNote': months_list_creditnote,
+          'DebitNote': months_list_debitnote,
+          'Journal': months_list_journal,
+        };
+
+        final entries = typeMasterIdByKey.entries.toList();
+        final results = await Future.wait([
+          for (final e in entries)
+            ledgerRepo.ledgerReportMonthlyAggregate(
+              ledgerMasterId,
+              from: from,
+              to: to,
+              voucherTypeMasterId: e.value,
+            ),
+        ]);
+        if (myGen != _summaryRequestGen) return;
+
+        for (var i = 0; i < entries.length; i++) {
+          final monthly = (results[i]['monthly'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+          targets[entries[i].key]!.addAll([
+            for (final m in monthly)
+              months(
+                mname: monthLabel(m['month'] as String),
+                total: parseMoneyField(m['totalAmount']).abs().toString(),
+              ),
+          ]);
+        }
       }
 
       if (receivableparty == 'True' || payableparty == 'True') {
