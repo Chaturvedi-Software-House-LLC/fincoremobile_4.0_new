@@ -775,104 +775,81 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                 ),
               ),
 
-              // List card
-              SliverToBoxAdapter(
-                child: Container(
-                  margin: const EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black12,
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      if (state.isSearchViewVisible) ...[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                          child: SizedBox(
-                            height: 46,
-                            child: TextField(
-                              controller: searchController,
-                              onChanged: (value) => ref
-                                  .read(
-                                    itemsDrillDownNotifierProvider(
-                                      _args,
-                                    ).notifier,
-                                  )
-                                  .filter(value),
-                              style: GoogleFonts.poppins(
-                                fontSize: 13.5,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                              decoration: InputDecoration(
-                                isDense: true,
-                                hintText: 'Search...',
-                                hintStyle: GoogleFonts.poppins(fontSize: 13),
-                                prefixIcon: Icon(
-                                  Icons.search,
-                                  size: 18,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                                filled: true,
-                                fillColor:
-                                    Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Colors.white.withOpacity(0.06)
-                                        : Colors.grey.shade100,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 8,
-                                  horizontal: 12,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                  borderSide: BorderSide.none,
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                  borderSide: BorderSide(
-                                    color: app_color.withOpacity(0.6),
-                                    width: 1.4,
-                                  ),
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                  borderSide: BorderSide.none,
-                                ),
-                              ),
-                            ),
-                          ),
+              // List card - `SliverFillRemaining` (not `SliverToBoxAdapter`)
+              // when empty, so the card's background genuinely fills the
+              // rest of the viewport instead of stopping at the empty-
+              // state message's own content height (a fixed-height
+              // `SizedBox` inside a box-sized `SliverToBoxAdapter` left a
+              // gap of bare scaffold background below the card). Matches
+              // `Items.dart`'s already-correct empty-state pattern.
+              if (state.isVisibleNoDataFound)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Container(
+                    margin: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black12,
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
                         ),
                       ],
-                      _buildListSection(state),
-                      if (state.isLoadingMore)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Center(
-                            child: SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator.adaptive(
-                                strokeWidth: 2.4,
+                    ),
+                    child: Column(
+                      children: [
+                        if (state.isSearchViewVisible) _buildSearchBox(),
+                        Expanded(child: Center(child: _buildEmptyState())),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SliverToBoxAdapter(
+                  child: Container(
+                    margin: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black12,
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        if (state.isSearchViewVisible) _buildSearchBox(),
+                        _buildListSection(state),
+                        if (state.isLoadingMore)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Center(
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator.adaptive(
+                                  strokeWidth: 2.4,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
 
@@ -1102,27 +1079,75 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
   // overlay (which left a large dead white area between the message and
   // the bottom nav).
   Widget _buildEmptyState() {
-    return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.4,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 48,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.search_off_rounded,
+          size: 48,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'No Records Found',
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchBox() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: SizedBox(
+        height: 46,
+        child: TextField(
+          controller: searchController,
+          onChanged: (value) => ref
+              .read(itemsDrillDownNotifierProvider(_args).notifier)
+              .filter(value),
+          style: GoogleFonts.poppins(
+            fontSize: 13.5,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'Search...',
+            hintStyle: GoogleFonts.poppins(fontSize: 13),
+            prefixIcon: Icon(
+              Icons.search,
+              size: 18,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(height: 12),
-            Text(
-              'No Records Found',
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+            filled: true,
+            fillColor: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white.withOpacity(0.06)
+                : Colors.grey.shade100,
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 8,
+              horizontal: 12,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(24),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(24),
+              borderSide: BorderSide(
+                color: app_color.withOpacity(0.6),
+                width: 1.4,
               ),
             ),
-          ],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(24),
+              borderSide: BorderSide.none,
+            ),
+          ),
         ),
       ),
     );

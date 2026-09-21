@@ -733,41 +733,42 @@ class _PartyPageState extends ConsumerState<Party>
                         ),
                       ),
 
-                      // ⚠️ No Data Found
-                      Visibility(
-                        visible: _s.isVisibleNoDataFound,
-                        child: SizedBox(
-                          height: MediaQuery.of(context).size.height * 0.5,
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.search_off_rounded,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                  size: 40,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'No matching parties',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 16,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
+
+                // ⚠️ No Data Found - `SliverFillRemaining` (not nested in
+                // the header's `SliverToBoxAdapter`) so it genuinely fills
+                // the rest of the viewport instead of stopping at a
+                // fixed-height SizedBox, which left a gap of bare scaffold
+                // background below it - see `ItemsDrillDown.dart`'s
+                // identical fix.
+                if (_s.isVisibleNoDataFound)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.search_off_rounded,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            size: 40,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'No matching parties',
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
 
                 // 📋 Party List - a real sliver (SliverList) so the
                 // CustomScrollView only builds cards near the viewport;

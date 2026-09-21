@@ -794,12 +794,17 @@ class _PartyClickedSalePurcOrderClickedPageState
                                 ),
                               ],
 
+                              // `Expanded` (matching the real list's own
+                              // `Expanded` below), not a fixed-height
+                              // SizedBox, so this fills the rest of the
+                              // screen instead of leaving a gap of bare
+                              // scaffold background below it - see
+                              // `ItemsDrillDown.dart`'s identical fix.
                               if (vm.isVisibleNoDataFound)
-                                SizedBox(
-                                  height:
-                                      MediaQuery.of(context).size.height * 0.5,
+                                Expanded(
                                   child: Center(
                                     child: Column(
+                                      mainAxisSize: MainAxisSize.min,
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
@@ -810,7 +815,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                                             context,
                                           ).colorScheme.onSurfaceVariant,
                                         ),
-                                        SizedBox(height: 12),
+                                        const SizedBox(height: 12),
                                         Text(
                                           'No Records Found',
                                           style: GoogleFonts.poppins(

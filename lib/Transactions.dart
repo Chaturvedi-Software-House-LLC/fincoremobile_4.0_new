@@ -1232,7 +1232,10 @@ class _TransactionsPageState extends ConsumerState<Transactions>
                 // of every transaction up front, which is what caused the
                 // same scroll-hang bug already fixed on the Party list.
                 if (!_isTrendTabSelected && isVisibleNoDataFound)
-                  SliverToBoxAdapter(child: _buildEmptyState(context))
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(child: _buildEmptyState(context)),
+                  )
                 else if (!_isTrendTabSelected)
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(
@@ -1661,46 +1664,42 @@ class _TransactionsPageState extends ConsumerState<Transactions>
 }
 
 Widget _buildEmptyState(BuildContext context) {
-  return SizedBox(
-    height: MediaQuery.of(context).size.height * 0.5,
-    child: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 84,
-            height: 84,
-            decoration: BoxDecoration(
-              color: app_color.withOpacity(0.08),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.receipt_long_rounded,
-              size: 40,
-              color: app_color.withOpacity(0.6),
-            ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            "No transactions found",
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Try a different date range, voucher type, or filter",
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Container(
+        width: 84,
+        height: 84,
+        decoration: BoxDecoration(
+          color: app_color.withOpacity(0.08),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          Icons.receipt_long_rounded,
+          size: 40,
+          color: app_color.withOpacity(0.6),
+        ),
       ),
-    ),
+      const SizedBox(height: 18),
+      Text(
+        "No transactions found",
+        style: GoogleFonts.poppins(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        "Try a different date range, voucher type, or filter",
+        textAlign: TextAlign.center,
+        style: GoogleFonts.poppins(
+          fontSize: 13,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    ],
   );
 }
 

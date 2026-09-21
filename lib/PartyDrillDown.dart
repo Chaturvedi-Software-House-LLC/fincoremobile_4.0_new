@@ -1089,30 +1089,33 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
   // the scroll flow right below the header, instead of floating as an
   // unpositioned Stack overlay (which left a large dead white area between
   // the message and the bottom nav).
+  // `SliverFillRemaining` (not `SliverToBoxAdapter`) so the empty state
+  // genuinely fills the rest of the viewport instead of stopping at a
+  // fixed-height SizedBox, which left a gap of bare scaffold background
+  // below it - see `ItemsDrillDown.dart`'s identical fix.
   Widget _buildEmptyState() {
-    return SliverToBoxAdapter(
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.4,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.search_off_rounded,
-                size: 48,
+    return SliverFillRemaining(
+      hasScrollBody: false,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'No Records Found',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 12),
-              Text(
-                'No Records Found',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
