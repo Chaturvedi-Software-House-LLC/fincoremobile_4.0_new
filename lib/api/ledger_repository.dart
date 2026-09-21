@@ -257,10 +257,14 @@ class LedgerRepository {
     int ledgerMasterId, {
     DateTime? from,
     DateTime? to,
+    int? voucherTypeMasterId,
   }) async {
     final query = StringBuffer('?');
     if (from != null) query.write('from=${_dateOnly(from)}&');
-    if (to != null) query.write('to=${_dateOnly(to)}');
+    if (to != null) query.write('to=${_dateOnly(to)}&');
+    if (voucherTypeMasterId != null) {
+      query.write('voucherTypeMasterId=$voucherTypeMasterId');
+    }
     final result = await _client.getForCompany(
       '/reports/ledgers/$ledgerMasterId/item-summary$query',
     );

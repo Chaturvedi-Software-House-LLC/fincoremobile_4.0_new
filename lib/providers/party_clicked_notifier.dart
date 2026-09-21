@@ -511,6 +511,12 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
   List<months> months_list_debitnote = [];
   List<months> months_list_journal = [];
 
+  // voucherTypeMasterId per voucher-type key, populated by
+  // `_fetchSummaryDataTallyApi` from `ledgerSummary`'s own rows - reused by
+  // `fetchSoldPurchase` so it can call `itemSummary` scoped to one voucher
+  // type instead of a name-based filter.
+  Map<String, int> _typeMasterIdByKey = {};
+
   bool isVisibleNoDataFound = false;
   bool isVisibleSummaryBtn = false;
   bool isVisibleSoldBtn = false;
@@ -765,11 +771,13 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     }
   }
 
-  /// `reports/ledgers/ledger-report` (ledger-scoped, see
-  /// `LedgerRepository.ledgerReportDetail`'s doc comment) instead of the
-  /// previous company-wide `fetchDrilldownVouchers` fetch - this tab was
-  /// still on the old full-company pattern even after `PartyDrillDown.dart`/
-  /// the Monthly Breakdown above were moved off it.
+  /// `reports/ledgers/:ledgerMasterId/item-summary` (server-side already
+  /// grouped by item, see `LedgerRepository.itemSummary`'s doc comment) -
+  /// one lightweight aggregate call instead of paginating through every
+  /// ledger-entry row for the ledger and bucketing client-side (which this
+  /// tab did even after the Monthly Breakdown/`PartyDrillDown.dart` moved
+  /// off that pattern - fetching 9+ pages sequentially before showing
+  /// anything felt just as "stuck" as the original company-wide fetch did).
   Future<void> fetchSoldPurchase(String vchtype) async {
     final ledgerMasterId = args.ledgerMasterId;
     if (ledgerMasterId == null) return;
@@ -796,44 +804,21 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     try {
       final from = parseCompactDate(startDateString);
       final to = parseCompactDate(endDateString);
-      final rows = await _ref.read(ledgerRepositoryProvider).ledgerReportDetail(
-            ledgerMasterId: ledgerMasterId,
+      final rows = await _ref.read(ledgerRepositoryProvider).itemSummary(
+            ledgerMasterId,
             from: from,
             to: to,
+            voucherTypeMasterId: _typeMasterIdByKey[vchtype],
           );
-
-      final totals = <String, Map<String, dynamic>>{};
-      for (final row in rows) {
-        final voucherType =
-            (row['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
-        if (voucherType != vchtype) continue;
-        final inventoryEntries =
-            (row['inventoryEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-                const [];
-        final date = row['date']?.toString() ?? '';
-        for (final entry in inventoryEntries) {
-          final name = (entry['stockItemName'] ?? '').toString();
-          final bucket = totals.putIfAbsent(
-            name,
-            () => {'qty': 0.0, 'unit': '', 'lastdate': '', 'rate': '0'},
-          );
-          bucket['qty'] = (bucket['qty'] as double) + parseMoneyField(entry['quantity']);
-          bucket['unit'] = entry['unitSymbol'] ?? bucket['unit'];
-          if (date.compareTo(bucket['lastdate'] as String) >= 0) {
-            bucket['lastdate'] = date;
-            bucket['rate'] = (entry['rate'] ?? '0').toString();
-          }
-        }
-      }
 
       final items = [
-        for (final entry in totals.entries)
+        for (final row in rows)
           Sold_Purchased(
-            item: entry.key,
-            qty: (entry.value['qty'] as double).toString(),
-            unit: (entry.value['unit'] as String),
-            lastdate: (entry.value['lastdate'] as String),
-            rate: (entry.value['rate'] as String),
+            item: (row['stockItemName'] ?? '').toString(),
+            qty: parseMoneyField(row['totalQuantity']).toString(),
+            unit: (row['unitSymbol'] ?? '').toString(),
+            lastdate: (row['lastDate'] ?? '').toString(),
+            rate: (row['lastRate'] ?? '0').toString(),
           ),
       ];
 
@@ -999,6 +984,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
       // subqueries) instead of fetching every detail row for the whole
       // ledger and bucketing client-side.
       final typeMasterIdByKey = <String, int>{};
+      _typeMasterIdByKey = typeMasterIdByKey;
 
       for (final row in summaryRows) {
         final vchtype = (row['voucherTypeName'] as String? ?? '').replaceAll(' ', '');
