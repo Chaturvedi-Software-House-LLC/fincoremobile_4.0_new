@@ -221,4 +221,32 @@ class StockRepository {
       ),
     );
   }
+
+  /// `reports/stock-items/item-report?view=normal` - every voucher line for
+  /// one item (plus the voucher's resolved `ledgerEntries`/
+  /// `costCentreAllocations`), item-scoped instead of company-wide. Backs
+  /// `ItemsDrillDown.dart`'s Ledger/Bills/Voucher Type/Cost Center grouping
+  /// views, which previously fetched every voucher in the company via
+  /// `voucher_drilldown_helper.dart`'s `fetchDrilldownVouchers` - the "stuck"
+  /// screen this endpoint was added to fix.
+  Future<List<Map<String, dynamic>>> itemReportDetail({
+    required int stockItemMasterId,
+    DateTime? from,
+    DateTime? to,
+    int? voucherTypeMasterId,
+  }) async {
+    final query = StringBuffer(
+      '?view=normal&stockItemMasterId=$stockItemMasterId',
+    );
+    if (from != null) query.write('&from=${_dateOnly(from)}');
+    if (to != null) query.write('&to=${_dateOnly(to)}');
+    if (voucherTypeMasterId != null) {
+      query.write('&voucherTypeMasterId=$voucherTypeMasterId');
+    }
+    return fetchAllPages(
+      (page) => _client.getForCompany(
+        '/reports/stock-items/item-report$query&page=$page&limit=100',
+      ),
+    );
+  }
 }
