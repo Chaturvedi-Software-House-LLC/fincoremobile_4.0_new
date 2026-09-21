@@ -371,4 +371,51 @@ class LedgerRepository {
     final rows = (result.data as List).cast<Map<String, dynamic>>();
     return rows.isNotEmpty ? rows.first : null;
   }
+
+  /// `reports/ledgers/ledger-report?view=normal` - every voucher-ledger-entry
+  /// row for one party ledger (plus the voucher's resolved
+  /// `inventoryEntries`/`costCentreAllocations`), ledger-scoped instead of
+  /// company-wide. Backs `PartyDrillDown.dart`'s Items/Bills/Voucher Type/
+  /// Cost Center grouping views - the ledger-entry-driven sibling of
+  /// `StockRepository.itemReportDetail`, so it also covers Receipt/Payment/
+  /// Journal/Contra vouchers that never touch inventory.
+  Future<List<Map<String, dynamic>>> ledgerReportDetail({
+    required int ledgerMasterId,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final query = StringBuffer('?view=normal&ledgerMasterId=$ledgerMasterId');
+    if (from != null) query.write('&from=${_dateOnly(from)}');
+    if (to != null) query.write('&to=${_dateOnly(to)}');
+    return fetchAllPages(
+      (page) => _client.getForCompany(
+        '/reports/ledgers/ledger-report$query&page=$page&limit=100',
+      ),
+    );
+  }
+
+  /// `reports/ledgers/ledger-report?view=monthly-aggregate` - one round trip
+  /// for this ledger's overall totals plus its month-by-month breakdown.
+  /// Backs `PartyClicked.dart`'s Monthly Breakdown, replacing the previous
+  /// approach of fetching every voucher for the date range and bucketing by
+  /// month/voucher-type client-side.
+  Future<Map<String, dynamic>> ledgerReportMonthlyAggregate(
+    int ledgerMasterId, {
+    DateTime? from,
+    DateTime? to,
+    int? voucherTypeMasterId,
+  }) async {
+    final query = StringBuffer(
+      '?view=monthly-aggregate&ledgerMasterId=$ledgerMasterId',
+    );
+    if (from != null) query.write('&from=${_dateOnly(from)}');
+    if (to != null) query.write('&to=${_dateOnly(to)}');
+    if (voucherTypeMasterId != null) {
+      query.write('&voucherTypeMasterId=$voucherTypeMasterId');
+    }
+    final result = await _client.getForCompany(
+      '/reports/ledgers/ledger-report$query',
+    );
+    return result.data as Map<String, dynamic>;
+  }
 }

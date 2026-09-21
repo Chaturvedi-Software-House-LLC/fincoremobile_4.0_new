@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../PartyDrillDown.dart';
-import '../api/voucher_drilldown_helper.dart';
+import '../api/ledger_repository.dart';
 import '../api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
 
 /// Riverpod migration of `PartyDrillDown.dart`'s `_PartyDrillDownState`.
@@ -240,57 +240,90 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
     }
   }
 
-  /// The party ledger's own contribution to [voucher] - the amount summed
-  /// for "Bills"/"Voucher Type" groupings. When [args.lockedItem] is set
-  /// (viewing a specific item's history), the item's inventory-entry amount
-  /// is used instead, since that's what the drill-down is actually about at
-  /// that point.
-  double _voucherAmount(Map<String, dynamic> voucher) {
-    if (args.lockedItem != null) {
-      final inventoryEntries =
-          (voucher['inventoryEntries'] as List?)
-              ?.cast<Map<String, dynamic>>() ??
-          const [];
-      return inventoryEntries
-          .where((e) => e['stockItemName'] == args.lockedItem)
-          .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
-    }
-    final ledgerEntries =
-        (voucher['ledgerEntries'] as List?)?.cast<Map<String, dynamic>>() ??
-        const [];
-    final entry = ledgerEntries.firstWhere(
-      (e) => e['ledgerName'] == args.ledger,
-      orElse: () => ledgerEntries.isNotEmpty ? ledgerEntries.first : const {},
-    );
-    return parseMoneyField(entry['amount']);
-  }
-
-  /// tally-api path: filters vouchers via [fetchDrilldownVouchers] to this
-  /// party/type/locked dimensions, then aggregates client-side into the
-  /// exact legacy JSON shape each `PXxx.fromJson` factory already expects
-  /// - the rest of this screen (sorting, search, PDF/CSV export) is
-  /// untouched. `Voucher Type` grouping is a known simplification: unlike
-  /// legacy Tally, tally-api's `voucherTypeName` has no broader/narrower
-  /// hierarchy, so once [args.type] is already fixed this almost always
-  /// yields one group rather than several.
+  /// tally-api path - `reports/ledgers/ledger-report` (see
+  /// `LedgerRepository.ledgerReportDetail`'s doc comment). Unlike the old
+  /// `fetchDrilldownVouchers`-based approach, this fetches only rows for
+  /// this one party ledger (`ledgerMasterId`-scoped server-side, so the
+  /// returned `amount`/`isDebit` are already this ledger's own entry - no
+  /// more matching `ledgerEntries` by name to find "this party's" leg)
+  /// instead of every voucher in the company. [args.lockedItem]/
+  /// [args.lockedCostcenter] still have to be applied by name client-side
+  /// since only names (not masterIds) are threaded through this screen's
+  /// recursive navigation.
+  ///
+  /// Rows are per ledger-entry, so a voucher with two legs on this same
+  /// ledger (rare, but not impossible) comes back as two rows - grouped
+  /// back to one per-voucher entry first (summing this ledger's own
+  /// amount), matching the old per-voucher grouping semantics for Items/
+  /// Bills/Voucher Type. Cost Center stays per-entry, since an entry's own
+  /// cost-centre split is scoped to that entry specifically.
   Future<List<Map<String, dynamic>>> _fetchGroupTallyApi(String group) async {
     final from = parseCompactDate(args.startDateString);
     final to = parseCompactDate(args.endDateString);
-    final vouchers = await fetchDrilldownVouchers(
+    final rows = await LedgerRepository.instance.ledgerReportDetail(
+      ledgerMasterId: args.ledgerMasterId!,
       from: from,
       to: to,
-      partyLedgerName: args.ledger,
-      itemName: args.lockedItem,
-      voucherTypeName: args.lockedVchname ?? args.type,
-      costCentreName: args.lockedCostcenter,
     );
+
+    final voucherTypeName = args.lockedVchname ?? args.type;
+    final filteredRows = rows.where((row) {
+      if (row['voucherTypeName'] != voucherTypeName) return false;
+      if (args.lockedItem != null) {
+        final inventoryEntries =
+            (row['inventoryEntries'] as List?)
+                ?.cast<Map<String, dynamic>>() ??
+            const [];
+        if (!inventoryEntries.any(
+          (e) => e['stockItemName'] == args.lockedItem,
+        )) {
+          return false;
+        }
+      }
+      if (args.lockedCostcenter != null) {
+        final costCentreEntries =
+            (row['costCentreAllocations'] as List?)
+                ?.cast<Map<String, dynamic>>() ??
+            const [];
+        if (args.lockedCostcenter == 'null') {
+          if (costCentreEntries.isNotEmpty) return false;
+        } else if (!costCentreEntries.any(
+          (e) => e['costCentreName'] == args.lockedCostcenter,
+        )) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+
+    // Group rows back to one entry per voucher (summing this ledger's own
+    // amount across that voucher's entries) for the groupings that operate
+    // at voucher granularity.
+    final byVoucher = <int, Map<String, dynamic>>{};
+    for (final row in filteredRows) {
+      final voucherMasterId = row['voucherMasterId'] as int;
+      final amount = parseMoneyField(row['amount']);
+      final existing = byVoucher[voucherMasterId];
+      if (existing == null) {
+        byVoucher[voucherMasterId] = {
+          'voucherNumber': row['voucherNumber'] ?? '',
+          'date': row['date'] ?? '',
+          'voucherTypeName': row['voucherTypeName'] ?? '',
+          'inventoryEntries': row['inventoryEntries'],
+          'amount': amount,
+        };
+      } else {
+        existing['amount'] = (existing['amount'] as double) + amount;
+      }
+    }
+    final vouchers = byVoucher.values.toList();
 
     switch (group) {
       case 'Items':
         final totals = <String, Map<String, double>>{};
-        for (final voucher in vouchers) {
+        for (final row in filteredRows) {
           final inventoryEntries =
-              (voucher['inventoryEntries'] as List?)
+              (row['inventoryEntries'] as List?)
                   ?.cast<Map<String, dynamic>>() ??
               const [];
           for (final entry in inventoryEntries) {
@@ -317,10 +350,10 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
         return [
           for (final voucher in vouchers)
             {
-              'vchno': voucher['number'] ?? '',
+              'vchno': voucher['voucherNumber'],
               'Partyledger': args.ledger,
-              'vchdate': voucher['date'] ?? '',
-              'amount': _voucherAmount(voucher),
+              'vchdate': voucher['date'],
+              'amount': voucher['amount'],
             },
         ];
 
@@ -333,7 +366,7 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
             () => {'count': 0, 'amount': 0.0},
           );
           bucket['count'] = bucket['count']! + 1;
-          bucket['amount'] = bucket['amount']! + _voucherAmount(voucher);
+          bucket['amount'] = bucket['amount']! + (voucher['amount'] as double);
         }
         return [
           for (final entry in totals.entries)
@@ -346,9 +379,9 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
 
       case 'Cost Center':
         final totals = <String, Map<String, num>>{};
-        for (final voucher in vouchers) {
+        for (final row in filteredRows) {
           final costCentreEntries =
-              (voucher['costCentreAllocations'] as List?)
+              (row['costCentreAllocations'] as List?)
                   ?.cast<Map<String, dynamic>>() ??
               const [];
           if (costCentreEntries.isEmpty) {
@@ -357,7 +390,7 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
               () => {'count': 0, 'amount': 0.0},
             );
             bucket['count'] = bucket['count']! + 1;
-            bucket['amount'] = bucket['amount']! + _voucherAmount(voucher);
+            bucket['amount'] = bucket['amount']! + parseMoneyField(row['amount']);
           } else {
             for (final entry in costCentreEntries) {
               final name = (entry['costCentreName'] ?? 'null').toString();
