@@ -30,15 +30,18 @@ class _Crumb {
 class DrillLedger {
   final String Partyledger, qty;
   final double amount;
+  final int? ledgerMasterId;
   DrillLedger({
     required this.Partyledger,
     required this.qty,
     required this.amount,
+    this.ledgerMasterId,
   });
   factory DrillLedger.fromJson(Map<String, dynamic> j) => DrillLedger(
     Partyledger: j['Partyledger'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
+    ledgerMasterId: j['ledgerMasterId'] as int?,
   );
 }
 
@@ -62,30 +65,36 @@ class DrillBill {
 class DrillVchType {
   final String vchname, qty;
   final double amount;
+  final int? voucherTypeMasterId;
   DrillVchType({
     required this.vchname,
     required this.qty,
     required this.amount,
+    this.voucherTypeMasterId,
   });
   factory DrillVchType.fromJson(Map<String, dynamic> j) => DrillVchType(
     vchname: j['vchname'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
+    voucherTypeMasterId: j['voucherTypeMasterId'] as int?,
   );
 }
 
 class DrillCostCenter {
   final String costcentre, qty;
   final double amount;
+  final int? costCentreMasterId;
   DrillCostCenter({
     required this.costcentre,
     required this.qty,
     required this.amount,
+    this.costCentreMasterId,
   });
   factory DrillCostCenter.fromJson(Map<String, dynamic> j) => DrillCostCenter(
     costcentre: j['costcentre'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
+    costCentreMasterId: j['costCentreMasterId'] as int?,
   );
 }
 
@@ -105,8 +114,11 @@ class ItemsDrillDown extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, item_name, total;
   final int? stockItemMasterId;
   final String? lockedLedger;
+  final int? lockedLedgerMasterId;
   final String? lockedCostcenter;
+  final int? lockedCostcenterMasterId;
   final String? lockedVchname;
+  final int? lockedVchnameMasterId;
 
   /// Ordered navigation history: each entry has 'type' and 'label' keys.
   final List<Map<String, String>> trail;
@@ -119,8 +131,11 @@ class ItemsDrillDown extends ConsumerStatefulWidget {
     required this.total,
     this.stockItemMasterId,
     this.lockedLedger,
+    this.lockedLedgerMasterId,
     this.lockedCostcenter,
+    this.lockedCostcenterMasterId,
     this.lockedVchname,
+    this.lockedVchnameMasterId,
     this.trail = const [],
   });
 
@@ -143,8 +158,11 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
         itemName: widget.item_name,
         stockItemMasterId: widget.stockItemMasterId,
         lockedLedger: widget.lockedLedger,
+        lockedLedgerMasterId: widget.lockedLedgerMasterId,
         lockedCostcenter: widget.lockedCostcenter,
+        lockedCostcenterMasterId: widget.lockedCostcenterMasterId,
         lockedVchname: widget.lockedVchname,
+        lockedVchnameMasterId: widget.lockedVchnameMasterId,
       );
 
   // ---------------------------------------------------------------------------
@@ -421,12 +439,26 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
     super.initState();
     startdate_text = _convertDate(widget.startdate_string);
     enddate_text = _convertDate(widget.enddate_string);
+    _scrollFabController.addListener(_maybeLoadMore);
   }
 
   @override
   void dispose() {
+    _scrollFabController.removeListener(_maybeLoadMore);
     _scrollFabController.dispose();
     super.dispose();
+  }
+
+  /// Triggers the active group's next page once the user scrolls within
+  /// 300px of the bottom - the notifier itself no-ops if a load is already
+  /// in flight or there's no more data, so this can fire repeatedly as the
+  /// user keeps scrolling without needing its own debounce.
+  void _maybeLoadMore() {
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 300) {
+      ref.read(itemsDrillDownNotifierProvider(_args).notifier).loadMoreItems();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -824,6 +856,19 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                         ),
                       ],
                       _buildListSection(state),
+                      if (state.isLoadingMore)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator.adaptive(
+                                strokeWidth: 2.4,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1110,8 +1155,11 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                     item_name: widget.item_name,
                     stockItemMasterId: widget.stockItemMasterId,
                     lockedLedger: item.Partyledger,
+                    lockedLedgerMasterId: item.ledgerMasterId,
                     lockedCostcenter: widget.lockedCostcenter,
+                    lockedCostcenterMasterId: widget.lockedCostcenterMasterId,
                     lockedVchname: widget.lockedVchname,
+                    lockedVchnameMasterId: widget.lockedVchnameMasterId,
                     trail: [
                       ...widget.trail,
                       {'type': 'Party', 'label': item.Partyledger},
@@ -1165,8 +1213,11 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                     item_name: widget.item_name,
                     stockItemMasterId: widget.stockItemMasterId,
                     lockedLedger: widget.lockedLedger,
+                    lockedLedgerMasterId: widget.lockedLedgerMasterId,
                     lockedCostcenter: widget.lockedCostcenter,
+                    lockedCostcenterMasterId: widget.lockedCostcenterMasterId,
                     lockedVchname: item.vchname,
+                    lockedVchnameMasterId: item.voucherTypeMasterId,
                     trail: [
                       ...widget.trail,
                       {'type': 'Vch Type', 'label': item.vchname},
@@ -1202,8 +1253,11 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                     item_name: widget.item_name,
                     stockItemMasterId: widget.stockItemMasterId,
                     lockedLedger: widget.lockedLedger,
+                    lockedLedgerMasterId: widget.lockedLedgerMasterId,
                     lockedCostcenter: item.costcentre,
+                    lockedCostcenterMasterId: item.costCentreMasterId,
                     lockedVchname: widget.lockedVchname,
+                    lockedVchnameMasterId: widget.lockedVchnameMasterId,
                     trail: [
                       ...widget.trail,
                       {

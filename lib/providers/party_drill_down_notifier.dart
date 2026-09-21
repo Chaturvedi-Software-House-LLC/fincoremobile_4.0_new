@@ -3,14 +3,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../PartyDrillDown.dart';
 import '../api/ledger_repository.dart';
-import '../api/monthly_bucket_helper.dart' show parseMoneyField, parseCompactDate;
+import '../api/voucher_type_repository.dart';
+import '../api/monthly_bucket_helper.dart' show parseCompactDate;
 
 /// Riverpod migration of `PartyDrillDown.dart`'s `_PartyDrillDownState`.
-/// Closest sibling: `party_total_clicked_rest_notifier.dart` (same
-/// tally-api drilldown fetch, `fetchDrilldownVouchers`) - this notifier
-/// additionally owns the four parallel group lists (Items/Bills/Voucher
-/// Type/Cost Center) and re-fetches whenever the selected group changes,
-/// same as the original `_fetchGroup`.
+/// Closest sibling: `items_drill_down_notifier.dart` - same shape (four
+/// parallel group lists, sort/search/PDF/CSV, recursive self-navigation,
+/// real incremental scroll-pagination per active group), ledger-scoped
+/// instead of item-scoped: 'Items' replaces 'Ledger' as the
+/// counterparty-grouping dimension.
 class PartyDrillDownArgs {
   final String startDateString;
   final String endDateString;
@@ -18,8 +19,11 @@ class PartyDrillDownArgs {
   final String ledger;
   final int? ledgerMasterId;
   final String? lockedItem;
+  final int? lockedItemMasterId;
   final String? lockedCostcenter;
+  final int? lockedCostcenterMasterId;
   final String? lockedVchname;
+  final int? lockedVchnameMasterId;
 
   const PartyDrillDownArgs({
     required this.startDateString,
@@ -28,8 +32,11 @@ class PartyDrillDownArgs {
     required this.ledger,
     this.ledgerMasterId,
     this.lockedItem,
+    this.lockedItemMasterId,
     this.lockedCostcenter,
+    this.lockedCostcenterMasterId,
     this.lockedVchname,
+    this.lockedVchnameMasterId,
   });
 
   @override
@@ -41,8 +48,11 @@ class PartyDrillDownArgs {
       other.ledger == ledger &&
       other.ledgerMasterId == ledgerMasterId &&
       other.lockedItem == lockedItem &&
+      other.lockedItemMasterId == lockedItemMasterId &&
       other.lockedCostcenter == lockedCostcenter &&
-      other.lockedVchname == lockedVchname;
+      other.lockedCostcenterMasterId == lockedCostcenterMasterId &&
+      other.lockedVchname == lockedVchname &&
+      other.lockedVchnameMasterId == lockedVchnameMasterId;
 
   @override
   int get hashCode => Object.hash(
@@ -52,8 +62,11 @@ class PartyDrillDownArgs {
         ledger,
         ledgerMasterId,
         lockedItem,
+        lockedItemMasterId,
         lockedCostcenter,
+        lockedCostcenterMasterId,
         lockedVchname,
+        lockedVchnameMasterId,
       );
 
   List<String> get availableGroups {
@@ -67,6 +80,7 @@ class PartyDrillDownArgs {
 
 class PartyDrillDownState {
   final bool isLoading;
+  final bool isLoadingMore;
   final bool isSortVisible;
   final bool showDateSort;
   final bool isVisibleNoDataFound;
@@ -85,6 +99,7 @@ class PartyDrillDownState {
 
   const PartyDrillDownState({
     this.isLoading = false,
+    this.isLoadingMore = false,
     this.isSortVisible = false,
     this.showDateSort = false,
     this.isVisibleNoDataFound = false,
@@ -104,6 +119,7 @@ class PartyDrillDownState {
 
   PartyDrillDownState copyWith({
     bool? isLoading,
+    bool? isLoadingMore,
     bool? isSortVisible,
     bool? showDateSort,
     bool? isVisibleNoDataFound,
@@ -122,6 +138,7 @@ class PartyDrillDownState {
   }) {
     return PartyDrillDownState(
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       isSortVisible: isSortVisible ?? this.isSortVisible,
       showDateSort: showDateSort ?? this.showDateSort,
       isVisibleNoDataFound: isVisibleNoDataFound ?? this.isVisibleNoDataFound,
@@ -144,6 +161,15 @@ class PartyDrillDownState {
 class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
   final PartyDrillDownArgs args;
 
+  int _page = 1;
+  bool _hasMore = true;
+  // The `type` (Sales/Purchase) filter this screen is always scoped to -
+  // resolved once, lazily, since only a name is threaded down from this
+  // screen's entry point, not a masterId - see
+  // `items_drill_down_notifier.dart`'s identical `_resolveTypeMasterId` for
+  // why threading one through every external caller wasn't necessary.
+  int? _typeMasterId;
+
   PartyDrillDownNotifier(this.args)
       : super(
           PartyDrillDownState(selectedGroup: args.availableGroups.first),
@@ -164,7 +190,27 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
     if (selectedSortOption == 'null') selectedSortOption = 'Default';
 
     state = state.copyWith(company: company, selectedSortOption: selectedSortOption);
+    _typeMasterId = await _resolveTypeMasterId();
     await selectGroup(state.selectedGroup);
+  }
+
+  Future<int?> _resolveTypeMasterId() async {
+    final reservedName = args.type == 'Sales' ? 'SALES' : 'PURCHASE';
+    final matches = await VoucherTypeRepository.instance.byReservedName(reservedName);
+    return matches.isNotEmpty ? matches.first['masterId'] as int? : null;
+  }
+
+  String _viewFor(String group) {
+    switch (group) {
+      case 'Items':
+        return 'by-item';
+      case 'Voucher Type':
+        return 'by-voucher-type';
+      case 'Cost Center':
+        return 'by-cost-centre';
+      default:
+        return 'normal';
+    }
   }
 
   Future<void> selectGroup(String group) async {
@@ -187,36 +233,123 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
       costcenterList: const [],
       filteredCostcenter: const [],
     );
+    _page = 1;
+    _hasMore = true;
+    await _fetchPage(group, append: false);
+  }
+
+  /// Called by the widget's scroll-near-bottom listener. No-ops when a load
+  /// is already in flight or the active group has no more pages.
+  Future<void> loadMoreItems() async {
+    if (state.isLoadingMore || state.isLoading || !_hasMore) return;
+    await _fetchPage(state.selectedGroup, append: true);
+  }
+
+  Future<void> _fetchPage(String group, {required bool append}) async {
+    if (append) {
+      state = state.copyWith(isLoadingMore: true);
+    }
 
     try {
       // No legacy fallback: tally-oauth-only sessions always carry a
       // ledgerMasterId, so a null one here means a legacy-paired session
       // with no tally-api master id - same "not available" empty-state
       // convention used elsewhere in this migration (see PartyClicked.dart).
-      final List<dynamic> raw = args.ledgerMasterId != null
-          ? await _fetchGroupTallyApi(group)
-          : const [];
+      if (args.ledgerMasterId == null) {
+        state = state.copyWith(
+          isLoading: false,
+          isLoadingMore: false,
+          isVisibleNoDataFound: true,
+          isSortVisible: false,
+        );
+        return;
+      }
+
+      final from = parseCompactDate(args.startDateString);
+      final to = parseCompactDate(args.endDateString);
+      final nextPage = append ? _page + 1 : 1;
+      final result = await LedgerRepository.instance.ledgerReportPage(
+        view: _viewFor(group),
+        page: nextPage,
+        limit: 30,
+        ledgerMasterId: args.ledgerMasterId,
+        stockItemMasterId: args.lockedItemMasterId,
+        voucherTypeMasterId: args.lockedVchnameMasterId ?? _typeMasterId,
+        costCentreMasterId: args.lockedCostcenterMasterId,
+        from: from,
+        to: to,
+      );
+      _page = nextPage;
+      _hasMore = result.hasMore;
 
       var itemList = state.itemList;
       var billsList = state.billsList;
       var vchtypeList = state.vchtypeList;
       var costcenterList = state.costcenterList;
 
-      if (raw.isNotEmpty) {
-        switch (group) {
-          case 'Items':
-            itemList = raw.map((j) => PItem.fromJson(j)).toList();
-            break;
-          case 'Bills':
-            billsList = raw.map((j) => PBill.fromJson(j)).toList();
-            break;
-          case 'Voucher Type':
-            vchtypeList = raw.map((j) => PVchType.fromJson(j)).toList();
-            break;
-          case 'Cost Center':
-            costcenterList = raw.map((j) => PCostCenter.fromJson(j)).toList();
-            break;
-        }
+      switch (group) {
+        case 'Items':
+          final page = result.items
+              .map(
+                (j) => PItem.fromJson({
+                  'item': j['stockItemName'] ?? '',
+                  'qty': j['totalQuantity'],
+                  'amount': j['totalAmount'],
+                  'stockItemMasterId': j['stockItemMasterId'],
+                }),
+              )
+              .toList();
+          itemList = append ? [...state.itemList, ...page] : page;
+          break;
+        case 'Bills':
+          // `normal` view rows are raw ledger-report detail rows (one per
+          // ledger entry, not merged per voucher the way the old
+          // eager-fetch-then-group approach did - see
+          // `items_drill_down_notifier.dart`'s identical Bills note for
+          // why merging across a page boundary isn't possible under real
+          // pagination). `Partyledger` here is the screen's own ledger
+          // name, not per-row server data.
+          final page = result.items
+              .map(
+                (j) => PBill.fromJson({
+                  'vchno': j['voucherNumber'],
+                  'Partyledger': args.ledger,
+                  'vchdate': j['date'],
+                  'amount': j['amount'],
+                }),
+              )
+              .toList();
+          billsList = append ? [...state.billsList, ...page] : page;
+          break;
+        case 'Voucher Type':
+          // `qty` here is the voucher/invoice count, not a real quantity -
+          // matches the pre-existing "count of vouchers" meaning this field
+          // has always had for the Voucher Type/Cost Center groupings.
+          final page = result.items
+              .map(
+                (j) => PVchType.fromJson({
+                  'vchname': j['voucherTypeName'] ?? '',
+                  'qty': j['invoiceCount'],
+                  'amount': j['totalAmount'],
+                  'voucherTypeMasterId': j['voucherTypeMasterId'],
+                }),
+              )
+              .toList();
+          vchtypeList = append ? [...state.vchtypeList, ...page] : page;
+          break;
+        case 'Cost Center':
+          final page = result.items
+              .map(
+                (j) => PCostCenter.fromJson({
+                  'costcentre': j['costCentreName'] ?? 'null',
+                  'qty': j['invoiceCount'],
+                  'amount': j['totalAmount'],
+                  'costCentreMasterId': j['costCentreMasterId'],
+                }),
+              )
+              .toList();
+          costcenterList = append ? [...state.costcenterList, ...page] : page;
+          break;
       }
 
       final empty =
@@ -227,6 +360,7 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
 
       state = state.copyWith(
         isLoading: false,
+        isLoadingMore: false,
         itemList: itemList,
         billsList: billsList,
         vchtypeList: vchtypeList,
@@ -236,185 +370,7 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
       );
       _applySortOption(state.selectedSortOption);
     } catch (e) {
-      state = state.copyWith(isLoading: false);
-    }
-  }
-
-  /// tally-api path - `reports/ledgers/ledger-report` (see
-  /// `LedgerRepository.ledgerReportDetail`'s doc comment). Unlike the old
-  /// `fetchDrilldownVouchers`-based approach, this fetches only rows for
-  /// this one party ledger (`ledgerMasterId`-scoped server-side, so the
-  /// returned `amount`/`isDebit` are already this ledger's own entry - no
-  /// more matching `ledgerEntries` by name to find "this party's" leg)
-  /// instead of every voucher in the company. [args.lockedItem]/
-  /// [args.lockedCostcenter] still have to be applied by name client-side
-  /// since only names (not masterIds) are threaded through this screen's
-  /// recursive navigation.
-  ///
-  /// Rows are per ledger-entry, so a voucher with two legs on this same
-  /// ledger (rare, but not impossible) comes back as two rows - grouped
-  /// back to one per-voucher entry first (summing this ledger's own
-  /// amount), matching the old per-voucher grouping semantics for Items/
-  /// Bills/Voucher Type. Cost Center stays per-entry, since an entry's own
-  /// cost-centre split is scoped to that entry specifically.
-  Future<List<Map<String, dynamic>>> _fetchGroupTallyApi(String group) async {
-    final from = parseCompactDate(args.startDateString);
-    final to = parseCompactDate(args.endDateString);
-    final rows = await LedgerRepository.instance.ledgerReportDetail(
-      ledgerMasterId: args.ledgerMasterId!,
-      from: from,
-      to: to,
-    );
-
-    final voucherTypeName = args.lockedVchname ?? args.type;
-    final filteredRows = rows.where((row) {
-      if (row['voucherTypeName'] != voucherTypeName) return false;
-      if (args.lockedItem != null) {
-        final inventoryEntries =
-            (row['inventoryEntries'] as List?)
-                ?.cast<Map<String, dynamic>>() ??
-            const [];
-        if (!inventoryEntries.any(
-          (e) => e['stockItemName'] == args.lockedItem,
-        )) {
-          return false;
-        }
-      }
-      if (args.lockedCostcenter != null) {
-        final costCentreEntries =
-            (row['costCentreAllocations'] as List?)
-                ?.cast<Map<String, dynamic>>() ??
-            const [];
-        if (args.lockedCostcenter == 'null') {
-          if (costCentreEntries.isNotEmpty) return false;
-        } else if (!costCentreEntries.any(
-          (e) => e['costCentreName'] == args.lockedCostcenter,
-        )) {
-          return false;
-        }
-      }
-      return true;
-    }).toList();
-
-    // Group rows back to one entry per voucher (summing this ledger's own
-    // amount across that voucher's entries) for the groupings that operate
-    // at voucher granularity.
-    final byVoucher = <int, Map<String, dynamic>>{};
-    for (final row in filteredRows) {
-      final voucherMasterId = row['voucherMasterId'] as int;
-      final amount = parseMoneyField(row['amount']);
-      final existing = byVoucher[voucherMasterId];
-      if (existing == null) {
-        byVoucher[voucherMasterId] = {
-          'voucherNumber': row['voucherNumber'] ?? '',
-          'date': row['date'] ?? '',
-          'voucherTypeName': row['voucherTypeName'] ?? '',
-          'inventoryEntries': row['inventoryEntries'],
-          'amount': amount,
-        };
-      } else {
-        existing['amount'] = (existing['amount'] as double) + amount;
-      }
-    }
-    final vouchers = byVoucher.values.toList();
-
-    switch (group) {
-      case 'Items':
-        final totals = <String, Map<String, double>>{};
-        for (final row in filteredRows) {
-          final inventoryEntries =
-              (row['inventoryEntries'] as List?)
-                  ?.cast<Map<String, dynamic>>() ??
-              const [];
-          for (final entry in inventoryEntries) {
-            final name = (entry['stockItemName'] ?? '').toString();
-            final bucket = totals.putIfAbsent(
-              name,
-              () => {'qty': 0, 'amount': 0},
-            );
-            bucket['qty'] = bucket['qty']! + parseMoneyField(entry['quantity']);
-            bucket['amount'] =
-                bucket['amount']! + parseMoneyField(entry['amount']);
-          }
-        }
-        return [
-          for (final entry in totals.entries)
-            {
-              'item': entry.key,
-              'qty': entry.value['qty'],
-              'amount': entry.value['amount'],
-            },
-        ];
-
-      case 'Bills':
-        return [
-          for (final voucher in vouchers)
-            {
-              'vchno': voucher['voucherNumber'],
-              'Partyledger': args.ledger,
-              'vchdate': voucher['date'],
-              'amount': voucher['amount'],
-            },
-        ];
-
-      case 'Voucher Type':
-        final totals = <String, Map<String, num>>{};
-        for (final voucher in vouchers) {
-          final name = (voucher['voucherTypeName'] ?? '').toString();
-          final bucket = totals.putIfAbsent(
-            name,
-            () => {'count': 0, 'amount': 0.0},
-          );
-          bucket['count'] = bucket['count']! + 1;
-          bucket['amount'] = bucket['amount']! + (voucher['amount'] as double);
-        }
-        return [
-          for (final entry in totals.entries)
-            {
-              'vchname': entry.key,
-              'qty': entry.value['count'].toString(),
-              'amount': entry.value['amount'],
-            },
-        ];
-
-      case 'Cost Center':
-        final totals = <String, Map<String, num>>{};
-        for (final row in filteredRows) {
-          final costCentreEntries =
-              (row['costCentreAllocations'] as List?)
-                  ?.cast<Map<String, dynamic>>() ??
-              const [];
-          if (costCentreEntries.isEmpty) {
-            final bucket = totals.putIfAbsent(
-              'null',
-              () => {'count': 0, 'amount': 0.0},
-            );
-            bucket['count'] = bucket['count']! + 1;
-            bucket['amount'] = bucket['amount']! + parseMoneyField(row['amount']);
-          } else {
-            for (final entry in costCentreEntries) {
-              final name = (entry['costCentreName'] ?? 'null').toString();
-              final bucket = totals.putIfAbsent(
-                name,
-                () => {'count': 0, 'amount': 0.0},
-              );
-              bucket['count'] = bucket['count']! + 1;
-              bucket['amount'] =
-                  bucket['amount']! + parseMoneyField(entry['amount']);
-            }
-          }
-        }
-        return [
-          for (final entry in totals.entries)
-            {
-              'costcentre': entry.key,
-              'qty': entry.value['count'].toString(),
-              'amount': entry.value['amount'],
-            },
-        ];
-
-      default:
-        return const [];
+      state = state.copyWith(isLoading: false, isLoadingMore: false);
     }
   }
 
@@ -449,6 +405,9 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
     _applySortOption(option);
   }
 
+  /// Sorting only ever reorders what's been loaded so far - see
+  /// `items_drill_down_notifier.dart`'s identical note on why a true
+  /// global sort isn't attempted under real pagination.
   void _applySortOption(String option) {
     final isSales = args.type == 'Sales';
     var items = List<PItem>.from(state.filteredItems);

@@ -30,11 +30,18 @@ class _PCrumb {
 class PItem {
   final String item, qty;
   final double amount;
-  PItem({required this.item, required this.qty, required this.amount});
+  final int? stockItemMasterId;
+  PItem({
+    required this.item,
+    required this.qty,
+    required this.amount,
+    this.stockItemMasterId,
+  });
   factory PItem.fromJson(Map<String, dynamic> j) => PItem(
     item: j['item'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
+    stockItemMasterId: j['stockItemMasterId'] as int?,
   );
 }
 
@@ -58,26 +65,36 @@ class PBill {
 class PVchType {
   final String vchname, qty;
   final double amount;
-  PVchType({required this.vchname, required this.qty, required this.amount});
+  final int? voucherTypeMasterId;
+  PVchType({
+    required this.vchname,
+    required this.qty,
+    required this.amount,
+    this.voucherTypeMasterId,
+  });
   factory PVchType.fromJson(Map<String, dynamic> j) => PVchType(
     vchname: j['vchname'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
+    voucherTypeMasterId: j['voucherTypeMasterId'] as int?,
   );
 }
 
 class PCostCenter {
   final String costcentre, qty;
   final double amount;
+  final int? costCentreMasterId;
   PCostCenter({
     required this.costcentre,
     required this.qty,
     required this.amount,
+    this.costCentreMasterId,
   });
   factory PCostCenter.fromJson(Map<String, dynamic> j) => PCostCenter(
     costcentre: j['costcentre'].toString(),
     qty: j['qty'].toString(),
     amount: double.tryParse(j['amount'].toString()) ?? 0,
+    costCentreMasterId: j['costCentreMasterId'] as int?,
   );
 }
 
@@ -96,8 +113,11 @@ class PartyDrillDown extends ConsumerStatefulWidget {
   final String startdate_string, enddate_string, type, ledger, total;
   final int? ledgerMasterId;
   final String? lockedItem;
+  final int? lockedItemMasterId;
   final String? lockedCostcenter;
+  final int? lockedCostcenterMasterId;
   final String? lockedVchname;
+  final int? lockedVchnameMasterId;
 
   /// Ordered navigation history: each entry has 'type' and 'label' keys.
   final List<Map<String, String>> trail;
@@ -110,8 +130,11 @@ class PartyDrillDown extends ConsumerStatefulWidget {
     required this.total,
     this.ledgerMasterId,
     this.lockedItem,
+    this.lockedItemMasterId,
     this.lockedCostcenter,
+    this.lockedCostcenterMasterId,
     this.lockedVchname,
+    this.lockedVchnameMasterId,
     this.trail = const [],
   });
 
@@ -134,8 +157,11 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
         ledger: widget.ledger,
         ledgerMasterId: widget.ledgerMasterId,
         lockedItem: widget.lockedItem,
+        lockedItemMasterId: widget.lockedItemMasterId,
         lockedCostcenter: widget.lockedCostcenter,
+        lockedCostcenterMasterId: widget.lockedCostcenterMasterId,
         lockedVchname: widget.lockedVchname,
+        lockedVchnameMasterId: widget.lockedVchnameMasterId,
       );
 
   // ---------------------------------------------------------------------------
@@ -395,12 +421,24 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
     super.initState();
     startdate_text = _convertDate(widget.startdate_string);
     enddate_text = _convertDate(widget.enddate_string);
+    _scrollFabController.addListener(_maybeLoadMore);
   }
 
   @override
   void dispose() {
+    _scrollFabController.removeListener(_maybeLoadMore);
     _scrollFabController.dispose();
     super.dispose();
+  }
+
+  /// Triggers the active group's next page once the user scrolls within
+  /// 300px of the bottom - see `ItemsDrillDown.dart`'s identical listener.
+  void _maybeLoadMore() {
+    if (!_scrollFabController.hasClients) return;
+    final position = _scrollFabController.position;
+    if (position.pixels >= position.maxScrollExtent - 300) {
+      ref.read(partyDrillDownNotifierProvider(_args).notifier).loadMoreItems();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -804,6 +842,21 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                 ),
               ),
               _buildListSection(state),
+              if (state.isLoadingMore)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
 
@@ -1090,8 +1143,11 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                       ledger: widget.ledger,
                       ledgerMasterId: widget.ledgerMasterId,
                       lockedItem: item.item,
+                      lockedItemMasterId: item.stockItemMasterId,
                       lockedCostcenter: widget.lockedCostcenter,
+                      lockedCostcenterMasterId: widget.lockedCostcenterMasterId,
                       lockedVchname: widget.lockedVchname,
+                      lockedVchnameMasterId: widget.lockedVchnameMasterId,
                       trail: [
                         ...widget.trail,
                         {'type': 'Item', 'label': item.item},
@@ -1141,8 +1197,11 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                       ledger: widget.ledger,
                       ledgerMasterId: widget.ledgerMasterId,
                       lockedItem: widget.lockedItem,
+                      lockedItemMasterId: widget.lockedItemMasterId,
                       lockedCostcenter: widget.lockedCostcenter,
+                      lockedCostcenterMasterId: widget.lockedCostcenterMasterId,
                       lockedVchname: item.vchname,
+                      lockedVchnameMasterId: item.voucherTypeMasterId,
                       trail: [
                         ...widget.trail,
                         {'type': 'Vch Type', 'label': item.vchname},
@@ -1176,8 +1235,11 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                       ledger: widget.ledger,
                       ledgerMasterId: widget.ledgerMasterId,
                       lockedItem: widget.lockedItem,
+                      lockedItemMasterId: widget.lockedItemMasterId,
                       lockedCostcenter: item.costcentre,
+                      lockedCostcenterMasterId: item.costCentreMasterId,
                       lockedVchname: widget.lockedVchname,
+                      lockedVchnameMasterId: widget.lockedVchnameMasterId,
                       trail: [
                         ...widget.trail,
                         {

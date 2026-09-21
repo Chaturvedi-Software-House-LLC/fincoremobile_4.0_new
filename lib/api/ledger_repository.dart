@@ -376,25 +376,45 @@ class LedgerRepository {
     return rows.isNotEmpty ? rows.first : null;
   }
 
-  /// `reports/ledgers/ledger-report?view=normal` - every voucher-ledger-entry
-  /// row for one party ledger (plus the voucher's resolved
-  /// `inventoryEntries`/`costCentreAllocations`), ledger-scoped instead of
-  /// company-wide. Backs `PartyDrillDown.dart`'s Items/Bills/Voucher Type/
-  /// Cost Center grouping views - the ledger-entry-driven sibling of
-  /// `StockRepository.itemReportDetail`, so it also covers Receipt/Payment/
-  /// Journal/Contra vouchers that never touch inventory.
-  Future<List<Map<String, dynamic>>> ledgerReportDetail({
-    required int ledgerMasterId,
+  /// `reports/ledgers/ledger-report` - one page of any of its views
+  /// (`normal` = per-entry voucher detail with resolved `inventoryEntries`/
+  /// `costCentreAllocations`; `by-item`/`by-voucher-type`/`by-cost-centre`
+  /// = server-side grouped totals, paginated over the group count) - the
+  /// ledger-entry-driven sibling of `StockRepository.itemReportPage`, so it
+  /// also covers Receipt/Payment/Journal/Contra vouchers that never touch
+  /// inventory. Backs `PartyDrillDown.dart`'s Items/Bills/Voucher Type/Cost
+  /// Center tabs with real incremental scroll-pagination.
+  Future<LedgerPage> ledgerReportPage({
+    required String view,
+    required int page,
+    int limit = 30,
+    int? ledgerMasterId,
+    int? stockItemMasterId,
+    int? voucherTypeMasterId,
+    int? costCentreMasterId,
     DateTime? from,
     DateTime? to,
   }) async {
-    final query = StringBuffer('?view=normal&ledgerMasterId=$ledgerMasterId');
+    final query = StringBuffer('?view=$view&page=$page&limit=$limit');
+    if (ledgerMasterId != null) query.write('&ledgerMasterId=$ledgerMasterId');
+    if (stockItemMasterId != null) {
+      query.write('&stockItemMasterId=$stockItemMasterId');
+    }
+    if (voucherTypeMasterId != null) {
+      query.write('&voucherTypeMasterId=$voucherTypeMasterId');
+    }
+    if (costCentreMasterId != null) {
+      query.write('&costCentreMasterId=$costCentreMasterId');
+    }
     if (from != null) query.write('&from=${_dateOnly(from)}');
     if (to != null) query.write('&to=${_dateOnly(to)}');
-    return fetchAllPages(
-      (page) => _client.getForCompany(
-        '/reports/ledgers/ledger-report$query&page=$page&limit=100',
-      ),
+    final result = await _client.getForCompany(
+      '/reports/ledgers/ledger-report$query',
+    );
+    return LedgerPage(
+      items: (result.data as List).cast<Map<String, dynamic>>(),
+      page: page,
+      totalPages: (result.meta?['lastPage'] as int?) ?? 1,
     );
   }
 
