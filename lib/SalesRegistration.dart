@@ -4584,6 +4584,14 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
                                     controller: itemDescriptionControllers[i],
                                     maxLines: 1,
                                     maxLength: 75,
+                                    // Disabling autocorrect/suggestions - iOS's
+                                    // predictive-text bar can otherwise fire a
+                                    // spurious focus change right as a field
+                                    // hits its maxLength cap, which read here
+                                    // as "typing suddenly jumps to the Qty
+                                    // field".
+                                    autocorrect: false,
+                                    enableSuggestions: false,
                                     decoration: InputDecoration(
                                       hintText: "Enter description",
                                       isDense: true,
@@ -5624,6 +5632,13 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
                                                                     descriptionControllers[name]![di],
                                                                 maxLines: 1,
                                                                 maxLength: 75,
+                                                                // See the identical fix on the
+                                                                // single-item description field
+                                                                // above - avoids iOS's predictive-
+                                                                // text bar firing a spurious focus
+                                                                // change right at the maxLength cap.
+                                                                autocorrect: false,
+                                                                enableSuggestions: false,
                                                                 style: GoogleFonts.poppins(
                                                                   fontSize: 13,
                                                                 ),

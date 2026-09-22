@@ -4702,6 +4702,12 @@ class _DeliverynoteregistrationPageState
                                                                     descriptionControllers[name]![di],
                                                                 maxLines: 1,
                                                                 maxLength: 75,
+                                                                // iOS's predictive-text bar can fire a
+                                                                // spurious focus change right at the
+                                                                // maxLength cap - see the identical fix
+                                                                // in SalesRegistration.dart.
+                                                                autocorrect: false,
+                                                                enableSuggestions: false,
                                                                 style: GoogleFonts.poppins(
                                                                   fontSize: 13,
                                                                 ),
