@@ -2032,13 +2032,24 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
       _isSalesListVisible = true;
     });
 
+    // `_selectedvoucher` defaults to (and can be reset to) the literal
+    // "All Voucher Types" sentinel meaning "no type filter" - every other
+    // call site in this file translates that to "" before passing it on
+    // as vchname (_mapSalePurcCash treats any non-empty vchname as an
+    // exact-match filter, so passing the sentinel through as-is excluded
+    // every voucher, since none is ever actually named "All Voucher
+    // Types"). This call site skipped that translation.
+    final vchname =
+        (_selectedvoucher == null || _selectedvoucher == "All Voucher Types")
+            ? ""
+            : _selectedvoucher!;
     fetchSales_purchase_cash(
       "cash-in-hand,bank accounts",
       startDateString,
       endDateString,
       "",
       "true",
-      _selectedvoucher ?? "",
+      vchname,
       _selectedLedgerGroup!,
     );
   }
