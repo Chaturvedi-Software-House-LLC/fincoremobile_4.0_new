@@ -298,6 +298,12 @@ class ItemsClickedNotifier extends StateNotifier<ItemsClickedState> {
     final itemSales = prefs.getString('item_sales') ?? 'False';
     final itemPurchase = prefs.getString('item_purchase') ?? 'False';
     final startFrom = prefs.getString('startfrom');
+    // Same key Dashboard/PartyClicked persist the user's chosen date-range
+    // preset under (party_clicked_notifier.dart's _init reads it
+    // identically) - this screen previously never read it at all and
+    // always opened on the hardcoded 'Today' default regardless of what
+    // was actually selected elsewhere in the app.
+    final selectedDate = prefs.getString('datetype') ?? 'Today';
 
     final isItemDescVisible = args.itemDesc != 'null' && args.itemDesc.isNotEmpty;
     final isItemAliasVisible = args.alias != 'null' && args.alias.isNotEmpty;
@@ -314,7 +320,7 @@ class ItemsClickedNotifier extends StateNotifier<ItemsClickedState> {
       isItemAliasVisible: isItemAliasVisible,
     );
 
-    await handleDate(state.selectedDate);
+    await handleDate(selectedDate);
   }
 
   /// Fetches sales/purchase summary data via the tally-api backend.
