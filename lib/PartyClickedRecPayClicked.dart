@@ -598,27 +598,21 @@ class _PartyTotalClickedRecPayClickedPageState
     return opening_string;
   }
 
-  // The header "total" arrives in one of two shapes depending on which tap
-  // brought the user here: a plain signed number (from the card's own
-  // Total tap) or "<number> DR"/"<number> CR" (from a bucket row tap,
-  // already suffix-formatted upstream). Handle both so the symbol/glyph
-  // renders correctly either way instead of showing plain unstyled text.
+  // `widget.total`/`total` is a static figure captured at navigation time
+  // (whichever row on PartyClicked.dart's Summary tab was tapped - Total,
+  // On Account, or a specific ">N days" ageing bucket). It never reflects
+  // what this screen's own Ageing Breakdown filter or search box are
+  // actually showing below it, so the two could - and did - disagree with
+  // each other. Sum the currently-visible list instead, so the header can
+  // never show a number the list underneath it doesn't back up.
   Widget _totalAmountWidget(String value, TextStyle style) {
     final vm = _s;
-    String cleaned = value.trim();
-    String suffix;
-    final upper = cleaned.toUpperCase();
-    if (upper.endsWith(' DR') || upper.endsWith(' CR')) {
-      suffix = upper.substring(upper.length - 2);
-      cleaned = cleaned.substring(0, cleaned.length - 3).trim();
-    } else if (cleaned.contains('-')) {
-      cleaned = cleaned.replaceAll('-', '');
-      suffix = 'DR';
-    } else {
-      suffix = 'CR';
-    }
-    final parsed = double.tryParse(cleaned.replaceAll(',', '')) ?? 0.0;
-    final parts = CurrencyFormatter.formatCurrencyParts(parsed);
+    final liveSum = vm.filteredItems.fold<double>(
+      0,
+      (sum, item) => sum + item.outstanding,
+    );
+    final suffix = type == 'Receivable' ? 'DR' : 'CR';
+    final parts = CurrencyFormatter.formatCurrencyParts(liveSum);
     return currencyAmountText(
       currencyCode: vm.currencyCode,
       symbol: vm.currencySymbol,
