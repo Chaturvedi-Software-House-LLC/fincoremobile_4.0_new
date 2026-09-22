@@ -92,7 +92,14 @@ class DashboardState {
     this.endDateString = '',
     this.selectedDate = 'Today',
     this.isTextEnabled = true,
-    this.isLoading = false,
+    // Starts true (not false) so the very first frame after this
+    // notifier is created already shows the skeleton loading UI
+    // (Dashboard.dart's _buildSkeletonDateCard/_buildSkeletonGrid)
+    // instead of the blank/zero-value default state - _init() does an
+    // `await SharedPreferences.getInstance()` and more before it ever
+    // sets this true itself, so without this default the screen briefly
+    // renders as if it had already loaded and just had nothing to show.
+    this.isLoading = true,
     this.isRefreshing = false,
     this.decimal = 2,
     this.selectedScale = NumberScale.thousand,
