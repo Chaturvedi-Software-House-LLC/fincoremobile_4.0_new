@@ -236,7 +236,7 @@ abstract class BaseApiClient {
       throw ApiException(
         statusCode: (decoded['statusCode'] as int?) ?? response.statusCode,
         code: (error['code'] as String?) ?? 'UNKNOWN',
-        message: _detailedMessage(error) ?? (error['message'] as String?) ?? 'Request failed',
+        message: _detailedMessage(error, decoded) ?? (error['message'] as String?) ?? 'Request failed',
       );
     }
 
@@ -346,7 +346,7 @@ abstract class BaseApiClient {
       throw ApiException(
         statusCode: (decoded['statusCode'] as int?) ?? response.statusCode,
         code: (error['code'] as String?) ?? 'UNKNOWN',
-        message: _detailedMessage(error) ?? (error['message'] as String?) ?? 'Request failed',
+        message: _detailedMessage(error, decoded) ?? (error['message'] as String?) ?? 'Request failed',
       );
     }
 
@@ -357,15 +357,25 @@ abstract class BaseApiClient {
   }
 
   /// Builds a specific error message from `error.details` (tally-api's own
-  /// convention) or `error.errors`/`error.aggregateErrors` (nestjs-zod's raw
+  /// convention), `error.errors`/`error.aggregateErrors` (nestjs-zod's raw
   /// shape, seen coming straight through from tally-oauth for at least one
-  /// endpoint) when present, joining every field's own message - e.g.
-  /// "Username must be at least 8 characters" - instead of just the
-  /// generic top-level "Validation failed" a Zod validation error's
-  /// `message` field carries on its own. Returns null (falls back to that
-  /// generic message) when no such per-field list is present or usable.
-  static String? _detailedMessage(Map<String, dynamic> error) {
-    final raw = error['details'] ?? error['errors'] ?? error['aggregateErrors'];
+  /// endpoint), or the top-level `details` (tally-admin-api's
+  /// `AllExceptionsFilter` puts a `ZodValidationException`'s issue list
+  /// there as a sibling of `error`, not nested inside it - confirmed
+  /// against `all-exception.filter.ts`'s `data.details = details`) when
+  /// present, joining every field's own message - e.g. "Password must
+  /// contain at least one lowercase letter" - instead of just the generic
+  /// top-level "Validation failed" a Zod validation error's `message`
+  /// field carries on its own. Returns null (falls back to that generic
+  /// message) when no such per-field list is present or usable.
+  static String? _detailedMessage(
+    Map<String, dynamic> error,
+    Map<String, dynamic> decoded,
+  ) {
+    final raw = error['details'] ??
+        error['errors'] ??
+        error['aggregateErrors'] ??
+        decoded['details'];
     if (raw is! List || raw.isEmpty) return null;
     final messages = <String>[];
     for (final item in raw) {
