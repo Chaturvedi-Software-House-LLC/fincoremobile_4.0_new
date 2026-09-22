@@ -1725,19 +1725,23 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
     _scrollFabController.addListener(_onDashboardClickedScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
+      // dashboardClickedNotifierProvider is `.autoDispose` and only runs
+      // its one-time _init() when Riverpod actually constructs a fresh
+      // instance - a quick pop-then-immediately-reopen of this same
+      // vchtypes can land inside the autoDispose grace period and reuse
+      // the still-alive instance from the last visit instead, still
+      // holding whatever ledger was drilled into (isLedgerGroupVisible
+      // false, a specific selectedLedgerGroup) rather than resetting to
+      // the group list. Force that reset explicitly on every mount so
+      // this screen never silently opens straight into a stale
+      // voucher-wise view. Deferred to a post-frame callback (like
+      // checkCurrencyMismatch above) - Riverpod forbids modifying a
+      // provider synchronously from initState while the widget tree is
+      // still building.
+      if (vchtypes == 'Cash' && mounted) {
+        _notifier.backToLedgerGroups();
+      }
     });
-    // dashboardClickedNotifierProvider is `.autoDispose` and only runs its
-    // one-time _init() when Riverpod actually constructs a fresh instance -
-    // a quick pop-then-immediately-reopen of this same vchtypes can land
-    // inside the autoDispose grace period and reuse the still-alive
-    // instance from the last visit instead, still holding whatever ledger
-    // was drilled into (isLedgerGroupVisible false, a specific
-    // selectedLedgerGroup) rather than resetting to the group list. Force
-    // that reset explicitly on every mount so this screen never silently
-    // opens straight into a stale voucher-wise view.
-    if (vchtypes == 'Cash') {
-      _notifier.backToLedgerGroups();
-    }
   }
 
   Widget _buildTotalBar() {
