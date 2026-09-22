@@ -833,7 +833,10 @@ class SalesOrderRegistrationNotifier
 
         salesledger_data = salesLedgers.map((l) => l['name'] as String).toList();
         _selectedsalesledger = (salesledger_data.isNotEmpty ? salesledger_data[0] : null);
-        isSalesLedgerLocked = salesledger_data.length == 1;
+        // Same reasoning as isVoucherTypeLocked above: only lock for a
+        // genuinely GODOWN-restricted (non-admin) UniGas user, never for
+        // an admin or any other company.
+        isSalesLedgerLocked = isUniGas && godowns.length == 1;
 
         ledgerdata = [
           for (final l in otherLedgersRaw)
@@ -873,7 +876,8 @@ class SalesOrderRegistrationNotifier
         }).toList();
 
         locationsdata = godowns.map((g) => g['name'] as String).toList();
-        isGodownLocked = locationsdata.length == 1;
+        // Same reasoning as isSalesLedgerLocked above.
+        isGodownLocked = isUniGas && godowns.length == 1;
       });
 
       if (_selectedvchtypename != null) {

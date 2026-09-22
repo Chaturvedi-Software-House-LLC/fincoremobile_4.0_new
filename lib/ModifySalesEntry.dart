@@ -4253,18 +4253,26 @@ class _ModifySalesEntryPageState extends ConsumerState<ModifySalesEntry>
     final ledgerName = _selectedledger as String?;
     final ledgerAmount = ledgerAmountController.text;
 
-    if (ledgerName == null || ledgerName.isEmpty) return;
-
-    if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      Navigator.of(context).pop();
-      double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
-
-      _notifier.addOrMergeLedger(ledgerName, parsedAmount);
-      _syncTotalsControllers();
-
-      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-      ledgerAmountController.clear();
+    // Previously a silent no-op when no ledger was picked from the
+    // TypeAheadField suggestions (typing alone never sets
+    // `_selectedledger`) - surface it instead of failing quietly.
+    if (ledgerName == null || ledgerName.isEmpty) {
+      showAppMessage(context, 'Please select a ledger');
+      return;
     }
+    if (ledgerAmount.isEmpty) {
+      showAppMessage(context, 'Please enter an amount');
+      return;
+    }
+
+    Navigator.of(context).pop();
+    double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
+
+    _notifier.addOrMergeLedger(ledgerName, parsedAmount);
+    _syncTotalsControllers();
+
+    _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+    ledgerAmountController.clear();
   }
 
   /// One-time seeding of the widget-local controllers/dialog-composition

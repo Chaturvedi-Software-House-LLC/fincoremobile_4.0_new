@@ -1001,7 +1001,10 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
               ? salesledger_data[0]
               : null;
         }
-        isSalesLedgerLocked = salesledger_data.length == 1;
+        // Same reasoning as isVoucherTypeLocked above: only lock for a
+        // genuinely GODOWN-restricted (non-admin) UniGas user, never for
+        // an admin or any other company.
+        isSalesLedgerLocked = isUniGas && godowns.length == 1;
 
         vatledgerdata.add('Not Applicable');
         vatledgerdata.addAll([for (final l in vatLedgers) l['name'] as String]);
@@ -1024,7 +1027,12 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
             for (final g in godowns) g['name'] as String: g['masterId'] as int,
           });
 
-        isGodownLocked = locationsdata.length == 1;
+        // Same reasoning as isVoucherTypeLocked/isSalesLedgerLocked above:
+        // only lock for a genuinely GODOWN-restricted (non-admin) UniGas
+        // user, never for an admin or any other company - even a generic
+        // company that genuinely only has one godown shouldn't have this
+        // field disabled over it.
+        isGodownLocked = isUniGas && godowns.length == 1;
 
         Map<String, dynamic>? matchedCurrency;
         for (final c in currencies) {

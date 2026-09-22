@@ -4568,22 +4568,30 @@ class _SalesOrderRegistrationPageState
     final ledgerName = _selectedledger as String?;
     final ledgerAmountText = ledgerAmountController.text;
 
-    if (ledgerName == null || ledgerName.isEmpty) return;
-
-    if (ledgerName.isNotEmpty && ledgerAmountText.isNotEmpty) {
-      Navigator.of(context).pop();
-      double parsedAmount = double.parse(ledgerAmountText.replaceAll(',', ''));
-
-      _notifier.addLedger(ledgerName, parsedAmount);
-
-      final vm = _s;
-      controller_vatamt.text = vm.formattedVatAmount;
-      controller_totalamt.text = vm.formattedTotalAmount;
-      setState(() {
-        _selectedledger = vm.ledgerData.isNotEmpty ? vm.ledgerData[0]['name'] : null;
-      });
-      ledgerAmountController.clear();
+    // Previously a silent no-op when no ledger was picked from the
+    // TypeAheadField suggestions (typing alone never sets
+    // `_selectedledger`) - surface it instead of failing quietly.
+    if (ledgerName == null || ledgerName.isEmpty) {
+      showAppMessage(context, 'Please select a ledger');
+      return;
     }
+    if (ledgerAmountText.isEmpty) {
+      showAppMessage(context, 'Please enter an amount');
+      return;
+    }
+
+    Navigator.of(context).pop();
+    double parsedAmount = double.parse(ledgerAmountText.replaceAll(',', ''));
+
+    _notifier.addLedger(ledgerName, parsedAmount);
+
+    final vm = _s;
+    controller_vatamt.text = vm.formattedVatAmount;
+    controller_totalamt.text = vm.formattedTotalAmount;
+    setState(() {
+      _selectedledger = vm.ledgerData.isNotEmpty ? vm.ledgerData[0]['name'] : null;
+    });
+    ledgerAmountController.clear();
   }
 
 

@@ -1105,7 +1105,10 @@ class DeliveryNoteRegistrationNotifier
               ? salesledger_data[0]
               : null;
         }
-        isSalesLedgerLocked = distinctSalesLedgerNames.length == 1;
+        // Same reasoning as isVoucherTypeLocked above: only lock for a
+        // genuinely GODOWN-restricted (non-admin) UniGas user, never for
+        // an admin or any other company.
+        isSalesLedgerLocked = isVanSalesSerial && _godownsRaw.length == 1;
 
         ledgerdata = otherLedgersRaw
             .map((l) => {
@@ -1144,7 +1147,8 @@ class DeliveryNoteRegistrationNotifier
 
         locationsdata = _godownsRaw.map((g) => g['name'].toString()).toList();
 
-        if (locationsdata.length == 1) {
+        // Same reasoning as isSalesLedgerLocked above.
+        if (isVanSalesSerial && _godownsRaw.length == 1) {
           isGodownLocked = true;
         } else {
           isGodownLocked = false;

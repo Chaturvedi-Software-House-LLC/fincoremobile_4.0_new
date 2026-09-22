@@ -4926,22 +4926,30 @@ class _ModifySalesOrderEntryPageState
     final ledgerName = _selectedledger as String?;
     final ledgerAmount = ledgerAmountController.text;
 
-    if (ledgerName == null || ledgerName.isEmpty) return;
-
-    if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      Navigator.of(context).pop();
-
-      _notifier.addLedger(ledgerName, ledgerAmount);
-
-      controller_vatamt.text = _s.formattedVatAmount;
-      controller_totalamt.text = _s.formattedTotalAmount;
-
-      setState(() {
-        _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-      });
-
-      ledgerAmountController.clear();
+    // Previously a silent no-op when no ledger was picked from the
+    // TypeAheadField suggestions (typing alone never sets
+    // `_selectedledger`) - surface it instead of failing quietly.
+    if (ledgerName == null || ledgerName.isEmpty) {
+      showAppMessage(context, 'Please select a ledger');
+      return;
     }
+    if (ledgerAmount.isEmpty) {
+      showAppMessage(context, 'Please enter an amount');
+      return;
+    }
+
+    Navigator.of(context).pop();
+
+    _notifier.addLedger(ledgerName, ledgerAmount);
+
+    controller_vatamt.text = _s.formattedVatAmount;
+    controller_totalamt.text = _s.formattedTotalAmount;
+
+    setState(() {
+      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+    });
+
+    ledgerAmountController.clear();
   }
 
   @override

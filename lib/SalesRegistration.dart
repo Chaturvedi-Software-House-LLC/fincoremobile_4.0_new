@@ -7598,24 +7598,34 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
   /// recompute moved verbatim into
   /// `SalesRegistrationNotifier.addOrMergeLedger`.
   void addLedger() {
-    final ledgerName = _selectedledger as String;
+    final ledgerName = _selectedledger as String?;
     final ledgerAmount = ledgerAmountController.text;
 
-    if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      Navigator.of(context).pop();
-      double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
-
-      _notifier.addOrMergeLedger(ledgerName, parsedAmount);
-
-      setState(() {
-        controller_vatamt.text = _s.formattedVatAmount;
-        controller_totalamt.text = _s.formattedTotalAmount;
-        _selectedledger = _s.ledgerData.isNotEmpty
-            ? _s.ledgerData[0]['name']
-            : null;
-        ledgerAmountController.clear();
-      });
+    // Previously a silent no-op when no ledger was picked from the
+    // TypeAheadField suggestions (typing alone never sets
+    // `_selectedledger`) - surface it instead of failing quietly.
+    if (ledgerName == null || ledgerName.isEmpty) {
+      showAppMessage(context, 'Please select a ledger');
+      return;
     }
+    if (ledgerAmount.isEmpty) {
+      showAppMessage(context, 'Please enter an amount');
+      return;
+    }
+
+    Navigator.of(context).pop();
+    double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
+
+    _notifier.addOrMergeLedger(ledgerName, parsedAmount);
+
+    setState(() {
+      controller_vatamt.text = _s.formattedVatAmount;
+      controller_totalamt.text = _s.formattedTotalAmount;
+      _selectedledger = _s.ledgerData.isNotEmpty
+          ? _s.ledgerData[0]['name']
+          : null;
+      ledgerAmountController.clear();
+    });
   }
 
   /// Widget-side wrapper - the actual session/prefs loading (and the
