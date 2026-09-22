@@ -310,12 +310,24 @@ class _SalesRegistrationPageState extends ConsumerState<SalesRegistration>
     final rows = await PriceLevelRepository.instance.ratesForItem(
       stockItemMasterId,
     );
+    // Compare calendar dates only (year/month/day), not full DateTimes -
+    // `DateTime.tryParse` on a plain "yyyy-MM-dd" string (the API's `date`
+    // field) produces a UTC-anchored midnight, while `asOf` is built from
+    // local wall-clock values (parseCompactDate/DateTime.now()). Near a
+    // timezone's date boundary those two can disagree on which calendar
+    // day it currently is, making `rowDate.isAfter(asOf)` wrongly true for
+    // a price-level row that's actually effective as of today - which
+    // silently excluded every row regardless of how correct the seeded
+    // data was.
+    final asOfDateOnly = DateTime(asOf.year, asOf.month, asOf.day);
     Map<String, dynamic>? best;
     DateTime? bestDate;
     for (final row in rows) {
       if (row['priceLevelName'] != priceLevelName) continue;
-      final rowDate = DateTime.tryParse(row['date']?.toString() ?? '');
-      if (rowDate == null || rowDate.isAfter(asOf)) continue;
+      final rawDate = DateTime.tryParse(row['date']?.toString() ?? '');
+      if (rawDate == null) continue;
+      final rowDate = DateTime(rawDate.year, rawDate.month, rawDate.day);
+      if (rowDate.isAfter(asOfDateOnly)) continue;
       if (bestDate == null || rowDate.isAfter(bestDate)) {
         bestDate = rowDate;
         best = row;
