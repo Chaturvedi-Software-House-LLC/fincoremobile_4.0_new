@@ -757,7 +757,8 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                 ),
               ),
 
-              SliverToBoxAdapter(
+              if (state.isSearchViewVisible)
+                SliverToBoxAdapter(
                 child: Container(
                   margin: const EdgeInsets.only(
                     left: 16,
@@ -778,8 +779,7 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (state.isSearchViewVisible) ...[
-                        Padding(
+                      Padding(
                           padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                           child: SizedBox(
                             height: 46,
@@ -836,7 +836,6 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                             ),
                           ),
                         ),
-                      ],
                     ],
                   ),
                 ),
