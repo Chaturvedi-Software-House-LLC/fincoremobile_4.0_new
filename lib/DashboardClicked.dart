@@ -333,6 +333,10 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
 
   bool _isVisibleduedate = false;
 
+  late final AnimationController _appBarSpinnerController =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
+        ..repeat();
+
   _DashboardClickedPageState({
     required this.startDateString,
     required this.endDateString,
@@ -361,6 +365,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
   void dispose() {
     _voucherController.dispose();
     _scrollFabController.dispose();
+    _appBarSpinnerController.dispose();
     super.dispose();
   }
 
@@ -1945,18 +1950,18 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                         _notifier.toggleAgeingView();
                       },
                 icon: (_isAgeingComputing || _isSwitchingView)
-                    ? SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: MediaQuery(
-                          data: MediaQuery.of(
-                            context,
-                          ).copyWith(disableAnimations: false),
+                    ? RotationTransition(
+                        turns: _appBarSpinnerController,
+                        child: const SizedBox(
+                          width: 22,
+                          height: 22,
                           child: CircularProgressIndicator(
+                            value: 0.25,
                             strokeWidth: 2.4,
-                            valueColor: const AlwaysStoppedAnimation<Color>(
+                            valueColor: AlwaysStoppedAnimation<Color>(
                               Colors.white,
                             ),
+                            backgroundColor: Colors.transparent,
                           ),
                         ),
                       )
@@ -1977,18 +1982,18 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                         _notifier.toggleTopPartiesView();
                       },
                 icon: _isSwitchingTopPartiesView
-                    ? SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: MediaQuery(
-                          data: MediaQuery.of(
-                            context,
-                          ).copyWith(disableAnimations: false),
+                    ? RotationTransition(
+                        turns: _appBarSpinnerController,
+                        child: const SizedBox(
+                          width: 22,
+                          height: 22,
                           child: CircularProgressIndicator(
+                            value: 0.25,
                             strokeWidth: 2.4,
-                            valueColor: const AlwaysStoppedAnimation<Color>(
+                            valueColor: AlwaysStoppedAnimation<Color>(
                               Colors.white,
                             ),
+                            backgroundColor: Colors.transparent,
                           ),
                         ),
                       )
