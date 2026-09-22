@@ -18,7 +18,13 @@ class CreateUserState {
   const CreateUserState({
     this.isRolesVisible = true,
     this.isUserVisible = true,
-    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
+    // NOT part of the isLoading-starts-true sweep (see
+    // dashboard_notifier.dart) - this flag only tracks userRegistration()'s
+    // submit-in-progress state (it gates the Create button's spinner), not
+    // an initial-data fetch; _init()/fetchRoles() never touch it. Starting
+    // it true left the Create button permanently in "Saving..." as soon as
+    // this screen opened, before the user submitted anything.
+    this.isLoading = false,
     this.roles = const [],
     this.selectedRole,
     this.company = '',
