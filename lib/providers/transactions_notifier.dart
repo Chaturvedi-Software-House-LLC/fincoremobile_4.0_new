@@ -336,8 +336,12 @@ class TransactionsNotifier extends StateNotifier<TransactionsState> {
   void sortByAmountLowtoHigh() {
     _commit(() {
       if (filteredItems_transactions.isNotEmpty) {
+        // `amount` is now signed (debit negative, credit positive) so a
+        // transaction's real size is its magnitude - sort by that, not
+        // the raw signed value, or a small credit would rank above a
+        // large debit.
         filteredItems_transactions.sort(
-          (a, b) => a.amount.compareTo(b.amount),
+          (a, b) => a.amount.abs().compareTo(b.amount.abs()),
         );
         transactions_count = filteredItems_transactions.length.toString();
       }
@@ -348,7 +352,7 @@ class TransactionsNotifier extends StateNotifier<TransactionsState> {
     _commit(() {
       if (filteredItems_transactions.isNotEmpty) {
         filteredItems_transactions.sort(
-          (a, b) => b.amount.compareTo(a.amount),
+          (a, b) => b.amount.abs().compareTo(a.amount.abs()),
         );
         transactions_count = filteredItems_transactions.length.toString();
       }
@@ -402,16 +406,26 @@ class TransactionsNotifier extends StateNotifier<TransactionsState> {
           const [];
       if (entries.isEmpty) continue;
 
-      final debitTotal = entries
-          .where((e) => e['isDebit'] == true)
-          .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+      // The row's `ledger` is entries.first's own ledger name - `amount`
+      // must be that SAME leg's own signed amount, not a voucher-wide sum
+      // of every debit leg (which is unrelated to entries.first and, since
+      // it's a sum of only-ever-non-negative magnitudes, is never negative
+      // - the widget's `amt < 0` Dr/Cr check derived from this always
+      // resolved to Cr, for every transaction, regardless of the ledger
+      // shown or its real debit/credit direction). Debit negative, credit
+      // positive - matches Bill.finalBalance/ledgerSummary's totalAmount
+      // convention already established elsewhere in this app.
+      final firstEntry = entries.first;
+      final firstAmount = parseMoneyField(firstEntry['amount']);
+      final signedAmount =
+          firstEntry['isDebit'] == true ? -firstAmount : firstAmount;
 
       rows.add(
         transactions.fromJson({
-          'ledger': entries.first['ledgerName'] ?? '',
+          'ledger': firstEntry['ledgerName'] ?? '',
           'vchname': voucher['voucherTypeName'] ?? '',
           'vchno': voucher['number'] ?? '',
-          'amount': debitTotal,
+          'amount': signedAmount,
           'vchdate': voucher['date'] ?? '',
           'isoptional': voucher['isOptional'] ?? false,
           'ispostdated': voucher['isPostDated'] ?? false,

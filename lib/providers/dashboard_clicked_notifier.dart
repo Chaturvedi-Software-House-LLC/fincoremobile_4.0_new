@@ -708,15 +708,15 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
   void sortByAmountLowtoHigh() {
     _commit(() {
       if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == 'Payment') {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => b.amount.compareTo(a.amount),
-          );
-        } else {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => a.amount.compareTo(b.amount),
-          );
-        }
+        // `amount` is signed (debit negative, credit positive) - sort by
+        // its real size (magnitude), not the raw signed value, so a small
+        // credit doesn't rank above a large debit. Consistently signed
+        // for every vchtypes now, so the old Payment-only reversed branch
+        // (a workaround for amount's previous inconsistent sign) is no
+        // longer needed.
+        filteredItems_sale_purc_cash.sort(
+          (a, b) => a.amount.abs().compareTo(b.amount.abs()),
+        );
       } else if (filteredItems_receivable_payable.isNotEmpty) {
         if (vchtypes == "Receivable") {
           filteredItems_receivable_payable.sort(
@@ -734,15 +734,9 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
   void sortByAmountHightoLow() {
     _commit(() {
       if (filteredItems_sale_purc_cash.isNotEmpty) {
-        if (vchtypes == "Payment") {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => a.amount.compareTo(b.amount),
-          );
-        } else {
-          filteredItems_sale_purc_cash.sort(
-            (a, b) => b.amount.compareTo(a.amount),
-          );
-        }
+        filteredItems_sale_purc_cash.sort(
+          (a, b) => b.amount.abs().compareTo(a.amount.abs()),
+        );
       } else if (filteredItems_receivable_payable.isNotEmpty) {
         if (vchtypes == "Receivable") {
           filteredItems_receivable_payable.sort(
@@ -1085,16 +1079,24 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
       return null;
     }
 
-    final debitTotal = entries
-        .where((e) => e['isDebit'] == true)
-        .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+    // `ledger` (shown) and `amount` must be the SAME leg - summing every
+    // debit leg across the whole voucher (always non-negative, since
+    // amounts are unsigned magnitudes here) was unrelated to
+    // entries.first's own ledger/direction, and being always >= 0 meant
+    // the Cr/Dr sign check downstream always resolved to Cr regardless of
+    // the real transaction direction. Debit negative, credit positive -
+    // matches the convention already established elsewhere in this app.
+    final firstEntry = entries.first;
+    final firstAmount = parseMoneyField(firstEntry['amount']);
+    final signedAmount =
+        firstEntry['isDebit'] == true ? -firstAmount : firstAmount;
 
     return Sale_purc_cash.fromJson({
       'vchname': voucher['voucherTypeName'] ?? '',
       'vchno': voucher['number'] ?? '',
-      'amount': debitTotal,
+      'amount': signedAmount,
       'vchdate': voucher['date'] ?? '',
-      'ledger': entries.first['ledgerName'] ?? '',
+      'ledger': firstEntry['ledgerName'] ?? '',
       'isoptional': voucher['isOptional'] ?? false,
       'ispostdated': voucher['isPostDated'] ?? false,
       'refno': voucher['reference'] ?? '',
