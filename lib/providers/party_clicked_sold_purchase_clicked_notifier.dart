@@ -298,9 +298,16 @@ class PartyClickedSoldPurchaseClickedNotifier
         final inventoryEntries =
             (row['inventoryEntries'] as List?)?.cast<Map<String, dynamic>>() ??
             const [];
-        final matching = inventoryEntries.where(
-          (e) => e['stockItemName'] == args.item,
-        );
+        // Match by the authoritative stockItemMasterId the backend already
+        // scoped this query to, not the display name - a name-string
+        // comparison here is fragile (whitespace/casing drift between the
+        // two separate report endpoints that produce each side of the
+        // comparison) and was silently dropping every row.
+        final matching = args.itemMasterId != null
+            ? inventoryEntries.where(
+                (e) => e['stockItemMasterId'] == args.itemMasterId,
+              )
+            : inventoryEntries.where((e) => e['stockItemName'] == args.item);
         for (final entry in matching) {
           rows.add(
             Data.fromJson({
