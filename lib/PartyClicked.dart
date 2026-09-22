@@ -1513,13 +1513,10 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                         ),
                       ],
                     ),
-                    child: LayoutBuilder(
-                      builder: (context, outerConstraints) {
-                        final emptyStateHeight = outerConstraints.maxHeight;
-                        return SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          LayoutBuilder(
+                    child: CustomScrollView(
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: LayoutBuilder(
                             builder: (context, constraints) {
                               int countPerRow = constraints.maxWidth > 600
                                   ? 3
@@ -1569,52 +1566,47 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                               );
                             },
                           ),
+                        ),
 
-                          /* Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 25),
-                            child: Divider(
-                              thickness: 1,
-                              color: Theme.of(context).dividerColor,
-                            ),
-                          ),*/
-                          if (isClicked_Summary)
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (isVisibleNoDataFound &&
-                                    !ReceivableVisibility &&
-                                    !PayableVisibility &&
-                                    !SalesOrderVisibility &&
-                                    !PurchaseOrderVisibility)
-                                  SizedBox(
-                                    height: emptyStateHeight,
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.search_off_rounded,
-                                            size: 48,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                          SizedBox(height: 12),
-                                          Text(
-                                            'No Records Found',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ],
+                        if (isClicked_Summary)
+                          if (isVisibleNoDataFound &&
+                              !ReceivableVisibility &&
+                              !PayableVisibility &&
+                              !SalesOrderVisibility &&
+                              !PurchaseOrderVisibility)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.search_off_rounded,
+                                      size: 48,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                    SizedBox(height: 12),
+                                    Text(
+                                      'No Records Found',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                     ),
-                                  ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else
+                            SliverToBoxAdapter(
+                              child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 if (SalesVisibility ||
                                     PurchaseVisibility ||
                                     ReceiptVisibility)
@@ -2031,10 +2023,11 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                     onTap: () => navigateToOrder('purcorder'),
                                   ),
                               ],
+                              ),
                             ),
 
-                          Visibility(
-                            visible: isClicked_Sold,
+                        if (isClicked_Sold) ...[
+                          SliverToBoxAdapter(
                             child: Column(
                               children: [
                                 // Header Count
@@ -2152,42 +2145,41 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                       ),
                                     ),
                                   ),
-
-                                // No Data Message
-                                if (isVisibleNoDataFound)
-                                  SizedBox(
-                                    height: emptyStateHeight,
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.search_off_rounded,
-                                            size: 48,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                          SizedBox(height: 12),
-                                          Text(
-                                            'No Records Found',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ],
+                              ],
+                            ),
+                          ),
+                          if (isVisibleNoDataFound)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.search_off_rounded,
+                                      size: 48,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                    SizedBox(height: 12),
+                                    Text(
+                                      'No Records Found',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                     ),
-                                  ),
-
-                                // Sold List
-                                if (isVisibleSoldList)
-                                  ListView.builder(
+                                  ],
+                                ),
+                              ),
+                            )
+                          else if (isVisibleSoldList)
+                            SliverToBoxAdapter(
+                              child: ListView.builder(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 12,
                                       vertical: 8,
@@ -2230,12 +2222,11 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                       );
                                     },
                                   ),
-                              ],
                             ),
-                          ),
+                        ],
 
-                          Visibility(
-                            visible: isClicked_Purchase,
+                        if (isClicked_Purchase) ...[
+                          SliverToBoxAdapter(
                             child: Container(
                               width: double.infinity,
                               color: Theme.of(context).scaffoldBackgroundColor,
@@ -2356,42 +2347,45 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                     ),
 
                                   const SizedBox(height: 10),
-
-                                  /// ❌ No Data
-                                  if (isVisibleNoDataFound)
-                                    SizedBox(
-                                      height: emptyStateHeight,
-                                      child: Center(
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Icon(
-                                              Icons.search_off_rounded,
-                                              size: 48,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                            SizedBox(height: 12),
-                                            Text(
-                                              'No Records Found',
-                                              style: GoogleFonts.poppins(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w600,
-                                                color: Theme.of(
-                                                  context,
-                                                ).colorScheme.onSurfaceVariant,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (isVisibleNoDataFound)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.search_off_rounded,
+                                      size: 48,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                    SizedBox(height: 12),
+                                    Text(
+                                      'No Records Found',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
                                       ),
                                     ),
-
-                                  /// 📦 Purchase List
-                                  if (isVisiblePurchaseList)
-                                    ListView.builder(
+                                  ],
+                                ),
+                              ),
+                            )
+                          else if (isVisiblePurchaseList)
+                            SliverToBoxAdapter(
+                              child: Container(
+                                width: double.infinity,
+                                color: Theme.of(context).scaffoldBackgroundColor,
+                                child: ListView.builder(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 14,
                                         vertical: 8,
@@ -2435,14 +2429,10 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                         );
                                       },
                                     ),
-                                ],
                               ),
                             ),
-                          ),
                         ],
-                      ),
-                    );
-                      },
+                      ],
                     ),
                   ),
                 ),
