@@ -3124,7 +3124,7 @@ class SummaryExpansionCard extends StatelessWidget {
 
                     return GestureDetector(
                       onTap: () {
-                        final dateTimeFormatter = DateFormat('MMMM yyyy');
+                        final dateTimeFormatter = DateFormat('MMM yyyy');
                         final date = dateTimeFormatter.parse(month);
                         final startStr = DateFormat(
                           'yyyyMMdd',
@@ -3338,7 +3338,7 @@ class PartyTrendChartCard extends StatelessWidget {
 
   DateTime? _parseMonth(String mname) {
     try {
-      return DateFormat('MMMM yyyy').parse(mname);
+      return DateFormat('MMM yyyy').parse(mname);
     } catch (_) {
       return null;
     }

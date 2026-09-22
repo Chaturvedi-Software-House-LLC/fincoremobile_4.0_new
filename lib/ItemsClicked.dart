@@ -967,7 +967,7 @@ class _ItemsClickedPageState extends ConsumerState<ItemsClicked>
             final parsedAmount = double.tryParse(card.amount);
             DateTime? parsedDate;
             try {
-              parsedDate = DateFormat('MMMM yyyy').parse(month);
+              parsedDate = DateFormat('MMM yyyy').parse(month);
             } catch (_) {
               parsedDate = null;
             }
