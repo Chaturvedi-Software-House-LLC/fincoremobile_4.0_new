@@ -809,7 +809,10 @@ class SalesOrderRegistrationNotifier
       _commit(() {
         vchtypenamedata = salesOrderTypes.map((v) => v['name'] as String).toList();
         _selectedvchtypename = (vchtypenamedata.isNotEmpty ? vchtypenamedata[0] : null);
-        isVoucherTypeLocked = vchtypenamedata.length == 1;
+        // Same reasoning as sales_registration_notifier.dart: only ever
+        // lock for a genuinely GODOWN-restricted UniGas user, never for
+        // an admin or any other company.
+        isVoucherTypeLocked = isUniGas && godowns.length == 1;
 
         partyledgerdata = partyLedgers.map((l) => l['name'] as String).toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));

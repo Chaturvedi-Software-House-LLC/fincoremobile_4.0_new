@@ -932,7 +932,15 @@ class SalesRegistrationNotifier extends StateNotifier<SalesRegistrationState> {
               vt['name'] as String: vt['masterId'] as int,
           });
 
-        isVoucherTypeLocked = vchtypenamedata.length == 1;
+        // Locking the Voucher Type dropdown only ever makes sense for a
+        // UniGas company-user who's actually restricted (the same
+        // GODOWN-restriction signal `godowns.length == 1` above already
+        // uses - an unrestricted user, including every admin, gets every
+        // godown back). Any other company (no UniGas GODOWN-restriction
+        // concept at all) never locks it, regardless of how many voucher
+        // types happen to exist - a data gap (e.g. only one Sales-type
+        // voucher type synced) isn't a reason to disable the field.
+        isVoucherTypeLocked = isUniGas && godowns.length == 1;
         _selectedvchtypename = vchtypenamedata.isNotEmpty
             ? vchtypenamedata[0]
             : null;

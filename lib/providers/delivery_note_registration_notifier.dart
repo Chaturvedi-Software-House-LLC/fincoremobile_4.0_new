@@ -1062,15 +1062,14 @@ class DeliveryNoteRegistrationNotifier
             .map((vt) => vt['name'].toString())
             .toList();
 
-        if (vchtypenamedata.length == 1) {
-          _selectedvchtypename = vchtypenamedata[0];
-          isVoucherTypeLocked = true;
-        } else {
-          _selectedvchtypename = vchtypenamedata.isNotEmpty
-              ? vchtypenamedata[0]
-              : null;
-          isVoucherTypeLocked = false;
-        }
+        _selectedvchtypename = vchtypenamedata.isNotEmpty
+            ? vchtypenamedata[0]
+            : null;
+        // Same reasoning as sales_registration_notifier.dart: only ever
+        // lock for a genuinely GODOWN-restricted UniGas user (the same
+        // `_godownsRaw.length == 1` signal the item-list scoping above
+        // already uses), never for an admin or any other company.
+        isVoucherTypeLocked = isVanSalesSerial && _godownsRaw.length == 1;
         voucherTypeToFetch = _selectedvchtypename;
 
         partyledgerdata.clear();
