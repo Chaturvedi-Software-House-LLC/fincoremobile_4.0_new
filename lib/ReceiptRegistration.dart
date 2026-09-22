@@ -4358,9 +4358,17 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
     // constructor-triggered `_init()` hasn't resolved yet); a reused one
     // already finished loading, so it's already true - only reset in that
     // case, to avoid racing a fresh instance's own in-flight `_init()`.
-    if (ref.read(receiptRegistrationNotifierProvider).isInitialDataLoaded) {
-      ref.read(receiptRegistrationNotifierProvider.notifier).resetForNewEntry();
-    }
+    // Deferred a microtask past `initState` - Riverpod forbids modifying a
+    // provider synchronously during the widget-tree-building lifecycle
+    // (build/initState/dispose/didUpdateWidget/didChangeDependencies).
+    Future.microtask(() {
+      if (!mounted) return;
+      if (ref.read(receiptRegistrationNotifierProvider).isInitialDataLoaded) {
+        ref
+            .read(receiptRegistrationNotifierProvider.notifier)
+            .resetForNewEntry();
+      }
+    });
     _initSharedPreferences();
     // Once the notifier's initial `loadData()` resolves, seed this screen's
     // own controllers/dialog-composition fields from the freshly-loaded
