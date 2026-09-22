@@ -4348,6 +4348,19 @@ class _ReceiptRegistrationPageState extends ConsumerState<ReceiptRegistration>
   @override
   void initState() {
     super.initState();
+    // The `autoDispose` notifier can end up reused (not actually disposed)
+    // instead of freshly recreated when this screen is closed and reopened
+    // in quick succession - e.g. the last listener is removed and the
+    // first new listener attached within the same frame, so Riverpod never
+    // sees the listener count hit zero and skips disposal. That otherwise
+    // leaves the previous entry's data on screen. A genuinely fresh
+    // instance's `isInitialDataLoaded` is still false here (its own
+    // constructor-triggered `_init()` hasn't resolved yet); a reused one
+    // already finished loading, so it's already true - only reset in that
+    // case, to avoid racing a fresh instance's own in-flight `_init()`.
+    if (ref.read(receiptRegistrationNotifierProvider).isInitialDataLoaded) {
+      ref.read(receiptRegistrationNotifierProvider.notifier).resetForNewEntry();
+    }
     _initSharedPreferences();
     // Once the notifier's initial `loadData()` resolves, seed this screen's
     // own controllers/dialog-composition fields from the freshly-loaded

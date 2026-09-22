@@ -1639,6 +1639,87 @@ class ReceiptRegistrationNotifier
     _lastInitError = null;
     return e;
   }
+
+  /// Forces this notifier back to a brand-new-entry state and re-runs
+  /// [_init]. Called from the widget's `initState` so a reopened Receipt
+  /// Registration screen always starts blank even if this `autoDispose`
+  /// provider's instance ends up reused instead of freshly recreated - e.g.
+  /// when the previous screen is popped and this one is pushed again in
+  /// quick succession, the last listener can be removed and the first new
+  /// listener attached within the same frame, so Riverpod never actually
+  /// sees the listener count hit zero and skips disposal. Resets every
+  /// mutable field back to its declared default (mirroring the constructor)
+  /// rather than relying on a new instance being constructed.
+  void resetForNewEntry() {
+    vchtypenamedata = [];
+    partydata = [];
+    bankcashname_data = [];
+    paymentmode_data = [];
+
+    _partyLedgerMasterIdByName = {};
+    _bankCashLedgerMasterIdByName = {};
+    _voucherTypeMasterIdByName = {};
+    _partyLedgersRaw = [];
+    _currencyMasterId = null;
+    _startFromPref = null;
+
+    bills = [];
+    cheque = [];
+
+    totalBillAmount = 0;
+    roundedtotalBillAmount = 0;
+    totalChequeAmount = 0;
+    roundedtotalChequeAmount = 0;
+
+    isVisibleBillHeading = false;
+    isVisibleChequeHeading = false;
+    isChequeVisible = false;
+    isPaymentModeVisible = false;
+
+    isVoucherTypeLocked = false;
+    isBankCashLedgerLocked = false;
+
+    _isLoading = true;
+    _isInitialDataLoaded = false;
+
+    company = '';
+    serial_no = '';
+    token = '';
+    currencycode = '';
+    name = '';
+    decimal = 2;
+    SecuritybtnAcessHolder = '';
+
+    receiptdate = DateTime.now();
+    receiptdatestring = '';
+    receiptdatetxt = '';
+
+    now = DateTime.now();
+    yearStartDate = DateTime(now.year, 1, 1);
+    yearEndDate = DateTime(now.year, 12, 31);
+
+    _selectedvchtypename = '';
+    _selectedparty = null;
+    _selectedbankcashname = null;
+    _selectedpaymentmode = '';
+
+    errorMessageVchNo = '';
+    vchnos = [];
+
+    isOutstandingLoading = false;
+    outstandingError = "";
+    openingOutstanding = 0.0;
+    totalOutstanding = 0.0;
+    outstandingBills = [];
+    showOutstandingCard = false;
+    isOutstandingExpanded = false;
+    visibleOutstandingBillCount = 5;
+
+    _lastInitError = null;
+
+    _commit(() {});
+    _init();
+  }
 }
 
 final receiptRegistrationNotifierProvider = StateNotifierProvider.autoDispose<
