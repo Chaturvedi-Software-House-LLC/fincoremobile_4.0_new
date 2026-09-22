@@ -1061,17 +1061,23 @@ class _ItemsClickedPageState extends ConsumerState<ItemsClicked>
                   ),
                 ),
 
-                // 🔹 Amount with arrow
-                Flexible(
-                  child: currencyAmountText(
-                    currencyCode: vm.currencyCode,
-                    symbol: vm.currencySymbol,
-                    amountText: formatTotal(amount, decimals: vm.decimal),
-                    style: GoogleFonts.poppins(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
+                // 🔹 Amount with arrow - NOT wrapped in Flexible: with
+                // `Expanded(month)` already the row's one flex child, a
+                // second flex sibling here would split the leftover space
+                // with it 50/50 (Flexible defaults to flex:1, same as
+                // Expanded) instead of sitting flush at the row's right
+                // edge, which is what left-aligned month + right-aligned
+                // amount is supposed to look like.
+                currencyAmountText(
+                  currencyCode: vm.currencyCode,
+                  symbol: vm.currencySymbol,
+                  amountText: formatTotal(amount, decimals: vm.decimal),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
 
