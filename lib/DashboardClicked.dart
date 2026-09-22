@@ -2174,7 +2174,10 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
           );
           return false;
         },
-        child: Stack(
+        child: LayoutBuilder(
+          builder: (context, bodyConstraints) {
+            final emptyStateHeight = bodyConstraints.maxHeight;
+            return Stack(
           children: [
             CustomScrollView(
               controller: _scrollFabController,
@@ -2524,7 +2527,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                             !_isLoading &&
                             filteredLedgerGroupList.isEmpty)
                           SizedBox(
-                            height: MediaQuery.of(context).size.height * 0.5,
+                            height: emptyStateHeight,
                             child: Center(
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -2738,7 +2741,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                             ),
                           ] else if (_topParties.isEmpty)
                             SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.5,
+                              height: emptyStateHeight,
                               child: Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -2839,8 +2842,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
 
                               if (isVisibleNoDataFound && !_isLoading)
                                 SizedBox(
-                                  height:
-                                      MediaQuery.of(context).size.height * 0.5,
+                                  height: emptyStateHeight,
                                   child: Center(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
@@ -3112,8 +3114,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                               ),
                             ] else if (_ageingBuckets.isEmpty)
                               SizedBox(
-                                height:
-                                    MediaQuery.of(context).size.height * 0.5,
+                                height: emptyStateHeight,
                                 child: Center(
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
@@ -3168,7 +3169,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                         ] else if (_isOutstandingListVisible) ...[
                           if (isVisibleNoDataFound && !_isLoading)
                             SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.5,
+                              height: emptyStateHeight,
                               child: Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -3229,6 +3230,8 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
               ),
             ScrollFab(controller: _scrollFabController),
           ],
+        );
+          },
         ),
       ),
     );

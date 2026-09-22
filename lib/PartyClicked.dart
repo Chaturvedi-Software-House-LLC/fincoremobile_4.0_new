@@ -1513,7 +1513,10 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                         ),
                       ],
                     ),
-                    child: SingleChildScrollView(
+                    child: LayoutBuilder(
+                      builder: (context, outerConstraints) {
+                        final emptyStateHeight = outerConstraints.maxHeight;
+                        return SingleChildScrollView(
                       child: Column(
                         children: [
                           LayoutBuilder(
@@ -1584,9 +1587,7 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                     !SalesOrderVisibility &&
                                     !PurchaseOrderVisibility)
                                   SizedBox(
-                                    height:
-                                        MediaQuery.of(context).size.height *
-                                        0.5,
+                                    height: emptyStateHeight,
                                     child: Center(
                                       child: Column(
                                         mainAxisAlignment:
@@ -2155,9 +2156,7 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                 // No Data Message
                                 if (isVisibleNoDataFound)
                                   SizedBox(
-                                    height:
-                                        MediaQuery.of(context).size.height *
-                                        0.5,
+                                    height: emptyStateHeight,
                                     child: Center(
                                       child: Column(
                                         mainAxisAlignment:
@@ -2361,9 +2360,7 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                                   /// ❌ No Data
                                   if (isVisibleNoDataFound)
                                     SizedBox(
-                                      height:
-                                          MediaQuery.of(context).size.height *
-                                          0.5,
+                                      height: emptyStateHeight,
                                       child: Center(
                                         child: Column(
                                           mainAxisAlignment:
@@ -2444,6 +2441,8 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
                           ),
                         ],
                       ),
+                    );
+                      },
                     ),
                   ),
                 ),
