@@ -19,6 +19,12 @@ class CurrencyFormatter {
   /// formatters that must know whether to render the Dirham glyph).
   static String getCurrencyCode() => _getCurrencyCode();
 
+  /// 🔹 Public accessor for the saved decimal-place count (needed by
+  /// callers formatting a non-currency number - e.g. a quantity - that
+  /// still needs to respect the user's decimal-place preference, falling
+  /// back to 2 the same way every currency amount already does).
+  static int getDecimalPlaces() => _getDecimalPlaces();
+
   /// 🔹 Symbol and formatted number kept separate, for callers that need to
   /// style the currency symbol independently from the amount (e.g. to swap
   /// in the Dirham glyph for AED without affecting the amount's font).

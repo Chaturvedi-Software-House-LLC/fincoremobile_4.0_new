@@ -1279,9 +1279,20 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
       'Voucher Type': Icons.assignment_outlined,
       'Cost Center': Icons.business_center_rounded,
     };
+    // `qty` arrives as tally-api's own raw formatMoney() string - always
+    // fixed to 4 decimal places server-side, regardless of the user's
+    // saved decimal-place preference (which every currency amount on this
+    // screen already respects via CurrencyFormatter). Reformat it the same
+    // way before display instead of showing the backend's raw precision -
+    // see ItemsDrillDown.dart's identical fix.
+    final formattedQty = qty == null
+        ? null
+        : NumberFormat(
+            "#,##0.${'0' * CurrencyFormatter.getDecimalPlaces()}",
+          ).format(double.tryParse(qty) ?? 0);
     final topRightLabel = isBills
         ? (date != null && date.isNotEmpty ? _convertDate(date) : null)
-        : (qty != null ? 'Qty: $qty' : null);
+        : (formattedQty != null ? 'Qty: $formattedQty' : null);
 
     return GestureDetector(
       onTap: onTap,
