@@ -369,7 +369,11 @@ class PartyClickedRecPayClickedNotifier
 
       final page = result.items.where((bill) {
         final balance = parseMoneyField(bill['finalBalance']);
-        return _isDebit == 'true' ? balance > 0 : balance <= 0;
+        // Receivable (an asset) carries a debit balance, stored negative
+        // here - matches party_clicked_notifier.dart's
+        // formatOnAccountWithBillNo, the app's one other place that already
+        // derives Receivable/Payable straight from a bill's raw sign.
+        return _isDebit == 'true' ? balance < 0 : balance > 0;
       }).map((bill) {
         return Data.fromJson({
           'billno': bill['name'] ?? '',

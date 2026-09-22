@@ -1337,7 +1337,11 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
       double opening = 0;
       for (final bill in bills) {
         final balance = parseMoneyField(bill['finalBalance']);
-        final isReceivable = balance > 0;
+        // Tally's own XML convention stores a debit amount negative, credit
+        // positive - so a Receivable (asset, debit-normal) bill is negative
+        // here and a Payable (liability, credit-normal) bill is positive.
+        // Matches party_clicked_notifier.dart's formatOnAccountWithBillNo.
+        final isReceivable = balance < 0;
         if (isReceivable != wantReceivable) continue;
         opening += balance;
         items.add(

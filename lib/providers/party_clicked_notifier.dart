@@ -567,7 +567,12 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
       return;
     }
 
-    if (value > 0) {
+    // Matches the bill-level convention `formatOnAccountWithBillNo` already
+    // uses: a negative net outstanding (Receivable, an asset) is a debit
+    // balance - displayed as "Dr", exactly like Tally itself shows a Sundry
+    // Debtors ledger. A positive net outstanding (Payable, a liability) is
+    // a credit balance - "Cr", matching a Sundry Creditors ledger in Tally.
+    if (value < 0) {
       if (receivableparty == 'True') {
         _commit(() {
           ReceivableVisibility = true;
