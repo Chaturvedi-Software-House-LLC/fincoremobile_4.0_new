@@ -887,7 +887,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                     ),
                   ),
                 ),
-              if (_isSearchViewVisible || state.isVisibleNoDataFound)
+              if (_isSearchViewVisible)
                 SliverToBoxAdapter(
                   child: Container(
                   margin: const EdgeInsets.only(
@@ -915,8 +915,7 @@ class _PartyClickedSoldPurchaseClickedPageState
                   child: Column(
                     children: [
                       // Search Field
-                      if (_isSearchViewVisible) ...[
-                        Padding(
+                      Padding(
                           padding: const EdgeInsets.only(
                             left: 12,
                             right: 12,
@@ -977,10 +976,8 @@ class _PartyClickedSoldPurchaseClickedPageState
                             ),
                           ),
                         ),
-                      ],
 
                       const SizedBox(height: 8),
-
                     ],
                   ),
                 ),

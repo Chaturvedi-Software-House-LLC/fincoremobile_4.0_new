@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../PartyClicked.dart';
 import '../api/monthly_bucket_helper.dart';
+import '../api/voucher_type_repository.dart';
 import '../currencyFormat.dart';
 import 'repository_providers.dart';
 
@@ -804,11 +805,33 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
     try {
       final from = parseCompactDate(startDateString);
       final to = parseCompactDate(endDateString);
+
+      // `_typeMasterIdByKey` is normally populated by
+      // `_fetchSummaryDataTallyApi` before either tab is ever tapped (the
+      // screen opens on Summary), but if this is called before that
+      // finishes (or it never ran - e.g. this ledger had no summary rows
+      // for the type), falling back to an unfiltered call here silently
+      // returned the ledger's *combined* item history for every voucher
+      // type, making Sold and Purchase show identical data. Resolve the
+      // type master id directly in that case instead of guessing.
+      var typeMasterId = _typeMasterIdByKey[vchtype];
+      if (typeMasterId == null) {
+        final reservedName = isSold ? 'SALES' : 'PURCHASE';
+        final matches =
+            await VoucherTypeRepository.instance.byReservedName(reservedName);
+        if (matches.isNotEmpty) {
+          typeMasterId = matches.first['masterId'] as int?;
+          if (typeMasterId != null) {
+            _typeMasterIdByKey[vchtype] = typeMasterId;
+          }
+        }
+      }
+
       final rows = await _ref.read(ledgerRepositoryProvider).itemSummary(
             ledgerMasterId,
             from: from,
             to: to,
-            voucherTypeMasterId: _typeMasterIdByKey[vchtype],
+            voucherTypeMasterId: typeMasterId,
           );
 
       final items = [

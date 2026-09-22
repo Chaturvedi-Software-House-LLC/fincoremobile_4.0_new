@@ -1049,7 +1049,7 @@ class _PartyTotalClickedRecPayClickedPageState
               // something to show (search field or "no records" state) -
               // otherwise it rendered as an empty decorated box (visible
               // shadow/rounded corners with nothing inside).
-              if (vm.isSearchViewVisible || vm.isVisibleNoDataFound)
+              if (vm.isSearchViewVisible)
                 SliverToBoxAdapter(
                 child: Container(
                   width: double.infinity,
@@ -1077,8 +1077,7 @@ class _PartyTotalClickedRecPayClickedPageState
                   ),
                   child: Column(
                     children: [
-                      if (vm.isSearchViewVisible) ...[
-                        Padding(
+                      Padding(
                           padding: const EdgeInsets.only(
                             left: 12,
                             right: 12,
@@ -1133,8 +1132,6 @@ class _PartyTotalClickedRecPayClickedPageState
                             ),
                           ),
                         ),
-                      ],
-
                     ],
                   ),
                 ),
