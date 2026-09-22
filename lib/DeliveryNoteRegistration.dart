@@ -232,11 +232,21 @@ class _DeliverynoteregistrationPageState
       final matching = rows.where(
         (r) => r['priceLevelName']?.toString() == priceLevelName,
       );
+      // Compare calendar dates only (year/month/day), not full DateTimes -
+      // see the identical fix in SalesRegistration.dart's _priceLevelRate:
+      // `DateTime.tryParse` on the API's plain "yyyy-MM-dd" `date` field
+      // produces a UTC-anchored midnight, while `asOf` is built from local
+      // wall-clock values - near a timezone's date boundary those two can
+      // disagree on which calendar day it currently is, wrongly excluding
+      // a price-level row that's actually effective as of today.
+      final asOfDateOnly = DateTime(asOf.year, asOf.month, asOf.day);
       DateTime? bestDate;
       double? bestRate;
       for (final row in matching) {
-        final rowDate = DateTime.tryParse(row['date']?.toString() ?? '');
-        if (rowDate == null || rowDate.isAfter(asOf)) continue;
+        final rawDate = DateTime.tryParse(row['date']?.toString() ?? '');
+        if (rawDate == null) continue;
+        final rowDate = DateTime(rawDate.year, rawDate.month, rawDate.day);
+        if (rowDate.isAfter(asOfDateOnly)) continue;
         if (bestDate == null || rowDate.isAfter(bestDate)) {
           final rate = _parseCompoundRate(row['rate']);
           if (rate != null) {

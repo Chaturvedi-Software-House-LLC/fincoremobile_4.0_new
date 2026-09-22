@@ -3271,12 +3271,17 @@ class _SalesOrderRegistrationPageState
     final rows = await PriceLevelRepository.instance.ratesForItem(
       stockItemMasterId,
     );
+    // Compare calendar dates only (year/month/day), not full DateTimes -
+    // see the identical fix in SalesRegistration.dart's _priceLevelRate.
+    final asOfDateOnly = DateTime(asOf.year, asOf.month, asOf.day);
     Map<String, dynamic>? best;
     DateTime? bestDate;
     for (final row in rows) {
       if (row['priceLevelName'] != priceLevelName) continue;
-      final rowDate = DateTime.tryParse(row['date']?.toString() ?? '');
-      if (rowDate == null || rowDate.isAfter(asOf)) continue;
+      final rawDate = DateTime.tryParse(row['date']?.toString() ?? '');
+      if (rawDate == null) continue;
+      final rowDate = DateTime(rawDate.year, rawDate.month, rawDate.day);
+      if (rowDate.isAfter(asOfDateOnly)) continue;
       if (bestDate == null || rowDate.isAfter(bestDate)) {
         bestDate = rowDate;
         best = row;
