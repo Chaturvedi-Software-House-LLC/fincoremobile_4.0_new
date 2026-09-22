@@ -33,11 +33,13 @@ class LedgerGroup {
   final String ledger;
   final double amount;
   final double opening;
+  final int? masterId;
 
   LedgerGroup({
     required this.ledger,
     required this.amount,
     required this.opening,
+    this.masterId,
   });
 
   factory LedgerGroup.fromJson(Map<String, dynamic> json) {
@@ -45,6 +47,7 @@ class LedgerGroup {
       ledger: json['ledger']?.toString() ?? '',
       amount: double.tryParse(json['amount'].toString()) ?? 0.0,
       opening: double.tryParse(json['opening'].toString()) ?? 0.0, // ✅ NEW
+      masterId: json['masterId'] as int?,
     );
   }
 }
@@ -2607,7 +2610,10 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                                 onTap: () {
                                   searchController.clear();
                                   FocusScope.of(context).unfocus();
-                                  _notifier.selectLedgerGroup(group.ledger);
+                                  _notifier.selectLedgerGroup(
+                                    group.ledger,
+                                    masterId: group.masterId,
+                                  );
                                 },
                                 child: Container(
                                   margin: const EdgeInsets.symmetric(

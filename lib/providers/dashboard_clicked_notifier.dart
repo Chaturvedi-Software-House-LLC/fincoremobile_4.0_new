@@ -268,6 +268,17 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
 
   bool _isLedgerGroupVisible = false;
   String? _selectedLedgerGroup;
+  // Set whenever a specific Cash/Bank ledger is drilled into
+  // (selectLedgerGroup) - once non-null, loadMoreSalesPurchaseCash uses
+  // the ledger-scoped `ledgerReportPage` endpoint (server-side filtered to
+  // this exact ledger) instead of the multi-type company-wide cursor path
+  // above, which had no server-side ledger filter at all and relied on
+  // scrolling through however many pages it took to stumble onto this
+  // ledger's own rows client-side - impractical once the company has more
+  // than a handful of vouchers.
+  int? _selectedLedgerGroupMasterId;
+  int _ledgerVoucherPage = 1;
+  bool _ledgerVoucherHasMore = true;
   List<LedgerGroup> ledgerGroupList = [];
 
   bool _isAgeingView = false;
@@ -335,8 +346,9 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
   String _dcVchNameFilter = '';
   Set<String>? _dcAllowedTypeNames;
 
-  bool get canLoadMoreSalePurcCash =>
-      _dcTypeCursors?.values.any((c) => c != null) ?? false;
+  bool get canLoadMoreSalePurcCash => _selectedLedgerGroupMasterId != null
+      ? _ledgerVoucherHasMore
+      : (_dcTypeCursors?.values.any((c) => c != null) ?? false);
 
   dynamic _selectedvoucher = "";
   List<String> spinner_list = [];
@@ -575,6 +587,7 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
             'ledger': ledger['name'] ?? '',
             'amount': closing - opening,
             'opening': opening,
+            'masterId': ledger['masterId'],
           }),
         );
       }
@@ -1234,6 +1247,13 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
   Future<void> loadMoreSalesPurchaseCash() async {
     if (_isLoadingMoreSalePurcCash) return;
     if (!canLoadMoreSalePurcCash) return;
+
+    if (_selectedLedgerGroupMasterId != null) {
+      _commit(() => _isLoadingMoreSalePurcCash = true);
+      await _loadLedgerVoucherPage();
+      return;
+    }
+
     final cursors = _dcTypeCursors;
     final from = _dcFrom;
     final to = _dcTo;
@@ -2019,39 +2039,100 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
     _commit(() {
       _isSalesListVisible = false;
       _isLedgerGroupVisible = true;
+      _selectedLedgerGroupMasterId = null;
     });
     fetchLedgerGroups();
   }
 
-  /// Cash/Bank ledger-group row tap - verbatim port minus
-  /// `searchController.clear()`/`FocusScope.of(context).unfocus()`.
-  void selectLedgerGroup(String ledgerName) {
+  /// Cash/Bank ledger-group row tap - fetches this exact ledger's own
+  /// vouchers via the server-side ledgerMasterId-scoped `ledgerReportPage`
+  /// endpoint (same one Party module's drill-downs use), instead of the
+  /// old approach of paginating through every voucher in the company and
+  /// filtering by ledger name client-side, which needed however many
+  /// pages it took to stumble onto this one ledger's rows - impractical
+  /// once the company has more than a handful of vouchers.
+  Future<void> selectLedgerGroup(String ledgerName, {int? masterId}) async {
     _commit(() {
       _selectedLedgerGroup = ledgerName;
+      _selectedLedgerGroupMasterId = masterId;
       _isLedgerGroupVisible = false;
       _isSalesListVisible = true;
+      _isLoading = true;
     });
+    sales_purc_cash_list.clear();
+    filteredItems_sale_purc_cash.clear();
+    _ledgerVoucherPage = 1;
+    _ledgerVoucherHasMore = true;
 
-    // `_selectedvoucher` defaults to (and can be reset to) the literal
-    // "All Voucher Types" sentinel meaning "no type filter" - every other
-    // call site in this file translates that to "" before passing it on
-    // as vchname (_mapSalePurcCash treats any non-empty vchname as an
-    // exact-match filter, so passing the sentinel through as-is excluded
-    // every voucher, since none is ever actually named "All Voucher
-    // Types"). This call site skipped that translation.
-    final vchname =
-        (_selectedvoucher == null || _selectedvoucher == "All Voucher Types")
-            ? ""
-            : _selectedvoucher!;
-    fetchSales_purchase_cash(
-      "cash-in-hand,bank accounts",
-      startDateString,
-      endDateString,
-      "",
-      "true",
-      vchname,
-      _selectedLedgerGroup!,
-    );
+    if (masterId == null) {
+      // No masterId available (shouldn't happen from the real UI, which
+      // always has it from the ledger-group fetch) - nothing to scope the
+      // query to.
+      if (!mounted) return;
+      _commit(() {
+        _isLoading = false;
+        isVisibleNoDataFound = true;
+      });
+      return;
+    }
+    await _loadLedgerVoucherPage();
+  }
+
+  Sale_purc_cash _mapLedgerReportRow(Map<String, dynamic> row) {
+    final rawAmount = parseMoneyField(row['amount']);
+    final signedAmount = row['isDebit'] == true ? -rawAmount : rawAmount;
+    return Sale_purc_cash.fromJson({
+      'vchname': row['voucherTypeName'] ?? '',
+      'vchno': row['voucherNumber'] ?? '',
+      'amount': signedAmount,
+      'vchdate': row['date'] ?? '',
+      'ledger': _selectedLedgerGroup ?? '',
+      'isoptional': false,
+      'ispostdated': row['isPostDated'] ?? false,
+      'refno': '',
+      'refdate': '',
+      'masterid': row['voucherMasterId'] ?? '',
+      'ledgers': const [],
+    });
+  }
+
+  Future<void> _loadLedgerVoucherPage() async {
+    final myGen = ++_dcRequestGen;
+    final from = parseCompactDate(startDateString);
+    final to = parseCompactDate(endDateString);
+
+    try {
+      final result = await _ledgerRepository.ledgerReportPage(
+        view: 'normal',
+        page: _ledgerVoucherPage,
+        limit: _dcPageLimit,
+        ledgerMasterId: _selectedLedgerGroupMasterId,
+        from: from,
+        to: to,
+      );
+      if (myGen != _dcRequestGen || !mounted) return;
+
+      final items = result.items.map(_mapLedgerReportRow).toList();
+      _ledgerVoucherHasMore = _ledgerVoucherPage < result.totalPages;
+      _ledgerVoucherPage++;
+
+      _commit(() {
+        sales_purc_cash_list.addAll(items);
+        filteredItems_sale_purc_cash = List.from(sales_purc_cash_list);
+        isVisibleNoDataFound =
+            filteredItems_sale_purc_cash.isEmpty && !_ledgerVoucherHasMore;
+        isSortVisible = filteredItems_sale_purc_cash.isNotEmpty;
+        _isLoading = false;
+        _isLoadingMoreSalePurcCash = false;
+      });
+      _applySalePurcCashSort();
+    } catch (e) {
+      if (myGen != _dcRequestGen || !mounted) return;
+      _commit(() {
+        _isLoading = false;
+        _isLoadingMoreSalePurcCash = false;
+      });
+    }
   }
 
   void clearVoucherTypeFilter(String firstSpinnerOption) {
