@@ -1948,7 +1948,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                     ? SizedBox(
                         width: 22,
                         height: 22,
-                        child: CircularProgressIndicator.adaptive(
+                        child: CircularProgressIndicator(
                           strokeWidth: 2.4,
                           valueColor: const AlwaysStoppedAnimation<Color>(
                             Colors.white,
@@ -1975,7 +1975,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                     ? SizedBox(
                         width: 22,
                         height: 22,
-                        child: CircularProgressIndicator.adaptive(
+                        child: CircularProgressIndicator(
                           strokeWidth: 2.4,
                           valueColor: const AlwaysStoppedAnimation<Color>(
                             Colors.white,
