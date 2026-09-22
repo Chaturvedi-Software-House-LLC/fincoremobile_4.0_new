@@ -200,8 +200,19 @@ class ItemsDrillDownNotifier extends StateNotifier<ItemsDrillDownState> {
   /// the same stability reason `VoucherTypeRepository` documents; the first
   /// active match is used if a company somehow has more than one voucher
   /// type sharing that reservedName.
+  // Only ever 'Sales'/'Purchase' from this screen's real callers today
+  // (see PartyDrillDown.dart's identical fix for the bug this ternary
+  // caused there once Credit Note/Debit Note started reaching it) - kept
+  // as a proper reservedName lookup rather than a two-way ternary anyway,
+  // so a future caller passing another type fails closed (null) instead
+  // of silently resolving to Purchase.
   Future<int?> _resolveTypeMasterId() async {
-    final reservedName = args.type == 'Sales' ? 'SALES' : 'PURCHASE';
+    final reservedName = args.type == 'Sales'
+        ? 'SALES'
+        : args.type == 'Purchase'
+            ? 'PURCHASE'
+            : null;
+    if (reservedName == null) return null;
     final matches = await VoucherTypeRepository.instance.byReservedName(reservedName);
     return matches.isNotEmpty ? matches.first['masterId'] as int? : null;
   }

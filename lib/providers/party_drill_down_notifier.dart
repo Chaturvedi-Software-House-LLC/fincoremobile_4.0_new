@@ -194,8 +194,26 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
     await selectGroup(state.selectedGroup);
   }
 
+  // `args.type` reaches this screen as one of PartyClicked.dart's own
+  // display names (Sales/Purchase/Credit Note/Debit Note, from both
+  // navigateToDetail and the Monthly Breakdown's month-tap) - a plain
+  // Sales/else-Purchase ternary silently resolved every non-Sales type
+  // (including Credit Note/Debit Note) to the Purchase voucher type,
+  // showing that party's Purchase vouchers - or nothing - instead of the
+  // type actually tapped.
+  static const _reservedNameByType = {
+    'Sales': 'SALES',
+    'Purchase': 'PURCHASE',
+    'Credit Note': 'CREDIT_NOTE',
+    'Debit Note': 'DEBIT_NOTE',
+    'Journal': 'JOURNAL',
+    'Receipt': 'RECEIPT',
+    'Payment': 'PAYMENT',
+  };
+
   Future<int?> _resolveTypeMasterId() async {
-    final reservedName = args.type == 'Sales' ? 'SALES' : 'PURCHASE';
+    final reservedName = _reservedNameByType[args.type];
+    if (reservedName == null) return null;
     final matches = await VoucherTypeRepository.instance.byReservedName(reservedName);
     return matches.isNotEmpty ? matches.first['masterId'] as int? : null;
   }
