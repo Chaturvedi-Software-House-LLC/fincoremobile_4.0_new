@@ -1124,12 +1124,15 @@ class ReceiptRegistrationNotifier
             .where((name) => name.isNotEmpty)
             .toList();
 
-        // Receipt entries have no godown/item dimension at all, so there's
-        // no GODOWN-restriction signal to distinguish a restricted UniGas
+        // Receipt entries have no godown/item dimension, so there's no
+        // GODOWN-restriction signal to distinguish a restricted UniGas
         // user from an admin the way Sales/Sales Order/Delivery Note can
         // (see their identical `isUniGas && godowns.length == 1` fix) -
-        // never lock here, same as every non-UniGas company.
-        isVoucherTypeLocked = false;
+        // gates on `isUniGasSerial` alone instead (never locks for a
+        // non-UniGas company; within UniGas, still locks whenever only
+        // one voucher type is actually available, same as before this
+        // whole fix existed).
+        isVoucherTypeLocked = isUniGasSerial && vchtypenamedata.length == 1;
         _selectedvchtypename =
             vchtypenamedata.isNotEmpty ? vchtypenamedata.first : '';
         voucherTypeToFetch = _selectedvchtypename;
@@ -1148,7 +1151,8 @@ class ReceiptRegistrationNotifier
         }).toList();
 
         _selectedbankcashname = null;
-        isBankCashLedgerLocked = bankcashname_data.length == 1;
+        // Same reasoning as isVoucherTypeLocked above.
+        isBankCashLedgerLocked = isUniGasSerial && bankcashname_data.length == 1;
 
         if (tallyAutoCashLedgerName != null &&
             tallyAutoCashLedgerName.isNotEmpty) {
