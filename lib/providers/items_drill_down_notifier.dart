@@ -97,7 +97,7 @@ class ItemsDrillDownState {
   final List<DrillCostCenter> filteredCostcenter;
 
   const ItemsDrillDownState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMore = false,
     this.isSortVisible = false,
     this.showDateSort = false,

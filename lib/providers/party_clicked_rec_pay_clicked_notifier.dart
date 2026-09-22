@@ -66,7 +66,7 @@ class PartyClickedRecPayClickedState {
   final String? selectedAgeingBucket;
 
   const PartyClickedRecPayClickedState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMore = false,
     this.isListVisible = true,
     this.isSortVisible = false,

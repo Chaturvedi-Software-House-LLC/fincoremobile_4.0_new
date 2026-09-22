@@ -113,7 +113,7 @@ class TransactionsNotifier extends StateNotifier<TransactionsState> {
           transactionsList: [],
           isVisibleNoDataFound: false,
           isSortVisible: false,
-          isLoading: false,
+          isLoading: true, // starts true - see dashboard_notifier.dart's fix for why
           isLoadingMoreTx: false,
           isTrendTabSelected: false,
           quickFilter: 'All',
@@ -171,7 +171,7 @@ class TransactionsNotifier extends StateNotifier<TransactionsState> {
   List<transactions> transactions_list = [];
   bool isVisibleNoDataFound = false;
   bool isSortVisible = false;
-  bool _isLoading = false;
+  bool _isLoading = true; // starts true - see dashboard_notifier.dart's fix for why
   bool _isLoadingMoreTx = false;
   bool _isTrendTabSelected = false;
   String _quickFilter = 'All';

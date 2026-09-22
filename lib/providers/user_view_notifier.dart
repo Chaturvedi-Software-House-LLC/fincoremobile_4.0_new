@@ -21,7 +21,7 @@ class UserViewState {
   const UserViewState({
     this.isRolesVisible = true,
     this.isUserVisible = true,
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMore = false,
     this.isVisibleNoUserFound = false,
     this.users = const [],

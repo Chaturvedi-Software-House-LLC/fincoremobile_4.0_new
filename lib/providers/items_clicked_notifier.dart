@@ -91,7 +91,7 @@ class ItemsClickedState {
   final String? startFrom;
 
   const ItemsClickedState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isDateVisible = true,
     this.salesSummaryVisible = false,
     this.purchaseSummaryVisible = false,

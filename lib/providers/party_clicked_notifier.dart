@@ -84,7 +84,7 @@ class PartyClickedState {
   final String pendingsalesorder, pendingpurchaseorder;
 
   const PartyClickedState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isTextEnabled = true,
     this.selectedDate = 'Today',
     this.startDateString = '',
@@ -525,7 +525,7 @@ class PartyClickedNotifier extends StateNotifier<PartyClickedState> {
 
   late SharedPreferences prefs;
   String startdate_text = "", enddate_text = "";
-  bool _isLoading = false;
+  bool _isLoading = true; // starts true - see dashboard_notifier.dart's fix for why
 
   String heading1 = '', heading2 = '', heading3 = '', heading4 = '', heading5 = '';
 

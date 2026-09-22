@@ -18,7 +18,7 @@ class CreateUserState {
   const CreateUserState({
     this.isRolesVisible = true,
     this.isUserVisible = true,
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.roles = const [],
     this.selectedRole,
     this.company = '',

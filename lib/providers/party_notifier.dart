@@ -22,7 +22,7 @@ class PartyState {
   final String? errorMessage;
 
   const PartyState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMoreParties = false,
     this.isVisibleNoDataFound = false,
     this.isAllList = false,

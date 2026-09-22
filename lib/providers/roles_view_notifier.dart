@@ -19,7 +19,7 @@ class RolesViewState {
   const RolesViewState({
     this.isRolesVisible = true,
     this.isUserVisible = true,
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMore = false,
     this.isVisibleNoRoleFound = false,
     this.roles = const [],

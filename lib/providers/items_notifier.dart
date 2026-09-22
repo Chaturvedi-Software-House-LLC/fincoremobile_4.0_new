@@ -111,7 +111,7 @@ class ItemsState {
     this.amount_visibility = false,
     this.isVisibleParent = false,
     this.company = '',
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.selectedItem = '',
     this.spinner_list = const [],
     this.all_items_list = const [],

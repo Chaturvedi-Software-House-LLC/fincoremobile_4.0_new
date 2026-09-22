@@ -99,7 +99,7 @@ class PartyDrillDownState {
   final List<PCostCenter> filteredCostcenter;
 
   const PartyDrillDownState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMore = false,
     this.isSortVisible = false,
     this.showDateSort = false,

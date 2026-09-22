@@ -60,7 +60,7 @@ class PartyClickedSalePurcOrderClickedState {
   final String company;
 
   const PartyClickedSalePurcOrderClickedState({
-    this.isLoading = false,
+    this.isLoading = true, // starts true - see dashboard_notifier.dart's fix for why
     this.isLoadingMore = false,
     this.isListVisible = false,
     this.isSortVisible = false,
