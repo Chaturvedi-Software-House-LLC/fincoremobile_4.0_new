@@ -928,7 +928,8 @@ class ModifySalesOrderEntryNotifier
     narration = oldnarration;
     referenceNo = oldrefno;
 
-    saledate = DateTime.parse(data['date'] as String);
+    saledate = DateTime.tryParse(data['date']?.toString() ?? '') ??
+        DateTime.now();
     saledatestring = _dateFormat.format(saledate);
     saledatetxt = formatlastsaledate(saledatestring);
 
@@ -1322,7 +1323,8 @@ class ModifySalesOrderEntryNotifier
     // below) re-derives this from the same field once master data is
     // loaded via `_populateFromExistingEntry()`, so this is only the
     // initial value used before that finishes.
-    saledate = DateTime.parse(args.data['date'] as String);
+    saledate = DateTime.tryParse(args.data['date']?.toString() ?? '') ??
+        DateTime.now();
     saledatestring = _dateFormat.format(saledate);
     saledatetxt = formatlastsaledate(saledatestring);
 

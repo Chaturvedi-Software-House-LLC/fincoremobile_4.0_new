@@ -129,9 +129,8 @@ class PendingReceiptEntryNotifier
         return entry;
       }
     }
-    return ledgerEntries.isNotEmpty
-        ? ledgerEntries.first as Map<String, dynamic>
-        : null;
+    final first = ledgerEntries.isNotEmpty ? ledgerEntries.first : null;
+    return first is Map<String, dynamic> ? first : null;
   }
 
   ReceiptModel? _mapReceiptEntry(Map<String, dynamic> e) {

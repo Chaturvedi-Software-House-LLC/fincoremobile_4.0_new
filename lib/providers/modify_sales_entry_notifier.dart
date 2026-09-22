@@ -1013,7 +1013,8 @@ class ModifySalesEntryNotifier extends StateNotifier<ModifySalesEntryState> {
         _initialNarration = oldnarration;
         _initialReference = oldrefno;
 
-        saledate = DateTime.parse(data['date'] as String);
+        saledate = DateTime.tryParse(data['date']?.toString() ?? '') ??
+            DateTime.now();
         saledatestring = _dateFormat.format(saledate);
         saledatetxt = formatlastsaledate(saledatestring);
 

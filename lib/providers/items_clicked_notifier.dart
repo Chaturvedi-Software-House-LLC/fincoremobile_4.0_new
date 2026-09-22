@@ -258,7 +258,13 @@ class ItemsClickedNotifier extends StateNotifier<ItemsClickedState> {
   }
 
   String convertDateFormat(String dateStr) {
-    final date = DateTime.parse(dateStr);
+    // `args.itemLastSaleDate`/`itemLastPurchDate` (this method's two real
+    // call sites) come straight from the API and are empty/`'null'` for an
+    // item with no sales/purchase history yet - matches the sibling guard
+    // in items_notifier.dart's `_parseItemDateSafe`.
+    if (dateStr.isEmpty || dateStr == 'null') return '';
+    final date = DateTime.tryParse(dateStr);
+    if (date == null) return dateStr;
     return DateFormat('dd-MMM-yyyy').format(date);
   }
 

@@ -444,8 +444,10 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
 
   void _generateMonthsList() {
     months_chart.clear();
-    DateTime startDate = DateTime.parse(state.startDateString);
-    DateTime endDate = DateTime.parse(state.endDateString);
+    final parsedStart = DateTime.tryParse(state.startDateString);
+    final endDate = DateTime.tryParse(state.endDateString);
+    if (parsedStart == null || endDate == null) return;
+    DateTime startDate = parsedStart;
     while (
         startDate.isBefore(endDate) || startDate.isAtSameMomentAs(endDate)) {
       months_chart.add(DateFormat('MMM-yy').format(startDate));

@@ -2169,8 +2169,8 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
       selectedSortOption = 'Default';
     }
 
-    final start = DateTime.parse(startDateString);
-    final end = DateTime.parse(endDateString);
+    final start = DateTime.tryParse(startDateString) ?? DateTime.now();
+    final end = DateTime.tryParse(endDateString) ?? DateTime.now();
 
     startdate_text = _formatDdMmmYyyy(start);
     enddate_text = _formatDdMmmYyyy(end);

@@ -1887,6 +1887,8 @@ class _VoucherOverviewChartState extends State<VoucherOverviewChart> {
           : '${pct.toStringAsFixed(0)}%';
       return Text(
         pctLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: GoogleFonts.poppins(
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
@@ -1898,6 +1900,8 @@ class _VoucherOverviewChartState extends State<VoucherOverviewChart> {
       currencyCode: widget.currencyCode,
       symbol: widget.currencysymbol,
       amountText: CurrencyFormatter.formatCurrencyParts(totalByType).number,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: GoogleFonts.poppins(
         fontSize: 11.5,
         fontWeight: FontWeight.w700,
@@ -2124,10 +2128,12 @@ class _VoucherOverviewChartState extends State<VoucherOverviewChart> {
                                 ),
                               ),
                             ),
-                            _legendValue(
-                              type,
-                              totalByType[type]!,
-                              grandTotal,
+                            Flexible(
+                              child: _legendValue(
+                                type,
+                                totalByType[type]!,
+                                grandTotal,
+                              ),
                             ),
                           ],
                         ),

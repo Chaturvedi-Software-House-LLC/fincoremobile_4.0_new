@@ -209,7 +209,15 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
   Future<CompanySelectResult> proceedWithLicense(
     Map<String, dynamic> license,
   ) async {
-    final companies = state.companiesFor(license['id'] as String);
+    final licenseId = license['id']?.toString();
+    if (licenseId == null) {
+      state = state.copyWith(
+        errorTitle: 'License Unavailable',
+        errorMessage: 'This license is missing required data.',
+      );
+      return const CompanySelectResult(false);
+    }
+    final companies = state.companiesFor(licenseId);
     state = state.copyWith(
       selectedLicense: license,
       clearErrorMessage: true,
