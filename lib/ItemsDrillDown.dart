@@ -641,7 +641,7 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Center(
-                        child: formatAmountRich(
+                        child: formatAmountPlainRich(
                           widget.total,
                           style: GoogleFonts.poppins(
                             fontSize: 20,
@@ -1491,7 +1491,14 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
                       color: Theme.of(context).dividerColor.withOpacity(0.75),
                     ),
                   ),
-                  child: formatAmountRich(
+                  // Every group here (Ledger/Bills/Voucher Type/Cost
+                  // Center) is driven by this item's own inventory-entry
+                  // amount, not a ledger balance (see stock-reports.service
+                  // .ts's itemReport - it attributes the item's full value
+                  // to every ledger leg rather than tracking a signed
+                  // balance), so none of these ever carry a real Dr/Cr
+                  // direction - plain value, no suffix.
+                  child: formatAmountPlainRich(
                     amount.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 14.5,

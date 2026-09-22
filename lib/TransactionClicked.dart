@@ -408,7 +408,7 @@ class _TransactionsClickedPageState
                                             ? null
                                             : Icons.store,
                                         rightIcon: Icons.money,
-                                        rightValueWidget: formatAmountRich(
+                                        rightValueWidget: formatAmountPlainRich(
                                           card.amount,
                                           style: GoogleFonts.poppins(
                                             fontSize: 13.5,

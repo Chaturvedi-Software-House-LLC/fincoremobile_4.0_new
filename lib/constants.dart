@@ -249,6 +249,41 @@ Widget formatAmountRich(
   );
 }
 
+/// Same rendering as [formatAmountRich] but with no "DR"/"CR" suffix - for
+/// an item-value magnitude (a stock item's monthly Sales/Purchase total, a
+/// per-item/per-ledger breakdown row, a closing stock valuation) rather
+/// than a real ledger/party balance. Real Tally itself never puts a Dr/Cr
+/// label on this kind of figure - only on an actual account balance - and
+/// since these amounts are never signed negative to begin with,
+/// [formatAmountRich] would always print "CR" regardless of the real
+/// transaction, which reads as if it means something it doesn't.
+Widget formatAmountPlainRich(
+  String amount, {
+  required TextStyle style,
+  int? maxLines,
+  TextOverflow? overflow,
+  TextAlign? textAlign,
+  bool? softWrap,
+}) {
+  String cleanAmount = amount.replaceAll(',', '').replaceAll('-', '');
+  cleanAmount = cleanAmount == "null" ? "0" : cleanAmount;
+
+  final amountDouble = double.tryParse(cleanAmount) ?? 0.0;
+  final parts = CurrencyFormatter.formatCurrencyParts(amountDouble);
+  final currencyCode = CurrencyFormatter.getCurrencyCode();
+
+  return currencyAmountText(
+    currencyCode: currencyCode,
+    symbol: parts.symbol,
+    amountText: parts.number,
+    style: style,
+    maxLines: maxLines,
+    overflow: overflow,
+    textAlign: textAlign,
+    softWrap: softWrap,
+  );
+}
+
 String formatNullto0(String value) {
   String value_string = '0';
 

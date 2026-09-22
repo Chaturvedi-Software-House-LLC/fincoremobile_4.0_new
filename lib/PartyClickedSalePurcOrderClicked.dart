@@ -985,7 +985,7 @@ class _PartyClickedSalePurcOrderClickedPageState
                                                             Brightness.dark
                                                         ? Colors.green.shade200
                                                         : Colors.green.shade800,
-                                                    textWidget: formatAmountRich(
+                                                    textWidget: formatAmountPlainRich(
                                                       card.pendingAmount
                                                           .toString(),
                                                       style: GoogleFonts.poppins(

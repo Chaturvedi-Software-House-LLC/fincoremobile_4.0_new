@@ -960,7 +960,7 @@ class _PartyClickedSalePurcOrderPageState
                                                             .shade50,
                                                       ),
                                                     ),
-                                                    child: formatAmountRich(
+                                                    child: formatAmountPlainRich(
                                                       card.totalAmount
                                                           .toString(),
                                                       style:

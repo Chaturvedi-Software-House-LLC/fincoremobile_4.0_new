@@ -624,7 +624,15 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Center(
-                        child: formatAmountRich(
+                        // A recursive drill-in from an 'Items' row (see
+                        // _buildListSection's 'Items' case) passes that
+                        // row's own item-value amount as `total`, not a
+                        // real party balance - only plain the Cr/Dr
+                        // suffix off in that case, same as the Items list
+                        // rows themselves.
+                        child: (widget.lockedItem != null
+                            ? formatAmountPlainRich
+                            : formatAmountRich)(
                           widget.total,
                           style: GoogleFonts.poppins(
                             fontSize: 20,
@@ -1437,7 +1445,7 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                       color: Theme.of(context).dividerColor.withOpacity(0.75),
                     ),
                   ),
-                  child: formatAmountRich(
+                  child: (listType == 'Items' ? formatAmountPlainRich : formatAmountRich)(
                     amount.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 14.5,

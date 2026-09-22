@@ -268,17 +268,23 @@ class ItemsClickedNotifier extends StateNotifier<ItemsClickedState> {
     return DateFormat('dd-MMM-yyyy').format(date);
   }
 
+  /// Used for a stock item's monthly Sales/Purchase total - an item-value
+  /// magnitude, not a ledger balance, so it never carries a real
+  /// debit/credit direction the way a party's own balance does (see the
+  /// Cr/Dr convention established for ledger/bill balances elsewhere in
+  /// this app). Appending "CR"/"DR" here used to just reflect whatever
+  /// sign the number happened to parse to - which was always non-negative
+  /// for both Sales AND Purchase, so it always showed "CR" regardless of
+  /// which one it actually was. Plain formatted value, no suffix.
   String formatTotal(dynamic amount, {int decimals = 2}) {
     try {
       final parsed = double.parse(amount.toString());
-      final absValue = parsed.abs();
       final formatter = NumberFormat.currency(
         locale: 'en',
         symbol: '',
         decimalDigits: decimals,
       );
-      final formatted = formatter.format(absValue).trim();
-      return parsed < 0 ? '$formatted DR' : '$formatted CR';
+      return formatter.format(parsed.abs()).trim();
     } catch (e) {
       return amount.toString();
     }

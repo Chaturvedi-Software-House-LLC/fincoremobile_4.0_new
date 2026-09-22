@@ -621,6 +621,26 @@ class _PartyTotalClickedRecPayClickedPageState
     );
   }
 
+  /// Per-row counterpart to [_totalAmountWidget] - `item.outstanding` is
+  /// already `.abs()`'d server-side data mapped with no sign (see
+  /// party_clicked_rec_pay_clicked_notifier.dart's `_fetchPage`), so
+  /// `formatAmountRich` would always print "CR" here regardless of which
+  /// tab (Receivable/Payable) is showing. This tab's own `type` already
+  /// determines the real direction for every row on it, same as the total.
+  Widget _billAmountWidget(double outstanding, TextStyle style, {bool? softWrap, TextOverflow? overflow}) {
+    final vm = _s;
+    final suffix = type == 'Receivable' ? 'DR' : 'CR';
+    final parts = CurrencyFormatter.formatCurrencyParts(outstanding);
+    return currencyAmountText(
+      currencyCode: vm.currencyCode,
+      symbol: vm.currencySymbol,
+      amountText: '${parts.number} $suffix',
+      style: style,
+      softWrap: softWrap,
+      overflow: overflow,
+    );
+  }
+
   String convertDateFormat(String dateStr) {
     String formattedDate = "";
 
@@ -1339,16 +1359,16 @@ class _PartyTotalClickedRecPayClickedPageState
                                               CrossAxisAlignment.center,
                                           children: [
                                             Flexible(
-                                              child: formatAmountRich(
-                                                card.outstanding.toString(),
-                                                softWrap: true,
-                                                overflow: TextOverflow.visible,
-                                                style: GoogleFonts.poppins(
+                                              child: _billAmountWidget(
+                                                card.outstanding,
+                                                GoogleFonts.poppins(
                                                   fontSize: 14,
                                                   fontWeight: FontWeight.w600,
                                                   color: Colors.white,
                                                   height: 1.4,
                                                 ),
+                                                softWrap: true,
+                                                overflow: TextOverflow.visible,
                                               ),
                                             ),
                                           ],

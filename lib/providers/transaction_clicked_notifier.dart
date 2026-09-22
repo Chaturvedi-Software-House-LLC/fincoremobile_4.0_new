@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../TransactionClicked.dart';
 import '../api/api_exception.dart';
+import '../api/monthly_bucket_helper.dart' show parseMoneyField;
 import 'repository_providers.dart';
 
 class TransactionClickedState {
@@ -89,6 +90,17 @@ class TransactionClickedNotifier extends StateNotifier<TransactionClickedState> 
 
   void clearError() => state = state.copyWith(clearError: true);
 
+  /// `row['amount']` is an unsigned magnitude; `row['isDebit']` (or an
+  /// explicit override, for a nested allocation that inherits its parent
+  /// ledger entry's direction) is the separate flag - debit negative,
+  /// credit positive, matching the convention used everywhere else in
+  /// this app.
+  double _signedAmount(Map<String, dynamic> row, {dynamic isDebit}) {
+    final raw = parseMoneyField(row['amount']);
+    final debit = isDebit ?? row['isDebit'];
+    return debit == true ? -raw : raw;
+  }
+
   Future<void> init(String masterid) async {
     final prefs = await SharedPreferences.getInstance();
     state = state.copyWith(company: prefs.getString('company_name') ?? '');
@@ -151,16 +163,16 @@ class TransactionClickedNotifier extends StateNotifier<TransactionClickedState> 
           (voucher['inventoryEntries'] as List?)
                   ?.cast<Map<String, dynamic>>() ??
               const [];
-      final costCentreRows =
-          (voucher['costCentreAllocations'] as List?)
-                  ?.cast<Map<String, dynamic>>() ??
-              const [];
-
+      // A voucher's own ledger entries genuinely have a Dr/Cr direction -
+      // real Tally shows every leg signed (e.g. a Sales voucher: Party A/c
+      // Dr, Sales A/c Cr, VAT A/c Cr) - unlike an item/quantity amount,
+      // which has no such concept. `amount` here is an unsigned
+      // magnitude; `isDebit` is the separate direction flag.
       final ledgerEntriesList = ledgerRows
           .map(
             (row) => LedgerEntries(
               ledger: (row['ledgerName'] ?? '').toString(),
-              amount: (row['amount'] ?? '0').toString(),
+              amount: _signedAmount(row).toString(),
             ),
           )
           .toList();
@@ -178,14 +190,26 @@ class TransactionClickedNotifier extends StateNotifier<TransactionClickedState> 
           )
           .toList();
 
-      final costCenterList = costCentreRows
-          .map(
-            (row) => CostCenter(
-              costcentre: (row['costCentreName'] ?? '').toString(),
-              amount: (row['amount'] ?? '0').toString(),
+      // Cost-centre allocations live as a JSON array on each ledger entry
+      // (`voucherLedgerEntryRowSchema.costCentreAllocations` -
+      // VOUCHER_DETAIL_SELECT nests it under "ledgerEntries", there is no
+      // top-level `costCentreAllocations` field on the voucher itself) -
+      // reading `voucher['costCentreAllocations']` directly (the old
+      // `costCentreRows`) always returned null/empty, so this tab never
+      // showed anything regardless of real data. Each allocation is a
+      // portion of its parent ledger entry's own amount, so it inherits
+      // that entry's `isDebit` direction too.
+      final costCenterList = [
+        for (final row in ledgerRows)
+          for (final alloc
+              in (row['costCentreAllocations'] as List?)
+                      ?.cast<Map<String, dynamic>>() ??
+                  const [])
+            CostCenter(
+              costcentre: (alloc['costCentreName'] ?? '').toString(),
+              amount: _signedAmount(alloc, isDebit: row['isDebit']).toString(),
             ),
-          )
-          .toList();
+      ];
 
       // Bill allocations live as a JSON array directly on each ledger
       // entry (`voucherLedgerEntryRowSchema.billAllocations`), not as a
@@ -193,7 +217,9 @@ class TransactionClickedNotifier extends StateNotifier<TransactionClickedState> 
       // entry. No `dueDate`/`billDate` field exists on this blob (that's
       // only tracked on the standalone `Bill` master, not on the voucher's
       // own bill-allocation record), so those show as "Not Available"
-      // rather than being fabricated.
+      // rather than being fabricated. Each allocation is a portion of its
+      // parent ledger entry's own amount, so it inherits that entry's
+      // `isDebit` direction too - same reasoning as costCenterList above.
       final billsList = [
         for (final row in ledgerRows)
           for (final bill
@@ -202,7 +228,7 @@ class TransactionClickedNotifier extends StateNotifier<TransactionClickedState> 
                   const [])
             Bills(
               billno: (bill['billName'] ?? '').toString(),
-              amount: (bill['amount'] ?? '0').toString(),
+              amount: _signedAmount(bill, isDebit: row['isDebit']).toString(),
               billtype: (bill['billType'] ?? '').toString(),
               duedate: 'null',
               billdate: 'null',

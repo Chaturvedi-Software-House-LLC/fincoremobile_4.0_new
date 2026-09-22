@@ -177,15 +177,18 @@ class _ItemsPageState extends ConsumerState<Items>
 
   // Renders without the leading symbol, for use with _currencyValueWidget
   // (which renders the symbol itself so it can swap in the Dirham glyph
-  // for AED).
-  String _formatAmountWithDRCRSuffix(String value) {
+  // for AED). `card.c_amount` is the item's own closingAmount (stock
+  // valuation) - an item-value magnitude, not a ledger/party balance, so
+  // real Tally never puts a Dr/Cr suffix on it either. Previously this
+  // always printed "CR" regardless of the real figure, since
+  // closingAmount is never actually signed negative.
+  String _formatItemAmount(String value) {
     if (value == "null" || value.isEmpty) {
       return "-";
     }
 
     double amount = double.tryParse(value) ?? 0;
-    String formatted = formatAmountinDecimals(amount.abs(), _s.decimal!);
-    return amount < 0 ? "$formatted DR" : "$formatted CR";
+    return formatAmountinDecimals(amount.abs(), _s.decimal!);
   }
 
   void showToast(String message) {
@@ -2109,7 +2112,7 @@ class _ItemsPageState extends ConsumerState<Items>
                     ),
                   ),
                   const SizedBox(height: 4),
-                  formatAmountRich(
+                  formatAmountPlainRich(
                     totalValue.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 16,
@@ -2211,7 +2214,7 @@ class _ItemsPageState extends ConsumerState<Items>
                   ),
                 ),
                 const SizedBox(width: 8),
-                formatAmountRich(
+                formatAmountPlainRich(
                   totalValue.toString(),
                   textAlign: TextAlign.right,
                   style: GoogleFonts.poppins(
@@ -2333,7 +2336,7 @@ class _ItemsPageState extends ConsumerState<Items>
                           ),
                         ),
                         const SizedBox(width: 8),
-                        formatAmountRich(
+                        formatAmountPlainRich(
                           item.c_amount,
                           maxLines: 1,
                           textAlign: TextAlign.right,
@@ -2540,7 +2543,7 @@ class _ItemsPageState extends ConsumerState<Items>
                     ),
                   ),
                   const SizedBox(height: 4),
-                  formatAmountRich(
+                  formatAmountPlainRich(
                     bucket.value.toString(),
                     style: GoogleFonts.poppins(
                       fontSize: 16,
@@ -2892,7 +2895,7 @@ class _ItemsPageState extends ConsumerState<Items>
                         "-",
                         valueWidget: card.c_amount != "null"
                             ? _currencyValueWidget(
-                                _formatAmountWithDRCRSuffix(card.c_amount.toString()),
+                                _formatItemAmount(card.c_amount.toString()),
                               )
                             : null,
                       ),

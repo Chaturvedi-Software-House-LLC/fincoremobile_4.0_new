@@ -4,7 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../PartyTotalClickedRest.dart';
 import '../api/ledger_repository.dart';
 import '../api/voucher_type_repository.dart';
-import '../api/monthly_bucket_helper.dart' show parseCompactDate;
+import '../api/monthly_bucket_helper.dart'
+    show parseCompactDate, parseMoneyField;
 
 /// Riverpod migration of `PartyTotalClickedRest.dart`'s
 /// `_PartyTotalClickedRestPageState`. Fetches via
@@ -271,11 +272,19 @@ class PartyTotalClickedRestNotifier
       _hasMore = result.hasMore;
 
       final page = result.items
-          .map(
-            (j) => Data.fromJson({
+          .map((j) {
+            // `amount` is an unsigned magnitude; `isDebit` is the separate
+            // direction flag - debit negative/credit positive, same
+            // convention already applied to the identical `normal` view
+            // in party_drill_down_notifier.dart's Bills mapping. Without
+            // this every Receipt/Payment/Journal row here always showed
+            // "CR" regardless of the real direction.
+            final rawAmount = parseMoneyField(j['amount']);
+            final signedAmount = j['isDebit'] == true ? -rawAmount : rawAmount;
+            return Data.fromJson({
               'vchno': j['voucherNumber'] ?? '',
               'vchdate': j['date'] ?? '',
-              'amount': j['amount'],
+              'amount': signedAmount,
               // `Data.ispostdated`/`isoptional` are checked against the
               // literal string '1' downstream (a legacy boolean-flag
               // convention) - `isoptional` is always '0' since the
@@ -283,8 +292,8 @@ class PartyTotalClickedRestNotifier
               // entirely.
               'ispostdated': j['isPostDated'] == true ? '1' : '0',
               'isoptional': '0',
-            }),
-          )
+            });
+          })
           .toList();
       final items = append ? [...state.itemList, ...page] : page;
 
