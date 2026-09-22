@@ -4,7 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../PartyDrillDown.dart';
 import '../api/ledger_repository.dart';
 import '../api/voucher_type_repository.dart';
-import '../api/monthly_bucket_helper.dart' show parseCompactDate;
+import '../api/monthly_bucket_helper.dart'
+    show parseCompactDate, parseMoneyField;
 
 /// Riverpod migration of `PartyDrillDown.dart`'s `_PartyDrillDownState`.
 /// Closest sibling: `items_drill_down_notifier.dart` - same shape (four
@@ -328,14 +329,24 @@ class PartyDrillDownNotifier extends StateNotifier<PartyDrillDownState> {
           // pagination). `Partyledger` here is the screen's own ledger
           // name, not per-row server data.
           final page = result.items
-              .map(
-                (j) => PBill.fromJson({
+              .map((j) {
+                // `amount` is an unsigned magnitude; `isDebit` is the
+                // separate direction flag - debit negative/credit
+                // positive matches the convention already established
+                // elsewhere (party_clicked_notifier.dart,
+                // ledgerSummary's SQL). Without applying it here every
+                // bill row showed as if it were always the same
+                // direction regardless of the real transaction.
+                final rawAmount = parseMoneyField(j['amount']);
+                final signedAmount =
+                    j['isDebit'] == true ? -rawAmount : rawAmount;
+                return PBill.fromJson({
                   'vchno': j['voucherNumber'],
                   'Partyledger': args.ledger,
                   'vchdate': j['date'],
-                  'amount': j['amount'],
-                }),
-              )
+                  'amount': signedAmount,
+                });
+              })
               .toList();
           billsList = append ? [...state.billsList, ...page] : page;
           break;

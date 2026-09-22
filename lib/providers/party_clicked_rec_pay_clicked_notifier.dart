@@ -272,6 +272,7 @@ class PartyClickedRecPayClickedNotifier
 
   Future<void> _loadAgeingThresholds() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     final t = [
       int.tryParse(prefs.getString('heading1') ?? '') ?? 30,
       int.tryParse(prefs.getString('heading2') ?? '') ?? 60,
@@ -289,6 +290,7 @@ class PartyClickedRecPayClickedNotifier
     try {
       final ledgerMasterId = args.ledgerMasterId;
       final ledgers = await _ref.read(ledgerRepositoryProvider).listLedgers();
+      if (!mounted) return;
       final match = ledgers.firstWhere(
         (l) => l['masterId'] == ledgerMasterId,
         orElse: () => const {},
@@ -364,6 +366,7 @@ class PartyClickedRecPayClickedNotifier
             limit: 30,
             ledgerMasterId: args.ledgerMasterId,
           );
+      if (!mounted) return;
       _page = nextPage;
       _hasMore = result.hasMore;
 

@@ -14,6 +14,7 @@ class CompanySelectState {
   final bool listShown;
   final List<Map<String, dynamic>> allCompanies;
   final List<Map<String, dynamic>> validLicenses;
+  final List<Map<String, dynamic>> invalidLicenses;
   final Map<String, dynamic>? selectedLicense;
   final String adminEmail;
   final String serialSearchQuery;
@@ -29,6 +30,7 @@ class CompanySelectState {
     this.listShown = false,
     this.allCompanies = const [],
     this.validLicenses = const [],
+    this.invalidLicenses = const [],
     this.selectedLicense,
     this.adminEmail = '',
     this.serialSearchQuery = '',
@@ -47,6 +49,7 @@ class CompanySelectState {
     bool? listShown,
     List<Map<String, dynamic>>? allCompanies,
     List<Map<String, dynamic>>? validLicenses,
+    List<Map<String, dynamic>>? invalidLicenses,
     Map<String, dynamic>? selectedLicense,
     bool clearSelectedLicense = false,
     String? adminEmail,
@@ -64,6 +67,7 @@ class CompanySelectState {
       listShown: listShown ?? this.listShown,
       allCompanies: allCompanies ?? this.allCompanies,
       validLicenses: validLicenses ?? this.validLicenses,
+      invalidLicenses: invalidLicenses ?? this.invalidLicenses,
       selectedLicense: clearSelectedLicense
           ? null
           : (selectedLicense ?? this.selectedLicense),
@@ -154,6 +158,7 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
       state = state.copyWith(
         allCompanies: companies,
         validLicenses: valid,
+        invalidLicenses: invalid,
         isLoading: false,
         adminEmail: adminEmail,
       );
@@ -178,8 +183,12 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
       }
 
       // Single serial + single company -> straight to Dashboard, no UI
-      // shown at all (matches legacy's auto-navigate behavior exactly).
-      if (valid.length == 1) {
+      // shown at all (matches legacy's auto-navigate behavior exactly) -
+      // but only when it's the account's only license outright; if there's
+      // also an invalid one, show the list instead so the invalid license
+      // (greyed out, with its reason) is still visible rather than
+      // silently skipped past.
+      if (valid.length == 1 && invalid.isEmpty) {
         return await proceedWithLicense(valid.first);
       } else {
         state = state.copyWith(listShown: true);
@@ -260,6 +269,25 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
     final serial = license['tallySerialNumber'] as String?;
     if (serial != null && serial.isNotEmpty) return serial;
     return license['name']?.toString() ?? 'Unnamed license';
+  }
+
+  /// `null` when `validUntil` is missing/unparseable - callers should omit
+  /// the expiry line entirely rather than show a blank one.
+  String? licenseExpiryLabel(Map<String, dynamic> license) {
+    final validUntil = DateTime.tryParse(
+      license['validUntil']?.toString() ?? '',
+    );
+    if (validUntil == null) return null;
+    return 'Valid until ${DateFormat('dd MMM yyyy').format(validUntil)}';
+  }
+
+  /// The reason a license in [CompanySelectState.invalidLicenses] can't be
+  /// used - shown as that tile's subtitle in place of
+  /// [licenseExpiryLabel]'s "Valid until ..." line.
+  String licenseUnavailableReasonLabel(Map<String, dynamic> license) {
+    final reason =
+        _ref.read(authRepositoryProvider).licenseUnavailableReason(license);
+    return reason?.$2 ?? 'This license is not currently active.';
   }
 
   Future<CompanySelectResult> selectCompany(

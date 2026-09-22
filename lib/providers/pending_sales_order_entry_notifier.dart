@@ -109,6 +109,7 @@ class PendingSalesOrderEntryNotifier
     try {
       final match = salesorderentries.firstWhere((e) => e.id == id);
       await VoucherEntryRepository.instance.remove(match.entryId);
+      if (!mounted) return null;
       await fetchSalesOrderEntries();
       return null;
     } on ApiException catch (e) {
@@ -116,6 +117,7 @@ class PendingSalesOrderEntryNotifier
     } catch (e) {
       error = 'Could not reach the server. Please try again.';
     }
+    if (!mounted) return error;
     _commit(() => _isLoading = false);
     return error;
   }
@@ -139,6 +141,7 @@ class PendingSalesOrderEntryNotifier
     final myGen = ++_peRequestGen;
     _commit(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return null;
 
     String? voucherTypeName;
 
@@ -161,6 +164,7 @@ class PendingSalesOrderEntryNotifier
     try {
       final salesOrderVoucherTypes = await VoucherTypeRepository.instance
           .byReservedName('SALES_ORDER');
+      if (!mounted) return null;
       _peAllowedMasterIds = salesOrderVoucherTypes
           .map((v) => v['masterId'])
           .toSet();
@@ -171,6 +175,7 @@ class PendingSalesOrderEntryNotifier
         page: 1,
         limit: _pePageLimit,
       );
+      if (!mounted) return null;
       if (myGen != _peRequestGen) return null; // superseded while awaiting
 
       _peTotalPages = firstPage.totalPages;
@@ -233,6 +238,7 @@ class PendingSalesOrderEntryNotifier
         page: page,
         limit: _pePageLimit,
       );
+      if (!mounted) return;
       if (myGen != _peRequestGen) {
         _commit(() => _isLoadingMore = false);
         return;
@@ -361,6 +367,7 @@ class PendingSalesOrderEntryNotifier
 
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     serial_no = prefs.getString('serial_no');
     _commit(() {});
     await fetchSalesOrderEntries();

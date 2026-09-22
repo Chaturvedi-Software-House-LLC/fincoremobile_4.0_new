@@ -1476,17 +1476,24 @@ class DashboardClickedNotifier extends StateNotifier<DashboardClickedState> {
             const [];
         if (entries.isEmpty) continue;
 
-        final debitTotal = entries
-            .where((e) => e['isDebit'] == true)
-            .fold<double>(0, (sum, e) => sum + parseMoneyField(e['amount']));
+        // `ledger` (shown) and `amount` must be the SAME leg - see the
+        // identical fix in `_mapSalePurcCashRow` above: summing every
+        // debit leg across the whole voucher is unrelated to
+        // entries.first's own ledger/direction and is always >= 0, which
+        // made the downstream Cr/Dr check always resolve to Cr regardless
+        // of the real transaction direction.
+        final firstEntry = entries.first;
+        final firstAmount = parseMoneyField(firstEntry['amount']);
+        final signedAmount =
+            firstEntry['isDebit'] == true ? -firstAmount : firstAmount;
 
         items.add(
           Sale_purc_cash.fromJson({
             'vchname': voucher['voucherTypeName'] ?? '',
             'vchno': voucher['number'] ?? '',
-            'amount': debitTotal,
+            'amount': signedAmount,
             'vchdate': voucher['date'] ?? '',
-            'ledger': entries.first['ledgerName'] ?? '',
+            'ledger': firstEntry['ledgerName'] ?? '',
             'isoptional': voucher['isOptional'] ?? false,
             'ispostdated': voucher['isPostDated'] ?? false,
             'refno': voucher['reference'] ?? '',

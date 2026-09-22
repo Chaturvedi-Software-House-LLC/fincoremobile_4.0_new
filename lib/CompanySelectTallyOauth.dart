@@ -3,11 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'Dashboard.dart';
 import 'Login.dart';
 import 'constants.dart';
 import 'providers/company_select_notifier.dart';
+import 'providers/dashboard_notifier.dart';
 
 /// Company-switch entry points (Dashboard's app-bar company name,
 /// `app_bottom_nav.dart`'s "Companies" quick action). Used to switch between
@@ -119,6 +121,14 @@ class _CompanySelectTallyOauthState
   }
 
   void _goToDashboard() {
+    // Force a fresh DashboardNotifier for the just-selected company. Its
+    // `.autoDispose` provider *should* already be torn down by the time we
+    // get here (Dashboard was fully unmounted via `pushAndRemoveUntil` back
+    // in `navigateToCompanySwitch`, well before this screen's own network
+    // round-trips complete) - but explicitly invalidating removes any doubt
+    // and guarantees `_init()`/`fetchDashData()` re-run against the new
+    // company rather than risking a stale instance surviving the swap.
+    ref.invalidate(dashboardNotifierProvider);
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => Dashboard()),
     );
@@ -375,10 +385,12 @@ class _CompanySelectTallyOauthState
                                 ),
                                 const SizedBox(height: 18),
                               ],
-                              if (_s.validLicenses.length > 1) ...[
+                              if (_s.validLicenses.length + _s.invalidLicenses.length >
+                                  1) ...[
                                 _buildSectionHeader(
                                   title: "Serial Numbers",
-                                  count: _s.validLicenses.length,
+                                  count: _s.validLicenses.length +
+                                      _s.invalidLicenses.length,
                                   icon: Icons.confirmation_number_outlined,
                                 ),
                                 const SizedBox(height: 10),
@@ -708,10 +720,206 @@ class _CompanySelectTallyOauthState
     );
   }
 
+  // Tapping a greyed-out (expired/suspended/inactive) serial number - same
+  // contact channels as Dashboard's `_licenseDialogContactChips` (its own
+  // expiring-soon/expired dialog), reused here so a license that's already
+  // fully expired by the time the user reaches this picker has the same
+  // renewal path, not just the one nagging an active session.
+  void _showLicenseUnavailableSheet(Map<String, dynamic> license) {
+    final serialText = _notifier.licenseLabel(license);
+    final reason = _notifier.licenseUnavailableReasonLabel(license);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Theme.of(sheetContext).scaffoldBackgroundColor,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 18),
+                    decoration: BoxDecoration(
+                      color: Theme.of(sheetContext).dividerColor,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.redAccent.withOpacity(isDark ? 0.16 : 0.1),
+                    ),
+                    child: const Icon(
+                      Icons.lock_clock_rounded,
+                      color: Colors.redAccent,
+                      size: 30,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: Text(
+                    serialText,
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 17),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withOpacity(isDark ? 0.1 : 0.06),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.redAccent.withOpacity(0.25)),
+                  ),
+                  child: Text(
+                    reason,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.redAccent.shade200,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  'Contact support to renew this license',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _contactRow(
+                  sheetContext,
+                  icon: Icons.email_outlined,
+                  label: 'saadan@ca-eim.com',
+                  color: Colors.teal,
+                  onTap: () async {
+                    final emailUri = Uri(
+                      scheme: 'mailto',
+                      path: 'saadan@ca-eim.com',
+                      query:
+                          'subject=License%20Renewal%20Request&body=Dear%20CSH%20LLC%20Support,%0A%0AMy%20license%20($serialText)%20is%20unavailable:%20$reason%20Please%20assist%20with%20renewal.%0A%0ARegards,',
+                    );
+                    if (await canLaunchUrl(emailUri)) await launchUrl(emailUri);
+                  },
+                ),
+                const SizedBox(height: 10),
+                _contactRow(
+                  sheetContext,
+                  icon: Icons.language_rounded,
+                  label: 'cshllc.ae/contact-us',
+                  color: Colors.deepPurple,
+                  onTap: () async {
+                    const url = 'https://cshllc.ae/contact-us/';
+                    if (await canLaunchUrl(Uri.parse(url))) {
+                      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                    }
+                  },
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: Text(
+                      'Close',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _contactRow(
+    BuildContext sheetContext, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(width: 1.3, color: color.withOpacity(0.4)),
+          gradient: LinearGradient(
+            colors: [color.withOpacity(0.05), color.withOpacity(0.1)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
+              child: Icon(icon, size: 18, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.poppins(
+                  fontSize: 13.5,
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, size: 14, color: color.withOpacity(0.7)),
+          ],
+        ),
+      ),
+    );
+  }
+
+
   Widget _buildSerialList() {
+    // Expired/suspended/inactive licenses are still listed (greyed out,
+    // with the reason) rather than silently hidden - valid ones first, so
+    // the usable options aren't pushed down by unusable ones.
+    final allSerials = [..._s.validLicenses, ..._s.invalidLicenses];
     final searchedSerials = _s.serialSearchQuery.isEmpty
-        ? _s.validLicenses
-        : _s.validLicenses.where((item) {
+        ? allSerials
+        : allSerials.where((item) {
             return _notifier
                 .licenseLabel(item)
                 .toLowerCase()
@@ -723,7 +931,7 @@ class _CompanySelectTallyOauthState
 
     return Column(
       children: [
-        if (_s.validLicenses.length > 6)
+        if (allSerials.length > 6)
           _buildSearchField(
             controller: _serialSearchController,
             hintText: 'Search serial numbers...',
@@ -741,8 +949,12 @@ class _CompanySelectTallyOauthState
             ),
           ),
         ...visibleSerials.map((item) {
-          final bool isSelected = item == _s.selectedLicense;
+          final bool isValid = _s.validLicenses.contains(item);
+          final bool isSelected = isValid && item == _s.selectedLicense;
           final serialText = _notifier.licenseLabel(item);
+          final subtitleText = isValid
+              ? _notifier.licenseExpiryLabel(item)
+              : _notifier.licenseUnavailableReasonLabel(item);
           final bool isDark = Theme.of(context).brightness == Brightness.dark;
           final Color unselectedBorder = isDark
               ? Theme.of(context).dividerColor.withOpacity(0.55)
@@ -752,58 +964,113 @@ class _CompanySelectTallyOauthState
           final Color unselectedIconBackground = isDark
               ? Theme.of(context).scaffoldBackgroundColor.withOpacity(0.5)
               : Colors.grey.shade50;
+          final Color disabledBackground =
+              isDark ? Theme.of(context).cardColor.withOpacity(0.18) : Colors.grey.shade100;
 
           return InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: () => _proceedWithLicense(item),
+            onTap: isValid
+                ? () => _proceedWithLicense(item)
+                : () => _showLicenseUnavailableSheet(item),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: isSelected
-                    ? app_color.withOpacity(isDark ? 0.14 : 0.08)
-                    : unselectedBackground,
+                color: !isValid
+                    ? disabledBackground
+                    : isSelected
+                        ? app_color.withOpacity(isDark ? 0.14 : 0.08)
+                        : unselectedBackground,
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
                   color: isSelected ? app_color : unselectedBorder,
                   width: isSelected ? 1.5 : 1,
                 ),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    height: 38,
-                    width: 38,
-                    decoration: BoxDecoration(
-                      color: isSelected ? app_color : unselectedIconBackground,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: isSelected ? app_color : unselectedBorder),
-                    ),
-                    child: Icon(
-                      Icons.qr_code_2_rounded,
-                      size: 20,
-                      color: isSelected
-                          ? Colors.white
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      serialText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: Theme.of(context).colorScheme.onSurface,
+              child: Opacity(
+                opacity: isValid ? 1 : 0.6,
+                child: Row(
+                  children: [
+                    Container(
+                      height: 38,
+                      width: 38,
+                      decoration: BoxDecoration(
+                        color: isSelected ? app_color : unselectedIconBackground,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: isSelected ? app_color : unselectedBorder),
+                      ),
+                      child: Icon(
+                        isValid ? Icons.qr_code_2_rounded : Icons.lock_clock_rounded,
+                        size: 20,
+                        color: isSelected
+                            ? Colors.white
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
-                  ),
-                  if (isSelected)
-                    const Icon(Icons.check_circle_rounded, color: app_color, size: 21),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            serialText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          if (subtitleText != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                subtitleText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w400,
+                                  color: !isValid
+                                      ? Colors.red.shade400
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (isSelected)
+                      const Icon(Icons.check_circle_rounded, color: app_color, size: 21),
+                    if (!isValid)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withOpacity(isDark ? 0.2 : 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Renew',
+                              style: GoogleFonts.poppins(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.redAccent.shade200,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(Icons.chevron_right_rounded,
+                                size: 16, color: Colors.redAccent.shade200),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           );

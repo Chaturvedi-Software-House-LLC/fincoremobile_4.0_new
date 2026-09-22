@@ -25,6 +25,7 @@ import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'widgets/entry_widgets.dart';
 import 'providers/transactions_notifier.dart';
+import 'utils/debouncer.dart';
 
 class transactions {
   final String ledger;
@@ -98,6 +99,7 @@ class _TransactionsPageState extends ConsumerState<Transactions>
   ];
 
   TextEditingController searchController = TextEditingController();
+  final _searchDebouncer = Debouncer();
 
   late GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
 
@@ -738,6 +740,8 @@ class _TransactionsPageState extends ConsumerState<Transactions>
   void dispose() {
     _scrollFabController.removeListener(_onTransactionsScroll);
     _scrollFabController.dispose();
+    searchController.dispose();
+    _searchDebouncer.dispose();
     super.dispose();
   }
 
@@ -1114,10 +1118,11 @@ class _TransactionsPageState extends ConsumerState<Transactions>
                                 height: 46,
                                 child: TextField(
                                   controller: searchController,
-                                  onChanged: (value) => _notifier
-                                      .applyTransactionFilters(
-                                        _currentSearchQuery,
-                                      ),
+                                  onChanged: (value) => _searchDebouncer.run(
+                                    () => _notifier.applyTransactionFilters(
+                                      _currentSearchQuery,
+                                    ),
+                                  ),
                                   style: GoogleFonts.poppins(
                                     color: Theme.of(
                                       context,

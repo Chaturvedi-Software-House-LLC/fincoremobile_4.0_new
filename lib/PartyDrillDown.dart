@@ -15,6 +15,7 @@ import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'providers/party_drill_down_notifier.dart';
+import 'utils/debouncer.dart';
 
 class _PCrumb {
   final IconData icon;
@@ -147,6 +148,7 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
   final ScrollController _scrollFabController = ScrollController();
 
   final TextEditingController searchController = TextEditingController();
+  final _searchDebouncer = Debouncer();
 
   late String startdate_text, enddate_text;
 
@@ -428,6 +430,8 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
   void dispose() {
     _scrollFabController.removeListener(_maybeLoadMore);
     _scrollFabController.dispose();
+    searchController.dispose();
+    _searchDebouncer.dispose();
     super.dispose();
   }
 
@@ -785,13 +789,15 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                             height: 46,
                             child: TextField(
                               controller: searchController,
-                              onChanged: (value) => ref
-                                  .read(
-                                    partyDrillDownNotifierProvider(
-                                      _args,
-                                    ).notifier,
-                                  )
-                                  .filter(value),
+                              onChanged: (value) => _searchDebouncer.run(
+                                () => ref
+                                    .read(
+                                      partyDrillDownNotifierProvider(
+                                        _args,
+                                      ).notifier,
+                                    )
+                                    .filter(value),
+                              ),
                               style: GoogleFonts.poppins(
                                 fontSize: 13.5,
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -1363,29 +1369,33 @@ class _PartyDrillDownState extends ConsumerState<PartyDrillDown> {
                         ),
                       ),
                       if (topRightLabel != null)
-                        Container(
-                          margin: const EdgeInsets.only(left: 8),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.orangeAccent.withOpacity(0.9),
-                                Colors.deepOrangeAccent.withOpacity(0.8),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
+                        Flexible(
+                          child: Container(
+                            margin: const EdgeInsets.only(left: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
                             ),
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          child: Text(
-                            topRightLabel,
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.orangeAccent.withOpacity(0.9),
+                                  Colors.deepOrangeAccent.withOpacity(0.8),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            child: Text(
+                              topRightLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ),

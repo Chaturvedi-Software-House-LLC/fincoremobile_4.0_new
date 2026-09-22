@@ -175,6 +175,7 @@ class PartyClickedSalePurcOrderNotifier
 
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     final company = prefs.getString('company_name') ?? '';
 
     var selectedSortOption = prefs.getString('sort') ?? 'Default';
@@ -230,6 +231,7 @@ class PartyClickedSalePurcOrderNotifier
             from: from,
             to: to,
           );
+      if (!mounted) return;
 
       final items = [
         for (final row in rows)

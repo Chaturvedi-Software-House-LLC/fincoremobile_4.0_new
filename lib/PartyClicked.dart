@@ -28,6 +28,7 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/entry_widgets.dart';
 import 'providers/party_clicked_notifier.dart';
+import 'utils/debouncer.dart';
 
 class Summary {
   final String vchtype, totalInvoice, averageAmount, lastdate, totalAmount;
@@ -132,6 +133,7 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
   PartyClickedState get _s => ref.read(partyClickedNotifierProvider(_args));
 
   TextEditingController searchController = TextEditingController();
+  final _searchDebouncer = Debouncer();
 
   // Used to capture the Trend Overview chart as an image for the Summary
   // PDF export - the chart itself (fl_chart) has no direct PDF renderer,
@@ -1030,6 +1032,13 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
     // Parse the input date string
 
     return formattedDate;
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    _searchDebouncer.dispose();
+    super.dispose();
   }
 
   @override
@@ -2092,9 +2101,8 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
 
                                       child: TextField(
                                         controller: searchController,
-                                        onChanged: (value) {
-                                          _notifier.filterSold(value);
-                                        },
+                                        onChanged: (value) => _searchDebouncer
+                                            .run(() => _notifier.filterSold(value)),
                                         style: GoogleFonts.poppins(
                                           fontSize: 15,
                                           color: Theme.of(
@@ -2297,9 +2305,8 @@ class _PartyClickedPageState extends ConsumerState<PartyClicked>
 
                                         child: TextField(
                                           controller: searchController,
-                                          onChanged: (value) {
-                                            _notifier.filterPurchase(value);
-                                          },
+                                          onChanged: (value) => _searchDebouncer
+                                              .run(() => _notifier.filterPurchase(value)),
                                           style: GoogleFonts.poppins(
                                             fontSize: 15,
                                           ),
@@ -3062,14 +3069,18 @@ class SummaryExpansionCard extends StatelessWidget {
                             ),
                           ],
                         ),
-                        Row(
+                        Flexible(
+                          child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            formatAmountWithCrDrRich(
-                              totalAmount,
-                              GoogleFonts.poppins(
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface,
+                            Flexible(
+                              child: formatAmountWithCrDrRich(
+                                totalAmount,
+                                GoogleFonts.poppins(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 6),
@@ -3092,6 +3103,7 @@ class SummaryExpansionCard extends StatelessWidget {
                               ),
                             ),
                           ],
+                          ),
                         ),
                       ],
                     ),
@@ -4341,25 +4353,29 @@ Widget _buildSoldPurchaseCard({
               ),
 
               // 🧮 Qty badge (fixed size, aligned right)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: (isSale ? Colors.teal : Colors.deepOrange).withOpacity(
-                    0.1,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  "Qty: ${_stripUnitSuffix(qty)}",
-                  style: GoogleFonts.poppins(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: isSale
-                        ? Colors.teal.shade700
-                        : Colors.deepOrange.shade700,
+                  decoration: BoxDecoration(
+                    color: (isSale ? Colors.teal : Colors.deepOrange).withOpacity(
+                      0.1,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    "Qty: ${_stripUnitSuffix(qty)}",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: isSale
+                          ? Colors.teal.shade700
+                          : Colors.deepOrange.shade700,
+                    ),
                   ),
                 ),
               ),

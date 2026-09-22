@@ -108,6 +108,7 @@ class PendingDeliveryNoteEntryNotifier
     String? error;
     try {
       await VoucherEntryRepository.instance.remove(entryId);
+      if (!mounted) return null;
       await fetchDeliveryNoteEntries();
       return null;
     } on ApiException catch (e) {
@@ -115,6 +116,7 @@ class PendingDeliveryNoteEntryNotifier
     } catch (e) {
       error = 'Server Error!!!';
     }
+    if (!mounted) return error;
     _commit(() => _isLoading = false);
     return error;
   }
@@ -146,6 +148,7 @@ class PendingDeliveryNoteEntryNotifier
     String? error;
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return null;
 
       String? voucherTypeName;
 
@@ -166,6 +169,7 @@ class PendingDeliveryNoteEntryNotifier
 
       final deliveryNoteVoucherTypes = await VoucherTypeRepository.instance
           .byReservedName('DELIVERY_NOTE');
+      if (!mounted) return null;
 
       _peDeliveryNoteVoucherTypeMasterIds = deliveryNoteVoucherTypes
           .map<int>((v) => (v['masterId'] as num).toInt())
@@ -176,6 +180,7 @@ class PendingDeliveryNoteEntryNotifier
         page: 1,
         limit: _pePageLimit,
       );
+      if (!mounted) return null;
       if (myGen != _peRequestGen) return null; // superseded while awaiting
 
       _peTotalPages = firstPage.totalPages;
@@ -232,6 +237,7 @@ class PendingDeliveryNoteEntryNotifier
         page: page,
         limit: _pePageLimit,
       );
+      if (!mounted) return;
       if (myGen != _peRequestGen) {
         _commit(() => _isLoadingMore = false);
         return;
@@ -358,6 +364,7 @@ class PendingDeliveryNoteEntryNotifier
 
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     serial_no = prefs.getString('serial_no');
     _commit(() {});
     await fetchDeliveryNoteEntries();

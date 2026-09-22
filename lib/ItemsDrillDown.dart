@@ -15,6 +15,7 @@ import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
 import 'widgets/scroll_fab.dart';
 import 'providers/items_drill_down_notifier.dart';
+import 'utils/debouncer.dart';
 
 class _Crumb {
   final IconData icon;
@@ -148,6 +149,7 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
   final ScrollController _scrollFabController = ScrollController();
 
   final TextEditingController searchController = TextEditingController();
+  final _searchDebouncer = Debouncer();
 
   late String startdate_text, enddate_text;
 
@@ -446,6 +448,8 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
   void dispose() {
     _scrollFabController.removeListener(_maybeLoadMore);
     _scrollFabController.dispose();
+    searchController.dispose();
+    _searchDebouncer.dispose();
     super.dispose();
   }
 
@@ -1108,9 +1112,11 @@ class _ItemsDrillDownState extends ConsumerState<ItemsDrillDown> {
         height: 46,
         child: TextField(
           controller: searchController,
-          onChanged: (value) => ref
-              .read(itemsDrillDownNotifierProvider(_args).notifier)
-              .filter(value),
+          onChanged: (value) => _searchDebouncer.run(
+            () => ref
+                .read(itemsDrillDownNotifierProvider(_args).notifier)
+                .filter(value),
+          ),
           style: GoogleFonts.poppins(
             fontSize: 13.5,
             color: Theme.of(context).colorScheme.onSurface,

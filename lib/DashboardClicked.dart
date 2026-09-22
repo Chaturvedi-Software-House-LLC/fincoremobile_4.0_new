@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'Dashboard.dart';
 import 'CompanySelectTallyOauth.dart';
+import 'utils/debouncer.dart';
 import 'TransactionClicked.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -333,6 +334,7 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
   final ScrollController _scrollFabController = ScrollController();
   TextEditingController _voucherController = TextEditingController();
   TextEditingController searchController = TextEditingController();
+  final _searchDebouncer = Debouncer();
 
   bool _isVisibleduedate = false;
 
@@ -369,6 +371,10 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
     _voucherController.dispose();
     _scrollFabController.dispose();
     _appBarSpinnerController.dispose();
+    _scrollController_salelist.dispose();
+    _scrollController_receivablellist.dispose();
+    searchController.dispose();
+    _searchDebouncer.dispose();
     super.dispose();
   }
 
@@ -2458,25 +2464,31 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                Text(
-                                  openingheading ?? '',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
+                                Flexible(
+                                  child: Text(
+                                    openingheading ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
                                   ),
                                 ),
                                 const Spacer(),
-                                formatAmountRich(
-                                  opening_value!,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface,
+                                Flexible(
+                                  child: formatAmountRich(
+                                    opening_value!,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurface,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -2498,7 +2510,8 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                               height: 46,
                               child: TextField(
                                 controller: searchController,
-                                onChanged: _notifier.onSearchChanged,
+                                onChanged: (value) => _searchDebouncer
+                                    .run(() => _notifier.onSearchChanged(value)),
 
                                 style: GoogleFonts.poppins(
                                   fontSize: 13.5,
@@ -3501,16 +3514,6 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                                   ),
                                 ),
                               ),
-                            const SizedBox(height: 4),
-                            formatAmountRich(
-                              card.amount.toString(),
-                              softWrap: true,
-                              style: GoogleFonts.poppins(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                            ),
                           ],
                         ),
                       ),
@@ -3519,6 +3522,59 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                         size: 20,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: formatAmountRich(
+                          card.amount.toString(),
+                          softWrap: true,
+                          style: GoogleFonts.poppins(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      if (card.vchname.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: app_color.withOpacity(
+                              Theme.of(context).brightness == Brightness.dark
+                                  ? 0.18
+                                  : 0.08,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: app_color.withOpacity(
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? 0.42
+                                    : 0.3,
+                              ),
+                            ),
+                          ),
+                          constraints: const BoxConstraints(maxWidth: 110),
+                          child: Text(
+                            card.vchname,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: app_color.withOpacity(
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? 0.95
+                                    : 0.7,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -3623,51 +3679,19 @@ class _DashboardClickedPageState extends ConsumerState<DashboardClicked>
                       ],
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      if (card.vchname.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: app_color.withOpacity(
-                              Theme.of(context).brightness == Brightness.dark
-                                  ? 0.18
-                                  : 0.08,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: app_color.withOpacity(
-                                Theme.of(context).brightness == Brightness.dark
-                                    ? 0.42
-                                    : 0.3,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            card.vchname,
-                            style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: app_color.withOpacity(
-                                Theme.of(context).brightness == Brightness.dark
-                                    ? 0.95
-                                    : 0.7,
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (card.ispostdated == "1")
-                        _buildTag("Post Dated", Colors.orange),
-                      if (card.isoptional == "1")
-                        _buildTag("Optional", Colors.blue),
-                    ],
-                  ),
+                  if (card.ispostdated == "1" || card.isoptional == "1") ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        if (card.ispostdated == "1")
+                          _buildTag("Post Dated", Colors.orange),
+                        if (card.isoptional == "1")
+                          _buildTag("Optional", Colors.blue),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),

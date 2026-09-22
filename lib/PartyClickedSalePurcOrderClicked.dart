@@ -129,6 +129,7 @@ class _PartyClickedSalePurcOrderClickedPageState
   void dispose() {
     _scrollController.removeListener(_maybeLoadMore);
     _scrollController.dispose();
+    searchController.dispose();
     super.dispose();
   }
 

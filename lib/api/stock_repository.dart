@@ -32,17 +32,21 @@ class StockRepository {
       );
 
   /// The main item list. [stockGroupMasterId] narrows to one specific
-  /// group; omit for every item.
+  /// group server-side (via `/stock-items`' own `stockGroupMasterId` query
+  /// param - the same one [listStockItemsPage] already used) rather than
+  /// fetching the entire company-wide catalog and filtering client-side,
+  /// which pulled every page (and every item) into memory even when only
+  /// one group's items were needed - a real cost for a large company with
+  /// thousands of items across many groups.
   Future<List<Map<String, dynamic>>> listStockItems({
     int? stockGroupMasterId,
-  }) async {
-    final items = await fetchAllPages(
-      (page) => _client.getForCompany('/stock-items?page=$page&limit=100'),
+  }) {
+    final query = stockGroupMasterId != null
+        ? '&stockGroupMasterId=$stockGroupMasterId'
+        : '';
+    return fetchAllPages(
+      (page) => _client.getForCompany('/stock-items?page=$page&limit=100$query'),
     );
-    if (stockGroupMasterId == null) return items;
-    return items
-        .where((i) => i['stockGroupMasterId'] == stockGroupMasterId)
-        .toList();
   }
 
   /// One page of stock items, optionally narrowed to one [stockGroupMasterId]

@@ -19,6 +19,7 @@ import 'widgets/scroll_fab.dart';
 import 'widgets/searchable_selector.dart';
 import 'widgets/entry_widgets.dart';
 import 'providers/items_notifier.dart';
+import 'utils/debouncer.dart';
 
 class items {
   final int masterId;
@@ -192,6 +193,7 @@ class _ItemsPageState extends ConsumerState<Items>
   }
 
   TextEditingController searchController = TextEditingController();
+  final _searchDebouncer = Debouncer();
 
   String allitems = 'All Items';
 
@@ -1256,6 +1258,8 @@ class _ItemsPageState extends ConsumerState<Items>
   void dispose() {
     _scrollFabController.removeListener(_onItemsScroll);
     _scrollFabController.dispose();
+    searchController.dispose();
+    _searchDebouncer.dispose();
     super.dispose();
   }
 
@@ -1580,13 +1584,17 @@ class _ItemsPageState extends ConsumerState<Items>
                               height: 46,
                               child: TextField(
                                 controller: searchController,
-                                onChanged: _s.isClicked_movingsummary
-                                    ? _notifier.onMovingSummarySearchChanged
-                                    : _s.isClicked_stockvaluation
-                                    ? _notifier.onStockValuationSearchChanged
-                                    : _s.isClicked_itemageing
-                                    ? _notifier.onItemAgeingSearchChanged
-                                    : _onSearchChanged,
+                                onChanged: (value) => _searchDebouncer.run(() {
+                                  if (_s.isClicked_movingsummary) {
+                                    _notifier.onMovingSummarySearchChanged(value);
+                                  } else if (_s.isClicked_stockvaluation) {
+                                    _notifier.onStockValuationSearchChanged(value);
+                                  } else if (_s.isClicked_itemageing) {
+                                    _notifier.onItemAgeingSearchChanged(value);
+                                  } else {
+                                    _onSearchChanged(value);
+                                  }
+                                }),
                                 style: GoogleFonts.poppins(
                                   fontSize: 13.5,
                                   color: Theme.of(

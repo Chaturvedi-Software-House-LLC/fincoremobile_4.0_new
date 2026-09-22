@@ -55,6 +55,7 @@ class FastMovingInactiveItemsCriteriaNotifier
 
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     state = FastMovingInactiveItemsCriteriaState(
       fastMovingDays: prefs.getString('fastmovingdays') ?? '180',
       fastMovingQty: prefs.getString('fastmovingqty') ?? '1000',

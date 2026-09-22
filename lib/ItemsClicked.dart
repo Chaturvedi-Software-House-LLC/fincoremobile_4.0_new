@@ -771,12 +771,16 @@ class _ItemsClickedPageState extends ConsumerState<ItemsClicked>
                   ),
 
                   // 🔹 Value
-                  Text(
-                    inventory_closing == 'null' ? '0' : inventory_closing,
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).colorScheme.onSurface,
+                  Flexible(
+                    child: Text(
+                      inventory_closing == 'null' ? '0' : inventory_closing,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
                   ),
                 ],
@@ -1058,14 +1062,16 @@ class _ItemsClickedPageState extends ConsumerState<ItemsClicked>
                 ),
 
                 // 🔹 Amount with arrow
-                currencyAmountText(
-                  currencyCode: vm.currencyCode,
-                  symbol: vm.currencySymbol,
-                  amountText: formatTotal(amount, decimals: vm.decimal),
-                  style: GoogleFonts.poppins(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
+                Flexible(
+                  child: currencyAmountText(
+                    currencyCode: vm.currencyCode,
+                    symbol: vm.currencySymbol,
+                    amountText: formatTotal(amount, decimals: vm.decimal),
+                    style: GoogleFonts.poppins(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                   ),
                 ),
 
