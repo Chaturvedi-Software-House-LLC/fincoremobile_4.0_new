@@ -5889,16 +5889,27 @@ class _DeliverynoteregistrationPageState
     final ledgerName = _selectedledger as String?;
     final ledgerAmount = ledgerAmountController.text;
 
-    if (ledgerName == null || ledgerName.isEmpty) return;
-
-    if (ledgerName.isNotEmpty && ledgerAmount.isNotEmpty) {
-      Navigator.of(context).pop();
-      double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
-      _notifier.addOrMergeLedger(ledgerName, parsedAmount);
-      _syncTotalsControllers();
-      _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
-      ledgerAmountController.clear();
+    // `_ledgerFormkey.currentState!.validate()` at the call site doesn't
+    // actually catch this - `_ledgerController`'s TypeAheadField isn't a
+    // FormField itself, so an unselected ledger (still null, since typing
+    // alone without picking a suggestion never sets `_selectedledger`)
+    // sailed straight through "validation" and landed here as a silent
+    // no-op with zero feedback. Surface it instead of returning quietly.
+    if (ledgerName == null || ledgerName.isEmpty) {
+      showAppMessage(context, 'Please select a ledger');
+      return;
     }
+    if (ledgerAmount.isEmpty) {
+      showAppMessage(context, 'Please enter an amount');
+      return;
+    }
+
+    Navigator.of(context).pop();
+    double parsedAmount = double.parse(ledgerAmount.replaceAll(',', ''));
+    _notifier.addOrMergeLedger(ledgerName, parsedAmount);
+    _syncTotalsControllers();
+    _selectedledger = ledgerdata.isNotEmpty ? ledgerdata[0]['name'] : null;
+    ledgerAmountController.clear();
   }
 
   Future<void> _initWidgetPrefs() async {
