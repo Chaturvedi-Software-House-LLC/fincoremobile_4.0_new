@@ -2128,7 +2128,30 @@ class _VoucherOverviewChartState extends State<VoucherOverviewChart> {
                                 ),
                               ),
                             ),
-                            Flexible(
+                            const SizedBox(width: 8),
+                            // A hard maxWidth cap (not a Flexible/flex
+                            // share) - a flex share reserves that
+                            // proportion of the row's width up front
+                            // regardless of how little the value's own
+                            // text actually needs (the previous bug:
+                            // equal flex:1 on both sides always split
+                            // 50/50, truncating the type name early even
+                            // when the value was short). A plain
+                            // unflexed child avoids that, but is
+                            // unbounded on its own - a Row's non-flex
+                            // children are measured with NO max-width
+                            // constraint, so ellipsis can never actually
+                            // engage and an unusually wide amount (a
+                            // large currency total, or a bigger
+                            // accessibility text scale) would overflow
+                            // the row instead of truncating. Capping the
+                            // max width here keeps ellipsis genuinely
+                            // able to kick in as a backstop, while still
+                            // leaving the type name everything else -
+                            // ellipsis only fires on either side when
+                            // there truly isn't room.
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 96),
                               child: _legendValue(
                                 type,
                                 totalByType[type]!,
