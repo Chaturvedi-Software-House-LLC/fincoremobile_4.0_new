@@ -47,6 +47,27 @@ class _LoginPageState extends ConsumerState<Login>
   // background, no video asset/package needed.
   late final AnimationController _heroGlowController;
 
+  // Measured actual rendered height of _buildAnimatedHero() (its size is
+  // content-driven, not a fixed constant) - used to position the auth
+  // card's Positioned(top: ...) in the compact/phone layout's Stack (see
+  // build()). A Transform.translate approach was tried first but a
+  // SingleChildScrollView clips any paint that lands above its own
+  // content-relative y=0, which silently ate the "rise above the hero"
+  // portion of the translate - a Stack + measured Positioned sidesteps
+  // that entirely, since Positioned's offset is real layout, not a
+  // paint-only shift inside a clipping scroll viewport.
+  final GlobalKey _heroMeasureKey = GlobalKey();
+  double? _heroHeight;
+
+  void _measureHero() {
+    final renderObject = _heroMeasureKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return;
+    final height = renderObject.size.height;
+    if (_heroHeight != height && mounted) {
+      setState(() => _heroHeight = height);
+    }
+  }
+
   late SharedPreferences prefs_login;
 
   String responseMessage = ''; // To store the server response.
@@ -1335,11 +1356,19 @@ class _LoginPageState extends ConsumerState<Login>
                           end: Alignment.bottomRight,
                         ),
                       ),
+                      // top: false - the compact/phone hero below must
+                      // paint full-bleed behind the status bar/notch too
+                      // (its own gradient, not this page-level one, which
+                      // was visibly lighter/mismatched there). Each
+                      // branch below adds the status bar's height back
+                      // as its own top inset/padding instead.
                       child: SafeArea(
+                        top: false,
                         bottom: false,
                         child: LayoutBuilder(
                           builder: (context, constraints) {
                             final isWide = constraints.maxWidth >= 820;
+                            final topInset = MediaQuery.paddingOf(context).top;
 
                             if (isWide) {
                               // Desktop/wide layout: unchanged from
@@ -1348,8 +1377,11 @@ class _LoginPageState extends ConsumerState<Login>
                               // fill-to-bottom behavior (out of scope for
                               // this pass).
                               return SingleChildScrollView(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 34,
+                                padding: EdgeInsets.fromLTRB(
+                                  0,
+                                  34 + topInset,
+                                  0,
+                                  34,
                                 ),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -1378,44 +1410,55 @@ class _LoginPageState extends ConsumerState<Login>
                               );
                             }
 
-                            // Compact/phone layout: hero is fixed at the
-                            // top (not scrolled with the rest), and the
-                            // card below it fills all remaining viewport
-                            // height via ConstrainedBox(minHeight) - not
-                            // Expanded, which would throw here (a
-                            // SingleChildScrollView's child always gets
-                            // unbounded max-height constraints, and
-                            // Expanded/Flexible require a bounded one to
-                            // divide space). minHeight has no such
-                            // restriction: the card's own background
-                            // still stretches to fill it when content is
-                            // shorter, and the ScrollView only actually
-                            // scrolls once content exceeds it (small
-                            // screen).
-                            return Column(
-                              children: [
-                                _buildAnimatedHero(),
-                                Expanded(
-                                  child: LayoutBuilder(
-                                    builder: (context, inner) {
-                                      // + _heroCardOverlap compensates for
-                                      // _buildAuthCard's Transform.
-                                      // translate shifting the card up by
-                                      // that same amount to overlap the
-                                      // hero - without this, the shifted-
-                                      // up card would fall short of the
-                                      // true bottom by exactly that much.
-                                      return SingleChildScrollView(
+                            // Compact/phone layout: hero on top (measured
+                            // via _heroMeasureKey - see _measureHero),
+                            // card Positioned to start _heroCardOverlap
+                            // px before the hero's measured bottom edge
+                            // and fill the rest of the stack. Real Stack
+                            // positioning (not a Transform.translate
+                            // inside a SingleChildScrollView, which
+                            // clips away any paint that lands above the
+                            // scroll view's own y=0 - see _heroHeight's
+                            // doc comment) - so the overlap is always
+                            // actually visible, not silently clipped.
+                            WidgetsBinding.instance.addPostFrameCallback(
+                              (_) => _measureHero(),
+                            );
+                            final heroHeight = _heroHeight;
+                            // SizedBox.expand forces this Stack to take
+                            // the LayoutBuilder's full tight height - a
+                            // bare Stack given loose constraints sizes
+                            // itself to its non-positioned children only
+                            // (the hero, ~315px), NOT the full screen,
+                            // which made every Positioned(bottom: 0)
+                            // below resolve to a near-zero-height box
+                            // (stackHeight - top was only ~40px instead
+                            // of the ~650px actually available) - this
+                            // was the real cause of the blank/collapsed
+                            // auth form, not the overlap math itself.
+                            return SizedBox.expand(
+                              child: Stack(
+                                children: [
+                                  Container(
+                                    key: _heroMeasureKey,
+                                    child: _buildAnimatedHero(topInset: topInset),
+                                  ),
+                                  if (heroHeight != null)
+                                    Positioned(
+                                      top: heroHeight - _heroCardOverlap,
+                                      left: 0,
+                                      right: 0,
+                                      bottom: 0,
+                                      child: SingleChildScrollView(
                                         child: _buildAnimatedAuthForm(
                                           minHeight:
-                                              inner.maxHeight +
-                                              _heroCardOverlap,
+                                              constraints.maxHeight -
+                                              (heroHeight - _heroCardOverlap),
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
+                                      ),
+                                    ),
+                                ],
+                              ),
                             );
                           },
                         ),
@@ -1515,13 +1558,25 @@ class _LoginPageState extends ConsumerState<Login>
   /// replacing the old plain teal AppBar this screen used to have - the
   /// "Help" action moved to a floating button over this hero instead (see
   /// build()'s Stack).
-  Widget _buildAnimatedHero() {
+  Widget _buildAnimatedHero({double topInset = 0}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(36)),
-      child: Container(
+    // Flat/square bottom (no rounding here) - the card's OWN rounded top
+    // corners are what should visibly overlap and peek over this hero
+    // (see _buildAuthCard's Transform.translate), with the hero's flat
+    // teal background showing through in the two corner triangles beside
+    // the card's curve. Rounding the hero's bottom edge too (as before)
+    // made the overlap invisible - the card's rounded corner ended up
+    // fully swallowed by the hero's own matching curve instead of
+    // visibly rising over a flat edge.
+    //
+    // topInset (the status bar/notch height) is added into the top
+    // padding, not consumed via SafeArea, so this Container's own
+    // gradient paints full-bleed behind the status bar too - SafeArea
+    // would otherwise leave that strip showing the page-level
+    // background gradient instead, which is visibly lighter/mismatched.
+    return Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 44),
+        padding: EdgeInsets.fromLTRB(24, 28 + topInset, 24, 84),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -1532,6 +1587,11 @@ class _LoginPageState extends ConsumerState<Login>
           ),
         ),
         child: Stack(
+          // Stack's default alignment is topStart (left), which left-
+          // aligned the logo/headline Column below instead of centering
+          // it - center is required since that Column isn't itself
+          // wrapped in a Positioned/Align.
+          alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: [
             // Two soft blurred glow blobs that slowly drift in a loop -
@@ -1570,9 +1630,9 @@ class _LoginPageState extends ConsumerState<Login>
               children: [
                 const SizedBox(height: 36),
                 Container(
-                  width: 88,
-                  height: 88,
-                  padding: const EdgeInsets.all(14),
+                  width: 108,
+                  height: 108,
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(22),
@@ -1614,7 +1674,6 @@ class _LoginPageState extends ConsumerState<Login>
             ),
           ],
         ),
-      ),
     );
   }
 
@@ -1748,19 +1807,11 @@ class _LoginPageState extends ConsumerState<Login>
     required Widget child,
     double? minHeight,
   }) {
-    // Transform.translate (not a negative Container margin - Container
-    // asserts margin.isNonNegative and throws) shifts the card up by
-    // _heroCardOverlap so it visually rises into the hero above it, like
-    // a bottom sheet peeking over it. Transform only affects paint, not
-    // the layout box, so on its own this would leave a matching gap of
-    // page background at the true bottom - the caller compensates by
-    // passing a `minHeight` that's already _heroCardOverlap taller than
-    // the actual remaining space (see the LayoutBuilder call site), so
-    // the shifted-up card's bottom edge still lands exactly at the
-    // screen's true bottom.
-    return Transform.translate(
-      offset: const Offset(0, -_heroCardOverlap),
-      child: Container(
+    // The compact/phone layout already positions this card to overlap
+    // the hero via a real Stack + Positioned (see build()'s
+    // LayoutBuilder) - no translate needed here, this widget just
+    // renders its own rounded-top-corner box normally.
+    return Container(
         key: key,
         width: double.infinity,
         // Passed straight to Container's own `constraints:` (not just an
@@ -1774,46 +1825,77 @@ class _LoginPageState extends ConsumerState<Login>
         constraints: minHeight != null
             ? BoxConstraints(minHeight: minHeight)
             : null,
-        // Top padding is deliberately more than _heroCardOverlap (56) -
-        // the card's first content (the "Sign In" pill) must clear the
+        // Top padding is deliberately more than _heroCardOverlap - the
+        // card's first content (the "Sign In" pill) must clear the
         // overlapped-into-hero zone and land in the card's own white
         // area, or it'd sit on top of the hero's similarly-colored
         // gradient and become nearly invisible (teal pill on teal hero).
-        padding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
+        padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
-          // Top corners only - reads as a sheet rising from the hero
-          // above it (edge-to-edge on the compact/phone layout) rather
-          // than a bordered card floating on the page.
+          // Top corners only, bigger radius (44) than before (28) - at
+          // this size the curve (and the hero color peeking beside it)
+          // is obvious at a normal glance, not just when zoomed in.
+          // Reads as a sheet rising from the hero above it (edge-to-edge
+          // on the compact/phone layout) rather than a bordered card
+          // floating on the page.
           borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(28),
+            top: Radius.circular(50),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 36,
-              offset: const Offset(0, 20),
+              color: Colors.black.withOpacity(0.12),
+              blurRadius: 30,
+              offset: const Offset(0, -4),
             ),
           ],
         ),
+        // mainAxisSize.max + spaceBetween (not IntrinsicHeight, which
+        // throws "RenderBox was not laid out" when a descendant sits
+        // inside a SingleChildScrollView's child chain - tried first
+        // and reverted) pushes the footer to the card's true bottom
+        // when there's extra space, while still scrolling normally
+        // with the rest of the card's content when there isn't (a
+        // short screen/tall keyboard) - it needs to actually be part
+        // of the same scrollable column, not a Positioned floating on
+        // top of it (that doesn't move with scroll and can end up
+        // overlapping the last form field/button instead - tried and
+        // reverted too). This works without IntrinsicHeight because a
+        // Column with mainAxisSize.max only throws on an unbounded
+        // incoming maxHeight when it has an Expanded/Flexible child
+        // demanding a share of that space - plain fixed-size children
+        // (as here) just size to their natural sum, and spaceBetween
+        // then distributes this Container's own resolved extra height
+        // (from its `constraints: BoxConstraints(minHeight: ...)`
+        // above) between them instead.
         child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          child,
-          const SizedBox(height: 28),
-          // Footer now lives inside the card (per explicit ask) instead
-          // of as a separate page-level element below it - shown for
-          // every form (login/reset/OTP) that goes through this shared
-          // card, not just the login one, so none of them end up
-          // footerless.
-          _buildTallySyncBadge(compact: true),
-        ],
-      ),
-      ),
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Padding (not a bare SizedBox as a 3rd spaceBetween child -
+            // that would split the leftover space into two gaps instead
+            // of one) guarantees at least 32px between the form and the
+            // footer even when spaceBetween's own leftover space is
+            // small (a tall form/short screen).
+            Padding(
+              padding: const EdgeInsets.only(bottom: 32),
+              child: child,
+            ),
+            _buildTallySyncBadge(compact: true),
+          ],
+        ),
     );
   }
 
-  static const double _heroCardOverlap = 56;
+  // Smaller than the card's own top corner radius (50, see _buildAuthCard)
+  // so the corner curve still shows, but big enough that the white sheet
+  // climbing up over the hero's flat bottom edge is obvious at a normal
+  // glance - not just visible when zoomed into the corner pixels. At 0
+  // (no climb at all) the card just sits at its natural position right
+  // below the hero, and its corner cut-out only reveals the page's own
+  // background gradient behind it (not the hero), which is why the
+  // scoop looked mismatched/asymmetric instead of showing hero-teal.
+  static const double _heroCardOverlap = 40;
 
   /// The "Remember Me" switch+label and "Forgot Password?" link sit in a
   /// row when both genuinely fit on one line, and drop to a left-aligned
@@ -1864,33 +1946,39 @@ class _LoginPageState extends ConsumerState<Login>
       );
     }
 
-    final rememberMeRow = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Transform.scale(
-          scale: 0.9,
-          child: Switch(
-            value: _s.rememberMeEnabled,
-            activeColor: app_color,
-            activeTrackColor: app_color.withValues(alpha: 0.4),
-            inactiveThumbColor: const Color(0xFF9E9E9E),
-            inactiveTrackColor: const Color(0xFFD8DCE1),
-            trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            onChanged: _s.isRememberMeAutoLoggingIn
-                ? null
-                : (value) => _onRememberMeChanged(value),
+    final rememberMeRow = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _s.isRememberMeAutoLoggingIn
+          ? null
+          : () => _onRememberMeChanged(!_s.rememberMeEnabled),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Checkbox(
+              value: _s.rememberMeEnabled,
+              activeColor: app_color,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: _s.isRememberMeAutoLoggingIn
+                  ? null
+                  : (value) => _onRememberMeChanged(value ?? false),
+            ),
           ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          'Remember Me',
-          style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
-        ),
-      ],
+          const SizedBox(width: 8),
+          Text(
+            'Remember Me',
+            style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+        ],
+      ),
     );
 
-    const switchWidth = 34.0 * 0.9 + 4;
+    const switchWidth = 22.0 + 8;
     final textScaler = MediaQuery.textScalerOf(context);
     final rememberMeTextWidth =
         (TextPainter(
@@ -1947,7 +2035,7 @@ class _LoginPageState extends ConsumerState<Login>
   Widget _buildFormHeader({
     required IconData icon,
     required String title,
-    required String subtitle,
+    String? subtitle,
   }) {
     return Column(
       children: [
@@ -1970,17 +2058,19 @@ class _LoginPageState extends ConsumerState<Login>
             fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          subtitle,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontSize: 13.5,
-            height: 1.45,
-            fontWeight: FontWeight.w400,
+        if (subtitle != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13.5,
+              height: 1.45,
+              fontWeight: FontWeight.w400,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -1990,35 +2080,43 @@ class _LoginPageState extends ConsumerState<Login>
     required IconData icon,
     Widget? suffixIcon,
   }) {
+    // Flat, borderless filled fields (no visible outline in any state
+    // except a real validation error) - matches the reference design's
+    // plain grey pill-shaped fields rather than a standard bordered
+    // Material text field.
     return InputDecoration(
-      prefixIcon: Icon(icon, color: app_color),
+      prefixIcon: Icon(icon, color: Theme.of(context).colorScheme.onSurfaceVariant),
       suffixIcon: suffixIcon,
-      labelText: label,
-      labelStyle: GoogleFonts.poppins(
+      hintText: label,
+      hintStyle: GoogleFonts.poppins(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
         fontWeight: FontWeight.w500,
-        fontSize: 13.5,
+        fontSize: 14.5,
       ),
       filled: true,
-      fillColor:
-          Theme.of(context).inputDecorationTheme.fillColor ??
-          const Color(0xFFF7F9FB),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
+      fillColor: Theme.of(context).brightness == Brightness.dark
+          ? Theme.of(context).colorScheme.surfaceContainerHigh
+          : const Color(0xFFF1F4F7),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: app_color, width: 1.4),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: app_color, width: 1.6),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0xFFE85C5C)),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE85C5C), width: 1.2),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0xFFE85C5C), width: 1.4),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE85C5C), width: 1.6),
       ),
     );
   }
@@ -2061,33 +2159,19 @@ class _LoginPageState extends ConsumerState<Login>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // No repeated "Welcome"/subtitle header here - the hero above
-            // this card already says "Welcome back." + the same sign-in
-            // subtitle, so a second copy right below it just duplicated
-            // the same two lines of text. The other forms (reset
-            // password, OTP entry) still use _buildFormHeader - their
-            // icon/title/subtitle isn't already shown anywhere else.
-            // A single active-tab-style pill (no Sign Up tab next to it -
-            // this app has no public self-registration) - echoes the
-            // reference design's segmented Sign In/Sign Up control
-            // without implying a tappable Sign Up option that doesn't
-            // exist here.
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-              decoration: BoxDecoration(
-                color: app_color,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                'Sign In',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
+            // Same icon-box + title style as the other forms'
+            // _buildFormHeader (reset password, OTP entry) instead of
+            // the earlier standalone "Sign In" pill/chip, for visual
+            // consistency across all of this card's forms.
+            Align(
+              alignment: Alignment.center,
+              child: _buildFormHeader(
+                icon: Icons.login_rounded,
+                title: 'Sign In',
+                subtitle: 'Enter your credentials to access your account.',
               ),
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 24),
             TextFormField(
               controller: usernameController,
               focusNode: _usernameFocusNode,
