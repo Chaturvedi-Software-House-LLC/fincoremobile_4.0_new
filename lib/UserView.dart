@@ -18,6 +18,7 @@ class UserModel {
   final String id;
   final String roleId;
   final String roleName;
+  final bool roleIsSystem;
   final String name;
   final String email;
 
@@ -25,6 +26,7 @@ class UserModel {
     required this.id,
     required this.roleId,
     required this.roleName,
+    required this.roleIsSystem,
     required this.name,
     required this.email,
   });
@@ -36,6 +38,7 @@ class UserModel {
       id: json['id'] as String,
       roleId: role['id'] as String,
       roleName: role['name'] as String,
+      roleIsSystem: role['isSystem'] == true,
       name: '${user['firstName']} ${user['lastName']}'.trim(),
       email: (user['email'] as String?) ?? (user['userName'] as String),
     );
@@ -621,9 +624,15 @@ class _UserViewPageState extends ConsumerState<UserView>
                                   ),
                                 ),
 
-                                /// Right Column (Edit/Delete)
-                                Center(
-                                  child: Column(
+                                /// Right Column (Edit/Delete) - hidden for
+                                /// the system Admin role, which shouldn't
+                                /// be editable/deletable from this list
+                                /// (there's exactly one per company, and
+                                /// removing/reassigning it here would leave
+                                /// the company without an admin).
+                                if (!card.roleIsSystem)
+                                  Center(
+                                    child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       GestureDetector(
@@ -690,8 +699,8 @@ class _UserViewPageState extends ConsumerState<UserView>
                                         ),
                                       ),
                                     ],
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
