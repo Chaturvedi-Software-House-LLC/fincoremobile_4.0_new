@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,6 +41,11 @@ class _LoginPageState extends ConsumerState<Login>
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   Color _buttonColor = app_color;
   Color _resetbuttonColor = app_color;
+
+  // Drives the hero section's slow-drifting glow (see _buildAnimatedHero) -
+  // a pure-Flutter stand-in for the reference design's looping video
+  // background, no video asset/package needed.
+  late final AnimationController _heroGlowController;
 
   late SharedPreferences prefs_login;
 
@@ -1168,6 +1175,10 @@ class _LoginPageState extends ConsumerState<Login>
   @override
   void initState() {
     super.initState();
+    _heroGlowController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 8),
+    )..repeat();
     _initBiometrics();
     passwordController.addListener(_onPasswordChanged);
     resetemailController.addListener(_onResetEmailChanged);
@@ -1252,6 +1263,7 @@ class _LoginPageState extends ConsumerState<Login>
   @override
   void dispose() {
     _timer?.cancel();
+    _heroGlowController.dispose();
 
     passwordController.removeListener(_onPasswordChanged);
     resetemailController.removeListener(_onResetEmailChanged);
@@ -1303,140 +1315,153 @@ class _LoginPageState extends ConsumerState<Login>
               child: Scaffold(
                 backgroundColor: pageBackground,
                 key: _scaffoldKey,
-                appBar: PreferredSize(
-                  preferredSize: const Size.fromHeight(50),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ColoredBox(
-                        color: Color.alphaBlend(
-                          app_color.withOpacity(0.12),
-                          pageBackground,
+                // Old plain teal AppBar replaced by _buildAnimatedHero's
+                // full-bleed gradient hero (phone layout only - the wide/
+                // desktop layout keeps its side-by-side _buildBrandPanel,
+                // unchanged). The "Help" action that used to live in the
+                // AppBar is now a floating button over the hero/page below.
+                body: Stack(
+                  children: [
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: pageBackground,
+                        gradient: LinearGradient(
+                          colors: [
+                            app_color.withOpacity(0.12),
+                            pageBackground,
+                            gradientEnd,
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
                       ),
-                      AppBar(
-                        backgroundColor: app_color,
-                        elevation: 6,
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(
-                            bottom: Radius.circular(20),
-                          ),
-                        ),
-                        automaticallyImplyLeading: false,
-                        centerTitle: true,
-                        title: const Text(
-                          'Fincore Go',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                        actions: [
-                          IconButton(
-                            icon: const Icon(
-                              Icons.help_outline,
-                              color: Colors.white,
-                            ),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const Help(showBottomNavigation: false),
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                body: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: pageBackground,
-                    gradient: LinearGradient(
-                      colors: [
-                        app_color.withOpacity(0.12),
-                        pageBackground,
-                        gradientEnd,
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: SafeArea(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final isWide = constraints.maxWidth >= 820;
+                      child: SafeArea(
+                        bottom: false,
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isWide = constraints.maxWidth >= 820;
 
-                        // Footer lives outside the scroll area, as a fixed
-                        // sibling below it, rather than as the last item in
-                        // the scrolling Column - a Column driving its own
-                        // height off unbounded scroll-view constraints has
-                        // no reliable way to push a trailing child to the
-                        // bottom (an Expanded/Spacer there throws "incoming
-                        // height constraints are unbounded", and wrapping
-                        // in IntrinsicHeight to fix that instead throws its
-                        // own "Flex with flexible children doesn't support
-                        // returning intrinsic dimensions" - both were tried
-                        // and reverted). This way the footer is always
-                        // pinned to the true bottom of the viewport, and
-                        // only the content above it scrolls if it overflows.
-                        return Column(
-                          children: [
-                            Expanded(
-                              child: SingleChildScrollView(
-                                padding: EdgeInsets.only(
-                                  top: isWide ? 34 : 22,
-                                ),
-                                child: Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: isWide ? 40 : 20,
+                            // Footer lives outside the scroll area, as a
+                            // fixed sibling below it, rather than as the
+                            // last item in the scrolling Column - a Column
+                            // driving its own height off unbounded scroll-
+                            // view constraints has no reliable way to push
+                            // a trailing child to the bottom (an Expanded/
+                            // Spacer there throws "incoming height
+                            // constraints are unbounded", and wrapping in
+                            // IntrinsicHeight to fix that instead throws
+                            // its own "Flex with flexible children doesn't
+                            // support returning intrinsic dimensions" -
+                            // both were tried and reverted). This way the
+                            // footer is always pinned to the true bottom
+                            // of the viewport, and only the content above
+                            // it scrolls if it overflows.
+                            return Column(
+                              children: [
+                                Expanded(
+                                  child: SingleChildScrollView(
+                                    padding: EdgeInsets.only(
+                                      top: isWide ? 34 : 0,
                                     ),
-                                    child: ConstrainedBox(
-                                      constraints: BoxConstraints(
-                                        maxWidth: isWide ? 920 : 460,
-                                      ),
-                                      child: isWide
-                                          ? Row(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.center,
-                                              children: [
-                                                Expanded(
-                                                  child: _buildBrandPanel(),
-                                                ),
-                                                const SizedBox(width: 36),
-                                                SizedBox(
-                                                  width: 430,
-                                                  child:
-                                                      _buildAnimatedAuthForm(),
-                                                ),
-                                              ],
-                                            )
-                                          : Column(
-                                              children: [
-                                                _buildBrandPanel(
-                                                  compact: true,
-                                                ),
-                                                const SizedBox(height: 22),
-                                                _buildAnimatedAuthForm(),
-                                              ],
+                                    child: Column(
+                                      children: [
+                                        // Full-bleed hero, not inside the
+                                        // padded/constrained block below -
+                                        // only the compact/phone layout
+                                        // gets it; the wide layout keeps
+                                        // its existing side-by-side
+                                        // _buildBrandPanel instead.
+                                        if (!isWide) _buildAnimatedHero(),
+                                        Padding(
+                                          padding: EdgeInsets.fromLTRB(
+                                            isWide ? 40 : 20,
+                                            isWide ? 0 : 22,
+                                            isWide ? 40 : 20,
+                                            0,
+                                          ),
+                                          child: Center(
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: isWide ? 920 : 460,
+                                              ),
+                                              child: isWide
+                                                  ? Row(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        Expanded(
+                                                          child:
+                                                              _buildBrandPanel(),
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 36,
+                                                        ),
+                                                        SizedBox(
+                                                          width: 430,
+                                                          child:
+                                                              _buildAnimatedAuthForm(),
+                                                        ),
+                                                      ],
+                                                    )
+                                                  : _buildAnimatedAuthForm(),
                                             ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            // Full device width (not constrained/padded
-                            // like the content above) - only the top
-                            // corners are rounded, so it reads as a
-                            // page-wide footer rather than another card.
-                            _buildTallySyncBadge(compact: !isWide),
-                          ],
-                        );
-                      },
+                                const SizedBox(height: 20),
+                                // Full device width (not constrained/
+                                // padded like the content above) - only
+                                // the top corners are rounded, so it reads
+                                // as a page-wide footer rather than
+                                // another card.
+                                _buildTallySyncBadge(compact: !isWide),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
+                    // Floating "Help" action - replaces the old AppBar's
+                    // help icon now that this screen has no AppBar.
+                    SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: Material(
+                            // A fixed brand-color fill (not a translucent
+                            // white overlay) so this stays legible over
+                            // both the phone layout's hero gradient and
+                            // the wide/desktop layout's plain page
+                            // background.
+                            color: app_color,
+                            elevation: 3,
+                            shape: const CircleBorder(),
+                            child: IconButton(
+                              icon: const Icon(
+                                Icons.help_outline,
+                                color: Colors.white,
+                              ),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const Help(
+                                      showBottomNavigation: false,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1474,6 +1499,125 @@ class _LoginPageState extends ConsumerState<Login>
           : _s.isVisibleResetOtpForm
           ? _buildResetOtpForm(context)
           : _buildOtpForm(context),
+    );
+  }
+
+  /// Full-bleed hero section for the phone-width login layout - a
+  /// looping, drifting soft-glow gradient (pure Flutter, no video/Lottie
+  /// asset) standing in for the reference design's video background,
+  /// behind the FincoreGo logo + headline. Bigger and more dramatic than
+  /// [_buildBrandPanel] (used instead of it for the compact/phone case),
+  /// replacing the old plain teal AppBar this screen used to have - the
+  /// "Help" action moved to a floating button over this hero instead (see
+  /// build()'s Stack).
+  Widget _buildAnimatedHero() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(36)),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 44),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? [const Color(0xFF0B3D36), const Color(0xFF0F5C50)]
+                : [app_color, const Color(0xFF0E8A76)],
+          ),
+        ),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // Two soft blurred glow blobs that slowly drift in a loop -
+            // the "electricity" feel from the reference thunder video,
+            // reduced to something cheap and dependency-free.
+            Positioned.fill(
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+                child: AnimatedBuilder(
+                  animation: _heroGlowController,
+                  builder: (context, _) {
+                    final t = _heroGlowController.value * 2 * math.pi;
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: 40 + 30 * math.sin(t),
+                          top: -30 + 20 * math.cos(t),
+                          child: _glowBlob(180, Colors.white.withOpacity(0.22)),
+                        ),
+                        Positioned(
+                          right: 20 + 25 * math.cos(t),
+                          bottom: -20 + 25 * math.sin(t),
+                          child: _glowBlob(
+                            150,
+                            const Color(0xFFBFFFE0).withOpacity(0.28),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 36),
+                Container(
+                  width: 88,
+                  height: 88,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Image.asset(
+                    'assets/fincorego_logo_transparent.png',
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  'Welcome back.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Sign in to continue to your Fincore Go workspace.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: 13.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _glowBlob(double size, Color color) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
 
@@ -1612,16 +1756,19 @@ class _LoginPageState extends ConsumerState<Login>
   Widget _buildAuthCard({required Key key, required Widget child}) {
     return Container(
       key: key,
-      padding: const EdgeInsets.all(24),
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 22),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Theme.of(context).dividerColor),
-        boxShadow: const [
+        // Bigger, no border - reads as a sheet rising from the hero
+        // above it rather than a bordered card floating on the page.
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x14101828),
-            blurRadius: 30,
-            offset: Offset(0, 18),
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 36,
+            offset: const Offset(0, 20),
           ),
         ],
       ),
