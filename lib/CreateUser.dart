@@ -471,14 +471,24 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
     ),
   );
 
+  /// Backend's PasswordSchema requires at least one special character (see
+  /// tally-admin-api's password.schema.ts) - the old alnum-only charset here
+  /// could never satisfy that, so every email-login user creation (which
+  /// auto-generates its password via this method) failed validation.
+  /// Guarantees one special character by construction rather than leaving
+  /// it to chance, then fills the rest from the full charset and shuffles
+  /// so the special character isn't always in the same position.
   String _generateRandomPassword({int length = 8}) {
-    const chars =
+    const alnum =
         'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const special = '!@#\$%^&*()-_=+';
+    const chars = alnum + special;
     final rand = Random.secure();
-    return List.generate(
-      length,
-      (index) => chars[rand.nextInt(chars.length)],
-    ).join();
+    final result = [
+      special[rand.nextInt(special.length)],
+      ...List.generate(length - 1, (index) => chars[rand.nextInt(chars.length)]),
+    ]..shuffle(rand);
+    return result.join();
   }
 
   Widget _modernTextField({
