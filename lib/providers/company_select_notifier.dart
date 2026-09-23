@@ -375,18 +375,28 @@ class CompanySelectNotifier extends StateNotifier<CompanySelectState> {
       // Fail-closed (hidden) if the lookup fails for any reason, same
       // policy as the permission flags above.
       var isAdmin = false;
+      // Shown on the profile bottom sheet (app_bottom_nav.dart's
+      // `_quickProfileCard`) so it's clear which role is active for
+      // *this* company - the same account can hold a different role
+      // (or none) per company, which is exactly what was confusing
+      // about the Roles/Users tiles only showing up for some companies.
+      var roleName = '';
       final companyUserId = await repo.currentCompanyUserId();
       if (companyUserId != null) {
         try {
           final user = await _ref
               .read(identityRepositoryProvider)
               .getCompanyUser(companyUserId);
-          isAdmin = (user['role'] as Map<String, dynamic>?)?['isSystem'] == true;
+          final role = user['role'] as Map<String, dynamic>?;
+          isAdmin = role?['isSystem'] == true;
+          roleName = role?['name']?.toString() ?? '';
         } catch (_) {
           isAdmin = false;
+          roleName = '';
         }
       }
       await prefs.setString('secbtnaccess', isAdmin ? 'True' : 'False');
+      await prefs.setString('role_name', roleName);
 
       return const CompanySelectResult(true);
     } on ApiException catch (e) {

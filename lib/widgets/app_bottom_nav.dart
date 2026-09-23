@@ -95,6 +95,11 @@ class _AppBottomNavState extends State<AppBottomNav> {
   String assignedGodown = '';
   String nameNav = '';
   String emailNav = '';
+  // Set by company_select_notifier.dart on every company switch - the
+  // active company-user's role name for *this* company (a role is
+  // per-company, so the same account can show a different one, or
+  // none, elsewhere).
+  String roleName = '';
 
   String? deviceIdentifier = '';
 
@@ -150,6 +155,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
 
     final vanAllocation = prefs.getString("vanallocation") ?? "False";
     final secBtnAccess = prefs.getString('secbtnaccess') ?? 'False';
+    final roleNamePref = prefs.getString('role_name') ?? '';
 
     String godown = '';
     final allocationString = prefs.getString('spectra_allocations');
@@ -180,6 +186,7 @@ class _AppBottomNavState extends State<AppBottomNav> {
 
       nameNav = prefs.getString('name') ?? usernamePrefs;
       emailNav = usernamePrefs;
+      roleName = roleNamePref;
 
       assignedGodown = godown;
 
@@ -586,6 +593,11 @@ class _AppBottomNavState extends State<AppBottomNav> {
               onTap: () => navigateToCompanySwitch(context),
               trailingIcon: Icons.swap_horiz_rounded,
             ),
+            // Empty when the role lookup failed or this company-user has
+            // no role assigned for the active company - _profileChip
+            // already hides itself for blank text, so nothing shows
+            // rather than a bare/misleading chip.
+            _profileChip(Icons.badge_outlined, roleName),
             if (vanSalesSerialNo.contains(serialNo.trim()) &&
                 assignedGodown.isNotEmpty)
               _profileChip(Icons.local_shipping_outlined, assignedGodown),
