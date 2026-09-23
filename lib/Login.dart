@@ -414,6 +414,21 @@ class _LoginPageState extends ConsumerState<Login>
     );
   }
 
+  /// Called right after the login form's own `save()` (which is what
+  /// actually populates `usernamee`/`passwordd` from the fields - they
+  /// start blank and aren't set by [_onRememberMeChanged] itself, since
+  /// toggling the switch typically happens before typing anything).
+  /// Without this, "Remember Me" being on did nothing in the normal
+  /// flow: the switch's own handler only ever saved credentials that
+  /// happened to already be in hand at toggle time, which is never the
+  /// case for a fresh login.
+  Future<void> _persistRememberMeCredentialsIfEnabled() async {
+    if (!_s.rememberMeEnabled) return;
+    if (usernamee.isEmpty || usernamee == 'null' || passwordd.isEmpty) return;
+    await prefs_login.setString('remember_me_username', usernamee);
+    await prefs_login.setString('remember_me_password', passwordd);
+  }
+
   Future<void> _onRememberMeChanged(bool value) async {
     _login_.update((s) => s.copyWith(rememberMeEnabled: value));
 
@@ -2231,6 +2246,7 @@ class _LoginPageState extends ConsumerState<Login>
                             if (_formKey.currentState != null &&
                                 _formKey.currentState!.validate()) {
                               _formKey.currentState!.save();
+                              _persistRememberMeCredentialsIfEnabled();
                               _login();
                             }
                           },
