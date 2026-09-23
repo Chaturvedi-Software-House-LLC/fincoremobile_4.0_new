@@ -133,8 +133,13 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
   /// requires them as two independent fields
   /// (FirstNameSchema/LastNameSchema), just with lastName's minimum length
   /// dropped to 0 to allow that.
-  Future<({bool success, String? emailToNotify, String? password})>
-      userRegistration({
+  Future<
+      ({
+        bool success,
+        String? emailToNotify,
+        String? password,
+        bool isNewUser,
+      })> userRegistration({
     required String userNameOrEmail,
     required String password,
     required String roleId,
@@ -145,7 +150,8 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
     state = state.copyWith(isLoading: true);
 
     try {
-      await _ref.read(identityRepositoryProvider).createCompanyUser(
+      final result =
+          await _ref.read(identityRepositoryProvider).createCompanyUser(
         userName: userNameOrEmail,
         firstName: firstName,
         lastName: lastName,
@@ -153,6 +159,13 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
         roleId: roleId,
         email: isEmailLogin ? userNameOrEmail : null,
       );
+      // `isNewUser` is false when this email/username already had a User
+      // account elsewhere (tally-oauth's create() reuses it rather than
+      // provisioning a new one) - the password just submitted was silently
+      // ignored in that case, so the widget must not tell the caller "here
+      // is your new password" for an account whose real password didn't
+      // change (see company-user.service.ts's create()).
+      final isNewUser = result['isNewUser'] == true;
 
       state = state.copyWith(
         isLoading: false,
@@ -160,18 +173,29 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
       );
       return (
         success: true,
-        emailToNotify: isEmailLogin ? userNameOrEmail : null,
-        password: password,
+        emailToNotify: (isEmailLogin && isNewUser) ? userNameOrEmail : null,
+        password: isNewUser ? password : null,
+        isNewUser: isNewUser,
       );
     } on ApiException catch (e) {
       state = state.copyWith(isLoading: false, errorMessage: e.message);
-      return (success: false, emailToNotify: null, password: null);
+      return (
+        success: false,
+        emailToNotify: null,
+        password: null,
+        isNewUser: false,
+      );
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Could not reach the server. Please try again.',
       );
-      return (success: false, emailToNotify: null, password: null);
+      return (
+        success: false,
+        emailToNotify: null,
+        password: null,
+        isNewUser: false,
+      );
     }
   }
 }
