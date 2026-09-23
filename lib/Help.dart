@@ -483,8 +483,23 @@ class _HelpPageState extends ConsumerState<Help> with TickerProviderStateMixin {
                   ),
                 ),
 
-                const SizedBox(height: 14),
-                _buildLiveChatCard(),
+                // Live Chat opens AssistantChat, which is scoped to the
+                // active company (tally-api's
+                // `/tally-data/companies/:companyId/assistant/*`) - with
+                // no session/company yet (this screen's only pre-login
+                // entry point is Login.dart's floating Help button,
+                // which passes showBottomNavigation: false; every other
+                // call site is post-login and defaults it to true - see
+                // the constructor), there's nothing for it to talk to,
+                // and it used to show a confusing "isn't available for
+                // your account yet" message instead. Hidden entirely
+                // here rather than fixing that message, since it's not
+                // just unavailable "yet" - it's not usable at all before
+                // signing in.
+                if (widget.showBottomNavigation) ...[
+                  const SizedBox(height: 14),
+                  _buildLiveChatCard(),
+                ],
 
                 const SizedBox(height: 14),
                 // Contact Info Card
