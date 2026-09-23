@@ -633,15 +633,6 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
     }
     // USERNAME USER
     else {
-      if (username.length < 8) {
-        showAppMessage(context, "Username must be at least 8 characters");
-        return;
-      }
-      if (username.length > 100) {
-        showAppMessage(context, "Username must be 100 characters or fewer");
-        return;
-      }
-
       finalPassword = controller_password.text.trim();
 
       if (finalPassword.isEmpty) {
