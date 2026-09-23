@@ -1774,7 +1774,12 @@ class _LoginPageState extends ConsumerState<Login>
         constraints: minHeight != null
             ? BoxConstraints(minHeight: minHeight)
             : null,
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+        // Top padding is deliberately more than _heroCardOverlap (56) -
+        // the card's first content (the "Sign In" pill) must clear the
+        // overlapped-into-hero zone and land in the card's own white
+        // area, or it'd sit on top of the hero's similarly-colored
+        // gradient and become nearly invisible (teal pill on teal hero).
+        padding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           // Top corners only - reads as a sheet rising from the hero
