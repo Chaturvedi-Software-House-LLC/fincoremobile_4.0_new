@@ -4,13 +4,10 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:mailer/mailer.dart';
-import 'package:mailer/smtp_server.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/assistant_repository.dart';
 import 'api/token_store.dart';
-import 'utils/email_template.dart';
 
 // Matches the brand gradient used elsewhere in the app (see the "Live Chat"
 // card in Help.dart).
@@ -544,36 +541,22 @@ class _AssistantChatState extends State<AssistantChat> {
     );
   }
 
+  /// Sent server-side now (see tally-api's `AssistantController.
+  /// sendSupportRequest`) - this used to build and send the email
+  /// directly from the app with the SMTP password hardcoded into the
+  /// shipped client.
   Future<void> _sendSupportEmail({
     required String name,
     required String email,
     required String phone,
     required String details,
   }) async {
-    final smtpServer = SmtpServer(
-      'smtp.hostinger.com',
-      username: 'noreply@fincoreerp.com',
-      password: '^QLNlsU8m',
-      port: 465,
-      ssl: true,
+    await AssistantRepository.instance.sendSupportRequest(
+      name: name,
+      email: email,
+      phone: phone,
+      details: details,
     );
-
-    final message = Message()
-      ..from = Address('noreply@fincoreerp.com', 'Fincore Go Support')
-      ..recipients.add('saadan@ca-eim.com')
-      ..subject = 'Fincore Go Assistant - Support Request'
-      ..html = buildBrandedEmailHtml('''
-          <div style="text-align: start; font-size: 14px; font-family: Arial, sans-serif; color: #333;">
-            <p><b>Name:</b> $name</p>
-            <p><b>Email:</b> $email</p>
-            <p><b>Contact Number:</b> ${phone.trim().isEmpty ? 'Not provided' : phone}</p>
-            <p><b>Message:</b></p>
-            <p>${details.replaceAll('\n', '<br>')}</p>
-            <p style="color:#888;font-size:12px;">Sent from the Fincore Go in-app AI assistant.</p>
-          </div>
-          ''');
-
-    await send(message, smtpServer);
   }
 
   // -----------------------------------------------------------------------

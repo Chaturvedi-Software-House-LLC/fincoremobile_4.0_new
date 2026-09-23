@@ -122,9 +122,11 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
   /// concept: a company-user is always scoped to exactly one company (the
   /// one that's currently active), so that step is gone entirely.
   ///
-  /// Returns the (name, password, email-or-null) needed for the credentials
-  /// email on success, so the widget can send it - notifiers shouldn't own
-  /// SMTP/UI side effects.
+  /// The credentials email (for a genuinely new, email-login account) is
+  /// now sent server-side by company-user.service.ts's create() - it used
+  /// to be sent client-side from this widget with the SMTP password
+  /// hardcoded into the shipped app, which is why this used to also
+  /// return the email/password for the widget to send itself.
   ///
   /// [firstName]/[lastName] arrive already split from the widget's single
   /// "Full Name" field (see CreateUser.dart's `_splitFullName` - first word
@@ -133,13 +135,7 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
   /// requires them as two independent fields
   /// (FirstNameSchema/LastNameSchema), just with lastName's minimum length
   /// dropped to 0 to allow that.
-  Future<
-      ({
-        bool success,
-        String? emailToNotify,
-        String? password,
-        bool isNewUser,
-      })> userRegistration({
+  Future<({bool success, bool isNewUser})> userRegistration({
     required String userNameOrEmail,
     required String password,
     required String roleId,
@@ -171,31 +167,16 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
         isLoading: false,
         successMessage: 'User created successfully',
       );
-      return (
-        success: true,
-        emailToNotify: (isEmailLogin && isNewUser) ? userNameOrEmail : null,
-        password: isNewUser ? password : null,
-        isNewUser: isNewUser,
-      );
+      return (success: true, isNewUser: isNewUser);
     } on ApiException catch (e) {
       state = state.copyWith(isLoading: false, errorMessage: e.message);
-      return (
-        success: false,
-        emailToNotify: null,
-        password: null,
-        isNewUser: false,
-      );
+      return (success: false, isNewUser: false);
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Could not reach the server. Please try again.',
       );
-      return (
-        success: false,
-        emailToNotify: null,
-        password: null,
-        isNewUser: false,
-      );
+      return (success: false, isNewUser: false);
     }
   }
 }

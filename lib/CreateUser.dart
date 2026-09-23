@@ -3,15 +3,12 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:mailer/mailer.dart';
-import 'package:mailer/smtp_server.dart';
 import 'UserView.dart';
 import 'constants.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'widgets/entry_widgets.dart';
 import 'widgets/searchable_selector.dart';
 import 'providers/create_user_notifier.dart';
-import 'utils/email_template.dart';
 
 class CreateUser extends ConsumerStatefulWidget {
   const CreateUser({Key? key}) : super(key: key);
@@ -47,84 +44,6 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
     return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim());
   }
 
-  void sendUserCredentialsEmailSMTP({
-    required String email,
-    required String name,
-    required String password,
-  }) async {
-    final smtpServer = SmtpServer(
-      'smtp.hostinger.com',
-      username: 'noreply@fincoreerp.com',
-      password: '^QLNlsU8m',
-      port: 465,
-      ssl: true,
-    );
-
-    final message = Message()
-      ..from = Address('noreply@fincoreerp.com', 'Fincore Go Support')
-      ..recipients.add(email)
-      ..subject = 'Your Login Credentials for Fincore Go'
-      ..html = buildBrandedEmailHtml('''
-  <p style="font-size: 14px; font-family: Arial, sans-serif; color: #333;">
-    Hi <strong>$name</strong>,<br><br>
-    Welcome to <strong>Fincore Go!</strong><br>
-    Your account has been successfully created. Below are your login credentials:
-  </p>
-
-  <div style="background-color: #f5f5f5; color: #333; font-size: 14px; font-family: Arial, sans-serif; padding: 10px 20px; border-radius: 5px; display: inline-block; text-align: left;">
-    <strong>Email:</strong> $email<br>
-    <strong>Password:</strong> $password
-  </div>
-
-  <p style="font-size: 12px; font-family: Arial, sans-serif; color: #333; margin-top: 15px;">
-    You can change your password anytime from the "Reset Password" option in the app.
-  </p>
-
-  <hr style="border: none; border-top: 1px solid #ddd; margin: 25px 0;">
-
-  <div style="text-align: center;">
-    <h3 style="font-family: Arial, sans-serif; color: #333; margin-bottom: 10px;">
-      Get the Fincore Go Mobile App
-    </h3>
-
-    <div style="display: inline-block;">
-      <a href="https://play.google.com/store/apps/details?id=com.csh.fincoremobile" target="_blank" style="margin-right: 0px;">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg"
-               alt="Get it on Google Play"
-               style="width: 150px; height: auto;">
-      </a>
-
-      <a href="https://apps.apple.com/ae/app/fincore-mobile/id6451186057" target="_blank">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg"
-             alt="Download on the App Store"
-             style="width: 150px; height: auto;">
-      </a>
-    </div>
-  </div>
-
-  <div style="text-align: center; margin-top: 30px;">
-    <h3 style="font-family: Arial, sans-serif; color: #333; margin-bottom: 10px;">
-      Get the Fincore Go Desktop App
-    </h3>
-
-    <a href="https://mobile.chaturvedigroup.com/download/" target="_blank">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/6/68/Windows_logo_and_wordmark_-_2012–2015.svg"
-           alt="Download Fincore Go Desktop for Windows"
-           style="width: 150px; height: auto;">
-    </a>
-  </div>
-
-  <hr style="border: none; border-top: 1px solid #ddd; margin: 25px 0;">
-''');
-
-    try {
-      await send(message, smtpServer); // ✅ DO NOT assign it to a variable
-      debugPrint('Credential email sent to $email');
-    } catch (e) {
-      showAppMessage(context, 'Failed to send email: $e');
-    }
-  }
-
   /// Creates (or reuses, per company-user.service.ts's create()) a `User`
   /// and links it to the current company-user session's company - unlike
   /// the legacy backend, there is no "allowed companies" multi-select
@@ -148,15 +67,9 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
     );
 
     if (result.success) {
-      final fullName = '$firstName $lastName'.trim();
-      if (result.emailToNotify != null) {
-        sendUserCredentialsEmailSMTP(
-          email: result.emailToNotify!,
-          name: fullName,
-          password: result.password!,
-        );
-      }
-
+      // Credentials email (for a genuinely new, email-login account) is
+      // now sent server-side by company-user.service.ts's create() - see
+      // create_user_notifier.dart's doc comment.
       controller_username.clear();
       controller_fullname.clear();
       controller_password.clear();

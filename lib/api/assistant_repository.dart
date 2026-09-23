@@ -59,4 +59,25 @@ class AssistantRepository {
     );
     return AssistantAnswer.fromJson(result.data as Map<String, dynamic>);
   }
+
+  /// Used to be sent client-side (SMTP credentials hardcoded into the
+  /// shipped app) via AssistantChat.dart's own `_sendSupportEmail` -
+  /// moved server-side (see tally-api's `AssistantController.
+  /// sendSupportRequest`) for exactly that reason.
+  Future<void> sendSupportRequest({
+    required String name,
+    String? email,
+    String? phone,
+    required String details,
+  }) async {
+    await _client.postForCompany(
+      '/assistant/support',
+      body: {
+        'name': name,
+        if (email != null && email.isNotEmpty) 'email': email,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        'details': details,
+      },
+    );
+  }
 }
