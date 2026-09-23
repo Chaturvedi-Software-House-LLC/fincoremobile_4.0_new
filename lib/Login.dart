@@ -2070,50 +2070,56 @@ class _LoginPageState extends ConsumerState<Login>
                 'Enter the 6-digit code sent to ${resetemailController.text}, then choose a new password.',
           ),
           const SizedBox(height: 26),
-          PinCodeTextField(
-            appContext: context,
-            controller: resetOtpController,
-            length: 6,
-            keyboardType: TextInputType.number,
-            enabled: !_s.isVerifyingResetOtp,
-            animationType: AnimationType.fade,
-            onChanged: (value) {
-              // Editing after a confirmed/failed attempt un-confirms so the
-              // password fields hide again until re-verified.
-              if (value.length < 6 && _s.isResetOtpConfirmed) {
-                _login_.update((s) => s.copyWith(isResetOtpConfirmed: false));
-              }
-            },
-            onCompleted: _verifyResetOtp,
-            mainAxisAlignment: MainAxisAlignment.center,
-            separatorBuilder: otpPinSeparator,
-            pinTheme: PinTheme(
-              shape: PinCodeFieldShape.box,
-              borderRadius: BorderRadius.circular(12),
-              fieldHeight: 46,
-              fieldWidth: 46,
-              activeFillColor: app_color.withOpacity(0.1),
-              inactiveFillColor: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF1F2937)
-                  : const Color(0xFFF7F9FB),
-              selectedFillColor: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF1F2937)
-                  : Colors.white,
-              activeColor: app_color,
-              inactiveColor: Theme.of(context).dividerColor,
-              selectedColor: app_color,
-              borderWidth: 1.2,
+          LayoutBuilder(
+            builder: (context, constraints) => PinCodeTextField(
+              appContext: context,
+              controller: resetOtpController,
+              length: 6,
+              keyboardType: TextInputType.number,
+              enabled: !_s.isVerifyingResetOtp,
+              animationType: AnimationType.fade,
+              onChanged: (value) {
+                // Editing after a confirmed/failed attempt un-confirms so
+                // the password fields hide again until re-verified.
+                if (value.length < 6 && _s.isResetOtpConfirmed) {
+                  _login_.update(
+                    (s) => s.copyWith(isResetOtpConfirmed: false),
+                  );
+                }
+              },
+              onCompleted: _verifyResetOtp,
+              mainAxisAlignment: MainAxisAlignment.center,
+              separatorBuilder: otpPinSeparator,
+              pinTheme: PinTheme(
+                shape: PinCodeFieldShape.box,
+                borderRadius: BorderRadius.circular(12),
+                fieldHeight: 46,
+                fieldWidth: otpFieldWidth(constraints.maxWidth),
+                activeFillColor: app_color.withOpacity(0.1),
+                inactiveFillColor:
+                    Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1F2937)
+                    : const Color(0xFFF7F9FB),
+                selectedFillColor:
+                    Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1F2937)
+                    : Colors.white,
+                activeColor: app_color,
+                inactiveColor: Theme.of(context).dividerColor,
+                selectedColor: app_color,
+                borderWidth: 1.2,
+              ),
+              enableActiveFill: true,
+              // resetOtpController is a class-level field this State owns
+              // and disposes itself (see dispose()) - pin_code_fields
+              // defaults to disposing the controller it's given the moment
+              // this widget unmounts (e.g. "Back to login"/successful
+              // reset switch away from this form), which would leave the
+              // shared controller unusable on a later reset attempt and
+              // double-dispose it in dispose(). Must stay false wherever a
+              // controller outlives one PinCodeTextField instance.
+              autoDisposeControllers: false,
             ),
-            enableActiveFill: true,
-            // resetOtpController is a class-level field this State owns
-            // and disposes itself (see dispose()) - pin_code_fields
-            // defaults to disposing the controller it's given the moment
-            // this widget unmounts (e.g. "Back to login"/successful
-            // reset switch away from this form), which would leave the
-            // shared controller unusable on a later reset attempt and
-            // double-dispose it in dispose(). Must stay false wherever a
-            // controller outlives one PinCodeTextField instance.
-            autoDisposeControllers: false,
           ),
           AnimatedSize(
             duration: const Duration(milliseconds: 250),
@@ -2279,51 +2285,54 @@ class _LoginPageState extends ConsumerState<Login>
               ),
             ),
             const SizedBox(height: 26),
-            PinCodeTextField(
-              appContext: context,
-              controller: otpController,
-              // Matches the backend's OtpProvider.generate() default (6
-              // digits, every OTP flow) - was 4 from the old client-side
-              // fake OTP, which physically blocked entering a real code.
-              length: 6,
-              enabled: !_s.isOtpVerifyingProgress,
-              animationType: AnimationType.fade,
-              onChanged: (value) {
-                currentText = value;
-              },
-              onCompleted: (value) {
-                currentText = value;
-                _verifyOtpAndProceed(value);
-              },
-              mainAxisAlignment: MainAxisAlignment.center,
-              separatorBuilder: otpPinSeparator,
-              pinTheme: PinTheme(
-                shape: PinCodeFieldShape.box,
-                borderRadius: BorderRadius.circular(12),
-                fieldHeight: 46,
-                fieldWidth: 46,
-                activeFillColor: app_color.withOpacity(0.1),
-                inactiveFillColor:
-                    Theme.of(context).brightness == Brightness.dark
-                    ? const Color(0xFF1F2937)
-                    : const Color(0xFFF7F9FB),
-                selectedFillColor:
-                    Theme.of(context).brightness == Brightness.dark
-                    ? const Color(0xFF1F2937)
-                    : Colors.white,
-                activeColor: app_color,
-                inactiveColor: Theme.of(context).dividerColor,
-                selectedColor: app_color,
-                borderWidth: 1.2,
+            LayoutBuilder(
+              builder: (context, constraints) => PinCodeTextField(
+                appContext: context,
+                controller: otpController,
+                // Matches the backend's OtpProvider.generate() default (6
+                // digits, every OTP flow) - was 4 from the old client-side
+                // fake OTP, which physically blocked entering a real code.
+                length: 6,
+                enabled: !_s.isOtpVerifyingProgress,
+                animationType: AnimationType.fade,
+                onChanged: (value) {
+                  currentText = value;
+                },
+                onCompleted: (value) {
+                  currentText = value;
+                  _verifyOtpAndProceed(value);
+                },
+                mainAxisAlignment: MainAxisAlignment.center,
+                separatorBuilder: otpPinSeparator,
+                pinTheme: PinTheme(
+                  shape: PinCodeFieldShape.box,
+                  borderRadius: BorderRadius.circular(12),
+                  fieldHeight: 46,
+                  fieldWidth: otpFieldWidth(constraints.maxWidth),
+                  activeFillColor: app_color.withOpacity(0.1),
+                  inactiveFillColor:
+                      Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1F2937)
+                      : const Color(0xFFF7F9FB),
+                  selectedFillColor:
+                      Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1F2937)
+                      : Colors.white,
+                  activeColor: app_color,
+                  inactiveColor: Theme.of(context).dividerColor,
+                  selectedColor: app_color,
+                  borderWidth: 1.2,
+                ),
+                animationDuration: const Duration(milliseconds: 200),
+                enableActiveFill: true,
+                // Same reason as resetOtpController's PinCodeTextField
+                // above - otpController is a shared class-level field this
+                // State disposes itself, not owned by a single field
+                // instance.
+                autoDisposeControllers: false,
+                keyboardType: TextInputType.number,
+                obscureText: false,
               ),
-              animationDuration: const Duration(milliseconds: 200),
-              enableActiveFill: true,
-              // Same reason as resetOtpController's PinCodeTextField above
-              // - otpController is a shared class-level field this State
-              // disposes itself, not owned by a single field instance.
-              autoDisposeControllers: false,
-              keyboardType: TextInputType.number,
-              obscureText: false,
             ),
             const SizedBox(height: 22),
             AnimatedSwitcher(

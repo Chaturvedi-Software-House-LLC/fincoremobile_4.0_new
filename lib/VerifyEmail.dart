@@ -126,42 +126,44 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
                   ),
                 ),
                 const SizedBox(height: 28),
-                PinCodeTextField(
-                  appContext: context,
-                  controller: _otpController,
-                  length: 6,
-                  enabled: _codeSent && !state.isVerifying,
-                  animationType: AnimationType.fade,
-                  onChanged: (_) {},
-                  onCompleted: _verify,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  separatorBuilder: otpPinSeparator,
-                  pinTheme: PinTheme(
-                    shape: PinCodeFieldShape.box,
-                    borderRadius: BorderRadius.circular(12),
-                    fieldHeight: 46,
-                    fieldWidth: 46,
-                    activeFillColor: app_color.withOpacity(0.1),
-                    inactiveFillColor:
-                        Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF1F2937)
-                        : const Color(0xFFF7F9FB),
-                    selectedFillColor:
-                        Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF1F2937)
-                        : Colors.white,
-                    activeColor: app_color,
-                    inactiveColor: Theme.of(context).dividerColor,
-                    selectedColor: app_color,
-                    borderWidth: 1.2,
+                LayoutBuilder(
+                  builder: (context, constraints) => PinCodeTextField(
+                    appContext: context,
+                    controller: _otpController,
+                    length: 6,
+                    enabled: _codeSent && !state.isVerifying,
+                    animationType: AnimationType.fade,
+                    onChanged: (_) {},
+                    onCompleted: _verify,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    separatorBuilder: otpPinSeparator,
+                    pinTheme: PinTheme(
+                      shape: PinCodeFieldShape.box,
+                      borderRadius: BorderRadius.circular(12),
+                      fieldHeight: 46,
+                      fieldWidth: otpFieldWidth(constraints.maxWidth),
+                      activeFillColor: app_color.withOpacity(0.1),
+                      inactiveFillColor:
+                          Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF1F2937)
+                          : const Color(0xFFF7F9FB),
+                      selectedFillColor:
+                          Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF1F2937)
+                          : Colors.white,
+                      activeColor: app_color,
+                      inactiveColor: Theme.of(context).dividerColor,
+                      selectedColor: app_color,
+                      borderWidth: 1.2,
+                    ),
+                    enableActiveFill: true,
+                    // _otpController is disposed by this State's own
+                    // dispose() - pin_code_fields defaults to disposing the
+                    // controller itself when the field unmounts, which
+                    // would double-dispose it (child widgets are torn down
+                    // before the parent State's dispose() runs).
+                    autoDisposeControllers: false,
                   ),
-                  enableActiveFill: true,
-                  // _otpController is disposed by this State's own
-                  // dispose() - pin_code_fields defaults to disposing the
-                  // controller itself when the field unmounts, which would
-                  // double-dispose it (child widgets are torn down before
-                  // the parent State's dispose() runs).
-                  autoDisposeControllers: false,
                 ),
                 const SizedBox(height: 24),
                 SizedBox(

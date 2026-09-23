@@ -1705,6 +1705,19 @@ Uint8List fitToThermalPaperWidth(Uint8List png, int printerWidthPx) {
 // mail-templates.ts's formatOtpForDisplay) - purely visual, the
 // underlying entered/submitted value is still the plain 6-digit string.
 // Shared by Login.dart's login-OTP/reset-OTP fields and VerifyEmail.dart.
+// Fixed `fieldWidth: 46` (6 boxes) overflowed on narrower screens - the 6
+// boxes plus [otpPinSeparator]'s gaps (~58px: four 8px SizedBoxes + the
+// wider "-" separator's padding+glyph) need ~334px total, more than a
+// ~375-402pt-wide phone has left after the auth card's own padding.
+// Shrinks each box to fit the actual available width instead, capped at
+// the original 46 so it never grows past the intended size on a normal
+// screen. Pass the LayoutBuilder constraint width wrapping the
+// PinCodeTextField (not the full screen width - that already excludes
+// the auth card's padding).
+double otpFieldWidth(double maxWidth) {
+  return ((maxWidth - 60) / 6).clamp(30.0, 46.0);
+}
+
 Widget otpPinSeparator(BuildContext context, int index) {
   if (index == 2) {
     return Padding(
