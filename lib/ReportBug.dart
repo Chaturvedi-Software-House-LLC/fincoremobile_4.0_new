@@ -49,16 +49,15 @@ class _ReportBugState extends State<ReportBug> {
     );
     if (result == null || result.files.isEmpty) return;
 
+    // Silently capped rather than warned after the fact - the picker has
+    // no native "limit to N selections" option, and popping a message
+    // right after the user already made their picks felt like a scold.
+    // The remaining slot count is visible in the grid itself (the "add"
+    // tile disappears once maxBugReportImages is reached), so the cap is
+    // self-explanatory without an extra dialog.
     setState(() {
       _images.addAll(result.files.take(remaining));
     });
-
-    if (result.files.length > remaining) {
-      showAppMessage(
-        context,
-        'Only the first $remaining image(s) were added (max $maxBugReportImages).',
-      );
-    }
   }
 
   void _removeImage(int index) {
@@ -280,6 +279,13 @@ class _ReportBugState extends State<ReportBug> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: app_color,
                       foregroundColor: Colors.white,
+                      // Disabled (while submitting) keeps the same solid
+                      // color instead of ElevatedButton's default greyed-
+                      // out disabled look - that greying is what made the
+                      // spinner read as a flat, "static" circle instead of
+                      // an active loading indicator.
+                      disabledBackgroundColor: app_color,
+                      disabledForegroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -288,11 +294,13 @@ class _ReportBugState extends State<ReportBug> {
                     onPressed: _isSubmitting ? null : _submit,
                     icon: _isSubmitting
                         ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator.adaptive(
+                              strokeWidth: 2.5,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           )
                         : const Icon(Icons.send_rounded),
