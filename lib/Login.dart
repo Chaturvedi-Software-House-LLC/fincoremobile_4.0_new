@@ -796,6 +796,16 @@ class _LoginPageState extends ConsumerState<Login>
       showAppMessage(context, 'Password must be at least 8 characters');
       return;
     }
+    // Matches tally-admin-api's PasswordSchema - only length and one
+    // special character are required (see ChangePassword.dart/
+    // CreateUser.dart's matching checks).
+    if (!RegExp(r'[^a-zA-Z0-9]').hasMatch(newPasswordController.text)) {
+      showAppMessage(
+        context,
+        'Password must contain at least one special character',
+      );
+      return;
+    }
     if (newPasswordController.text != confirmNewPasswordController.text) {
       showAppMessage(context, 'Passwords do not match');
       return;

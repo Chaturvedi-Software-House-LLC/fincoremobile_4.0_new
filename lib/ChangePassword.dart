@@ -163,9 +163,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePassword> {
     final isConfirmPassVisible = vm.isConfirmPassVisible;
     final showNewPassValidation = vm.showNewPassValidation;
     final showConfirmValidation = vm.showConfirmValidation;
-    final hasLower = vm.hasLower;
-    final hasUpper = vm.hasUpper;
-    final hasNumber = vm.hasNumber;
+    final hasSpecial = vm.hasSpecial;
     final isMatch = vm.isMatch;
     final isLoading = vm.isLoading;
     return Scaffold(
@@ -286,11 +284,17 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePassword> {
                                     if (value == null || value.isEmpty) {
                                       return "New Password required";
                                     }
-                                    if (value.length < 5) {
-                                      return "Password must be greater than 4 characters";
+                                    // Matches tally-admin-api's
+                                    // PasswordSchema (min 8, one special
+                                    // character) - was min 5 with no
+                                    // special-character check, which let a
+                                    // password pass here that the backend
+                                    // would then reject.
+                                    if (value.length < 8) {
+                                      return "Password must be at least 8 characters";
                                     }
-                                    if (!hasLower || !hasUpper || !hasNumber) {
-                                      return "Password must meet all requirements";
+                                    if (!hasSpecial) {
+                                      return "Password must contain at least one special character";
                                     }
                                     if (value == oldPassController.text) {
                                       return "New password must be different from old password.";
@@ -301,9 +305,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePassword> {
 
                                 if (showNewPassValidation) ...[
                                   SizedBox(height: 8),
-                                  _buildRule("1 lowercase letter", hasLower),
-                                  _buildRule("1 uppercase letter", hasUpper),
-                                  _buildRule("1 number", hasNumber),
+                                  _buildRule("1 special character", hasSpecial),
                                 ],
 
                                 SizedBox(height: 15),

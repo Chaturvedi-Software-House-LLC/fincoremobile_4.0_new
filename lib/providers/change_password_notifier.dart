@@ -14,9 +14,10 @@ class ChangePasswordState {
   final bool isLoading;
   final bool showNewPassValidation;
   final bool showConfirmValidation;
-  final bool hasLower;
-  final bool hasUpper;
-  final bool hasNumber;
+  // Matches tally-admin-api's PasswordSchema - only length and one special
+  // character are required now (lowercase/uppercase/number rules were
+  // dropped from both sides - see CreateUser.dart's matching change).
+  final bool hasSpecial;
   final bool isMatch;
   final bool isOldPassVisible;
   final bool isNewPassVisible;
@@ -26,9 +27,7 @@ class ChangePasswordState {
     this.isLoading = false,
     this.showNewPassValidation = false,
     this.showConfirmValidation = false,
-    this.hasLower = false,
-    this.hasUpper = false,
-    this.hasNumber = false,
+    this.hasSpecial = false,
     this.isMatch = false,
     this.isOldPassVisible = false,
     this.isNewPassVisible = false,
@@ -39,9 +38,7 @@ class ChangePasswordState {
     bool? isLoading,
     bool? showNewPassValidation,
     bool? showConfirmValidation,
-    bool? hasLower,
-    bool? hasUpper,
-    bool? hasNumber,
+    bool? hasSpecial,
     bool? isMatch,
     bool? isOldPassVisible,
     bool? isNewPassVisible,
@@ -53,9 +50,7 @@ class ChangePasswordState {
           showNewPassValidation ?? this.showNewPassValidation,
       showConfirmValidation:
           showConfirmValidation ?? this.showConfirmValidation,
-      hasLower: hasLower ?? this.hasLower,
-      hasUpper: hasUpper ?? this.hasUpper,
-      hasNumber: hasNumber ?? this.hasNumber,
+      hasSpecial: hasSpecial ?? this.hasSpecial,
       isMatch: isMatch ?? this.isMatch,
       isOldPassVisible: isOldPassVisible ?? this.isOldPassVisible,
       isNewPassVisible: isNewPassVisible ?? this.isNewPassVisible,
@@ -81,9 +76,7 @@ class ChangePasswordNotifier extends StateNotifier<ChangePasswordState> {
   void validateNewPassword(String value, String confirmText) {
     state = state.copyWith(
       showNewPassValidation: value.isNotEmpty,
-      hasLower: RegExp(r'[a-z]').hasMatch(value),
-      hasUpper: RegExp(r'[A-Z]').hasMatch(value),
-      hasNumber: RegExp(r'[0-9]').hasMatch(value),
+      hasSpecial: RegExp(r'[^a-zA-Z0-9]').hasMatch(value),
       isMatch: value == confirmText,
     );
   }
@@ -121,9 +114,7 @@ class ChangePasswordNotifier extends StateNotifier<ChangePasswordState> {
         isLoading: false,
         showNewPassValidation: false,
         showConfirmValidation: false,
-        hasLower: false,
-        hasUpper: false,
-        hasNumber: false,
+        hasSpecial: false,
         isMatch: false,
       );
       return const ChangePasswordResult(
