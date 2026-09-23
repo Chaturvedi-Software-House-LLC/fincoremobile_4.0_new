@@ -237,10 +237,13 @@ class AuthRepository {
         (email != null && email.isNotEmpty) ? email : displayUserName,
       );
 
-      return LoginSessionResult(
-        email: email,
-        emailVerified: user['emailVerifiedAt'] != null,
-      );
+      final emailVerified = user['emailVerifiedAt'] != null;
+      // Read by dashboard_notifier.dart to show the "verify your email"
+      // banner - see Login.dart's doc comment on why this is no longer a
+      // blocking pre-Dashboard redirect.
+      await prefs.setString('email_verified', emailVerified ? 'True' : 'False');
+
+      return LoginSessionResult(email: email, emailVerified: emailVerified);
     }
 
     return const LoginSessionResult(email: null, emailVerified: true);

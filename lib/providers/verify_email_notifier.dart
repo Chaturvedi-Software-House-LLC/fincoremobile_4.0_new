@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/api_exception.dart';
 import '../api/auth_repository.dart';
@@ -17,11 +18,9 @@ class VerifyEmailState {
   }
 }
 
-/// Drives the "your email isn't verified yet" prompt shown right after an
-/// email-style login (see Login.dart) - shown again on every subsequent
-/// login until the account's email is actually verified, per how this
-/// feature was asked for; a username-style login never triggers it at
-/// all, checked by the caller before this notifier is ever touched.
+/// Drives VerifyEmail.dart, opened from Dashboard.dart's "verify your
+/// email" banner rather than a login-time gate (see VerifyEmail.dart's
+/// own doc comment for why that changed).
 class VerifyEmailNotifier extends StateNotifier<VerifyEmailState> {
   VerifyEmailNotifier() : super(const VerifyEmailState());
 
@@ -56,6 +55,13 @@ class VerifyEmailNotifier extends StateNotifier<VerifyEmailState> {
         verifyToken: _verifyToken!,
         otp: otp,
       );
+      // Dashboard.dart's own markEmailVerified() call (after this screen
+      // pops back with `true`) keeps this same session's Dashboard
+      // instance in sync; this persists it so the banner stays gone across
+      // an app restart too, without relying on a fresh login re-reading
+      // `emailVerifiedAt` from the server.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('email_verified', 'True');
       return null;
     } on ApiException catch (e) {
       return e.message;

@@ -3,20 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 
-import 'CompanySelectTallyOauth.dart';
 import 'Login.dart';
 import 'api/auth_repository.dart';
 import 'constants.dart';
 import 'providers/verify_email_notifier.dart';
 import 'widgets/entry_widgets.dart';
 
-/// Shown right after an email-style login when the account's email isn't
-/// verified yet (see Login.dart's `_directlogin`/`_verifyOtpAndProceed`,
-/// which check this via `LoginSessionResult.emailVerified` before ever
-/// reaching [CompanySelectTallyOauth]). A username-style login never
-/// lands here at all. Reappears on every subsequent login until the
-/// email is actually verified - there is deliberately no "skip" action,
-/// only "log out" for someone who logged in with the wrong account.
+/// Opened from Dashboard.dart's "verify your email" banner (shown whenever
+/// the signed-in account has an email on file that isn't verified yet -
+/// see `DashboardState.isEmailVerified`). Login itself no longer blocks on
+/// this (it used to redirect here instead of reaching the dashboard at
+/// all - see Login.dart's `_proceedToCompanySelection`, which now always
+/// runs unconditionally); verifying is a soft prompt the account can defer
+/// indefinitely, not a gate. Pops back to the dashboard with `true` on
+/// success so it can dismiss the banner immediately without a fresh login.
 class VerifyEmail extends ConsumerStatefulWidget {
   const VerifyEmail({super.key, required this.email});
 
@@ -71,9 +71,8 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
       });
       return;
     }
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const CompanySelectTallyOauth()),
-    );
+    if (!mounted) return;
+    Navigator.of(context).pop(true);
   }
 
   Future<void> _logout() async {
@@ -93,6 +92,11 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+        leading: BackButton(onPressed: () => Navigator.of(context).pop(false)),
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

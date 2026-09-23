@@ -16,6 +16,7 @@ import 'package:intl/intl.dart';
 import 'DashboardAnalytics.dart';
 import 'PendingSalesOrderEntry.dart';
 import 'CompanySelectTallyOauth.dart';
+import 'VerifyEmail.dart';
 import 'constants.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/entry_widgets.dart';
@@ -1058,6 +1059,7 @@ class _MyHomePageState extends ConsumerState<Dashboard>
                   child: Column(
                     children: [
                       _buildDashboardHeader(),
+                      _buildEmailVerificationBanner(),
                       if (_s.isLoading)
                         _buildSkeletonDateCard()
                       else
@@ -1592,6 +1594,60 @@ class _MyHomePageState extends ConsumerState<Dashboard>
           if (isSelected)
             Icon(Icons.check_circle_rounded, color: app_color, size: 20),
         ],
+      ),
+    );
+  }
+
+  /// Soft, non-blocking prompt shown when the signed-in account has an
+  /// email on file that isn't verified yet - see DashboardState's
+  /// `isEmailVerified`/`unverifiedEmail` doc comment for why this replaced
+  /// Login.dart's old redirect-to-VerifyEmail-before-Dashboard gate.
+  /// Tapping it pushes VerifyEmail.dart; a `true` result means the account
+  /// actually got verified there, so the banner dismisses immediately via
+  /// markEmailVerified() rather than waiting for the next app open/login.
+  Widget _buildEmailVerificationBanner() {
+    if (_s.isEmailVerified) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Material(
+        color: Colors.amber.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () async {
+            final verified = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => VerifyEmail(
+                  email: _s.unverifiedEmail ?? '',
+                ),
+              ),
+            );
+            if (verified == true) _notifier.markEmailVerified();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.mark_email_unread_outlined, color: Colors.amber.shade800),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Please verify your email to secure your account.',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
