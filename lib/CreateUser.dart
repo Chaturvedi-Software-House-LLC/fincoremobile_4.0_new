@@ -628,6 +628,16 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
         showAppMessage(context, "Password must be 72 characters or fewer");
         return;
       }
+      // Matches tally-admin-api's PasswordSchema - only length and one
+      // special character are required now (lowercase/uppercase/number
+      // rules were dropped from both sides).
+      if (!RegExp(r'[^a-zA-Z0-9]').hasMatch(finalPassword)) {
+        showAppMessage(
+          context,
+          "Password must contain at least one special character",
+        );
+        return;
+      }
     }
 
     _updateFocus();
