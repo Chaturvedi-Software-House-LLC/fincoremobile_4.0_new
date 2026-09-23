@@ -574,15 +574,10 @@ class _HelpPageState extends ConsumerState<Help> with TickerProviderStateMixin {
                   _buildLiveChatCard(),
                 ],
 
-                // "Report a Bug" (tally-api's POST /bug-reports) uses the
-                // `user`-scope token saved right after tally-oauth login
-                // (see FeedbackRepository's doc comment) - same pre-login
-                // gate as Live Chat above, since that token doesn't exist
-                // until then either.
-                if (widget.showBottomNavigation) ...[
-                  const SizedBox(height: 14),
-                  _buildReportBugCard(),
-                ],
+                // "Report an Issue" (tally-api's POST /bug-reports) - shown
+                // regardless of login state, unlike Live Chat above.
+                const SizedBox(height: 14),
+                _buildReportBugCard(),
 
                 const SizedBox(height: 14),
                 // Contact Info Card
