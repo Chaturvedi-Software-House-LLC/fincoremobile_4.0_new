@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'constants.dart';
 import 'package:FincoreGo/AssistantChat.dart';
+import 'package:FincoreGo/ReportBug.dart';
 import 'package:FincoreGo/providers/help_notifier.dart';
 import 'package:FincoreGo/widgets/app_bottom_nav.dart';
 import 'package:FincoreGo/widgets/app_navigation.dart';
@@ -237,6 +238,78 @@ class _HelpPageState extends ConsumerState<Help> with TickerProviderStateMixin {
             const Icon(
               Icons.arrow_forward_ios_rounded,
               color: Colors.white,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportBugCard() {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ReportBug()),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Theme.of(context).dividerColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.18 : 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: app_color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.bug_report_outlined,
+                color: app_color,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Report an Issue',
+                    style: GoogleFonts.poppins(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Found something wrong? Let our team know',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               size: 16,
             ),
           ],
@@ -499,6 +572,16 @@ class _HelpPageState extends ConsumerState<Help> with TickerProviderStateMixin {
                 if (widget.showBottomNavigation) ...[
                   const SizedBox(height: 14),
                   _buildLiveChatCard(),
+                ],
+
+                // "Report a Bug" (tally-api's POST /bug-reports) uses the
+                // `user`-scope token saved right after tally-oauth login
+                // (see FeedbackRepository's doc comment) - same pre-login
+                // gate as Live Chat above, since that token doesn't exist
+                // until then either.
+                if (widget.showBottomNavigation) ...[
+                  const SizedBox(height: 14),
+                  _buildReportBugCard(),
                 ],
 
                 const SizedBox(height: 14),

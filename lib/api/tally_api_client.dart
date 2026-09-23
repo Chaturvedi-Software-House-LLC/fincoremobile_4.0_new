@@ -76,6 +76,9 @@ class TallyApiClient extends BaseApiClient {
 
   Future<ApiResult> getAsUser(String path) => get(path, scope: TokenScope.user);
 
+  Future<ApiResult> postAsUser(String path, {Object? body}) =>
+      post(path, body: body, scope: TokenScope.user);
+
   Future<ApiResult> putAsUser(String path, {Object? body}) =>
       put(path, body: body, scope: TokenScope.user);
 
