@@ -21,17 +21,13 @@ class CreateUser extends ConsumerStatefulWidget {
 
 class _CreateUserPageState extends ConsumerState<CreateUser>
     with TickerProviderStateMixin {
-  bool _isFocused_email = false,
-      _isFocus_firstname = false,
-      _isFocus_lastname = false;
+  bool _isFocused_email = false, _isFocus_fullname = false;
 
   late final TextEditingController controller_username =
       TextEditingController();
   late final TextEditingController controller_password =
       TextEditingController();
-  late final TextEditingController controller_firstname =
-      TextEditingController();
-  late final TextEditingController controller_lastname =
+  late final TextEditingController controller_fullname =
       TextEditingController();
 
   bool _isFocused_password = false;
@@ -43,8 +39,7 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
   void dispose() {
     controller_username.dispose();
     controller_password.dispose();
-    controller_firstname.dispose();
-    controller_lastname.dispose();
+    controller_fullname.dispose();
     super.dispose();
   }
 
@@ -163,8 +158,7 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
       }
 
       controller_username.clear();
-      controller_firstname.clear();
-      controller_lastname.clear();
+      controller_fullname.clear();
       controller_password.clear();
       if (mounted) FocusScope.of(context).unfocus();
     }
@@ -326,19 +320,11 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
                             ),
                             const SizedBox(height: 16),
                             _modernTextField(
-                              label: 'First Name',
-                              controller: controller_firstname,
+                              label: 'Full Name',
+                              controller: controller_fullname,
                               icon: Icons.person_outline,
-                              isFocused: _isFocus_firstname,
-                              onFocus: () => _updateFocus(firstname: true),
-                            ),
-                            const SizedBox(height: 20),
-                            _modernTextField(
-                              label: 'Last Name',
-                              controller: controller_lastname,
-                              icon: Icons.person_outline,
-                              isFocused: _isFocus_lastname,
-                              onFocus: () => _updateFocus(lastname: true),
+                              isFocused: _isFocus_fullname,
+                              onFocus: () => _updateFocus(fullname: true),
                             ),
                             const SizedBox(height: 20),
                             _modernTextField(
@@ -559,59 +545,53 @@ class _CreateUserPageState extends ConsumerState<CreateUser>
   }
 
   void _updateFocus({
-    bool firstname = false,
-    bool lastname = false,
+    bool fullname = false,
     bool email = false,
     bool password = false,
   }) {
     setState(() {
-      _isFocus_firstname = firstname;
-      _isFocus_lastname = lastname;
+      _isFocus_fullname = fullname;
       _isFocused_email = email;
       _isFocused_password = password;
     });
   }
 
-  // Mirrors tally-oauth's actual `POST /company-user` Zod schema (confirmed
-  // live against the running server, not guessed): `userName` >= 8 chars,
-  // `firstName`/`lastName` >= 2 chars (confirmed live: a too-short lastName
-  // 400s with "Name must be at least 2 characters"), each <= their DB
-  // column widths (VarChar(100)/VarChar(100)/VarChar(320) for
-  // firstName/lastName/email), `phone` E.164 (`+` then up to 15 digits) if
-  // given. Password has no confirmed server-side complexity/length rule
-  // beyond bcrypt's 72-byte input cap, so this only enforces a conservative
-  // minimum (8, matching userName) rather than inventing rules that could
-  // reject a password the server would actually accept.
+  // Mirrors tally-oauth's actual `POST /company-user` Zod schema: `userName`
+  // just needs to be non-empty (no length policy - see UserNameSchema),
+  // `firstName` non-empty/<=100 chars, `lastName` <=100 chars but may be
+  // empty (see FirstNameSchema/LastNameSchema - this screen's single "Full
+  // Name" field is split on the first space, and a single-word name
+  // legitimately leaves lastName empty), `phone` E.164 (`+` then up to 15
+  // digits) if given. Password has no confirmed server-side
+  // complexity/length rule beyond bcrypt's 72-byte input cap, so this only
+  // enforces a conservative minimum (8) rather than inventing rules that
+  // could reject a password the server would actually accept.
   static final RegExp _phoneE164 = RegExp(r'^\+[1-9]\d{1,14}$');
 
-  String? _validateName(String label, String value) {
-    if (value.isEmpty) return "Please enter a $label";
-    if (value.length < 2) return "$label must be at least 2 characters";
-    if (value.length > 100) return "$label must be 100 characters or fewer";
-    return null;
+  /// Splits the single "Full Name" field into the backend's
+  /// firstName/lastName pair (see UserCreateSchema's FirstNameSchema/
+  /// LastNameSchema) - first word goes to firstName, everything else
+  /// (possibly nothing, for a single-word name) to lastName.
+  ({String firstName, String lastName}) _splitFullName(String fullName) {
+    final parts = fullName.trim().split(RegExp(r'\s+'));
+    return (firstName: parts.first, lastName: parts.skip(1).join(' '));
   }
 
   void _submitForm() {
-    final firstName = controller_firstname.text.trim();
-    final lastName = controller_lastname.text.trim();
+    final fullName = controller_fullname.text.trim();
     final username = controller_username.text.trim();
     final roleId =
         ref.read(createUserNotifierProvider).selectedRole?["id"] as String?;
 
-    final firstNameError = _validateName('first name', firstName);
-    if (firstNameError != null) {
-      showAppMessage(context, firstNameError);
+    if (fullName.isEmpty) {
+      showAppMessage(context, "Please enter a name");
       return;
     }
-    final lastNameError = _validateName('last name', lastName);
-    if (lastNameError != null) {
-      showAppMessage(context, lastNameError);
+    if (fullName.length > 100) {
+      showAppMessage(context, "Name must be 100 characters or fewer");
       return;
     }
-    if (firstName.toLowerCase() == lastName.toLowerCase()) {
-      showAppMessage(context, "First name and last name should not be the same");
-      return;
-    }
+    final (:firstName, :lastName) = _splitFullName(fullName);
     if (username.isEmpty) {
       showAppMessage(context, "Please enter a username or email");
       return;

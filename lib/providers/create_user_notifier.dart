@@ -126,10 +126,13 @@ class CreateUserNotifier extends StateNotifier<CreateUserState> {
   /// email on success, so the widget can send it - notifiers shouldn't own
   /// SMTP/UI side effects.
   ///
-  /// [firstName]/[lastName] are collected as separate fields in the UI
-  /// (matching tally-oauth's `CreateCompanyUserSchema`, which requires each
-  /// independently - previously derived by splitting a single "Full Name"
-  /// field, which broke for a short second word like "Driver 1"'s "1").
+  /// [firstName]/[lastName] arrive already split from the widget's single
+  /// "Full Name" field (see CreateUser.dart's `_splitFullName` - first word
+  /// to firstName, the rest to lastName, which may be empty for a
+  /// single-word name) - tally-oauth's `CreateCompanyUserSchema` still
+  /// requires them as two independent fields
+  /// (FirstNameSchema/LastNameSchema), just with lastName's minimum length
+  /// dropped to 0 to allow that.
   Future<({bool success, String? emailToNotify, String? password})>
       userRegistration({
     required String userNameOrEmail,
