@@ -85,6 +85,12 @@ class TallyApiClient extends BaseApiClient {
   Future<ApiResult> deleteAsUser(String path) =>
       delete(path, scope: TokenScope.user);
 
+  Future<ApiResult> postMultipartFilesAsUser(
+    String path, {
+    required List<MultipartFileInput> files,
+    Map<String, String> fields = const {},
+  }) => postMultipartFiles(path, files: files, fields: fields, scope: TokenScope.user);
+
   @override
   Future<void> refresh(TokenScope scope) {
     switch (scope) {

@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -25,7 +28,42 @@ class _ReportBugState extends State<ReportBug> {
   final _descriptionController = TextEditingController();
   final _stepsController = TextEditingController();
 
+  final List<PlatformFile> _images = [];
+
   bool _isSubmitting = false;
+
+  Future<void> _pickImages() async {
+    final remaining = maxBugReportImages - _images.length;
+    if (remaining <= 0) {
+      showAppMessage(
+        context,
+        'You can attach up to $maxBugReportImages images.',
+      );
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    setState(() {
+      _images.addAll(result.files.take(remaining));
+    });
+
+    if (result.files.length > remaining) {
+      showAppMessage(
+        context,
+        'Only the first $remaining image(s) were added (max $maxBugReportImages).',
+      );
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() => _images.removeAt(index));
+  }
 
   @override
   void dispose() {
@@ -46,6 +84,7 @@ class _ReportBugState extends State<ReportBug> {
         stepsToReproduce: _stepsController.text.trim().isEmpty
             ? null
             : _stepsController.text.trim(),
+        images: _images,
       );
       if (!mounted) return;
       showAppMessage(
@@ -194,6 +233,46 @@ class _ReportBugState extends State<ReportBug> {
                     hint: '1. Open Sales entry\n2. Tap Save\n3. ...',
                   ),
                 ),
+                const SizedBox(height: 20),
+                Text(
+                  'Screenshots (optional)',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (int i = 0; i < _images.length; i++)
+                      _ImageThumbnail(
+                        bytes: _images[i].bytes!,
+                        onRemove: () => _removeImage(i),
+                      ),
+                    if (_images.length < maxBugReportImages)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _pickImages,
+                        child: Container(
+                          width: 76,
+                          height: 76,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Theme.of(context).dividerColor,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.add_photo_alternate_outlined,
+                            color: app_color,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
@@ -228,6 +307,51 @@ class _ReportBugState extends State<ReportBug> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ImageThumbnail extends StatelessWidget {
+  const _ImageThumbnail({required this.bytes, required this.onRemove});
+
+  final Uint8List bytes;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            bytes,
+            width: 76,
+            height: 76,
+            fit: BoxFit.cover,
+          ),
+        ),
+        Positioned(
+          top: -8,
+          right: -8,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onRemove,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                color: Colors.black87,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.close,
+                size: 16,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

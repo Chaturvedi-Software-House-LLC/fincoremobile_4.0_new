@@ -1,9 +1,13 @@
 import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'base_api_client.dart';
 import 'tally_api_client.dart';
+
+const int maxBugReportImages = 5;
 
 /// `POST /bug-reports` - deliberately not company-scoped (unlike
 /// [TallyApiClient]'s other calls) so it works for any logged-in user,
@@ -23,13 +27,18 @@ class FeedbackRepository {
     required String title,
     required String description,
     String? stepsToReproduce,
+    List<PlatformFile> images = const [],
   }) async {
     final deviceInfo = await _describeDevice();
     final packageInfo = await PackageInfo.fromPlatform();
 
-    await _client.postAsUser(
+    // Always multipart, even with zero images - tally-api's controller
+    // parses this endpoint's body as multipart/form-data unconditionally
+    // (see FeedbackController), so a plain JSON postAsUser would fail to
+    // reach the fields at all.
+    await _client.postMultipartFilesAsUser(
       '/bug-reports',
-      body: {
+      fields: {
         'title': title,
         'description': description,
         if (stepsToReproduce != null && stepsToReproduce.trim().isNotEmpty)
@@ -38,6 +47,12 @@ class FeedbackRepository {
         'platform': Platform.operatingSystem,
         'deviceInfo': deviceInfo,
       },
+      files: images
+          .where((f) => f.bytes != null)
+          .map(
+            (f) => MultipartFileInput(bytes: f.bytes!, fileName: f.name),
+          )
+          .toList(),
     );
   }
 

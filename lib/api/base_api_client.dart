@@ -17,6 +17,23 @@ import 'token_store.dart';
 /// per-client one. tally-api only ever needs [companyUser].
 enum TokenScope { none, user, companyUser }
 
+/// One file for [BaseApiClient.postMultipartFiles] - the field name only
+/// matters to the client library that builds the multipart body; every
+/// server-side handler in this app reads multipart parts by `type`
+/// ('file' vs a plain field), not by field name, so any repeated name
+/// works for a multi-file upload.
+class MultipartFileInput {
+  const MultipartFileInput({
+    required this.bytes,
+    required this.fileName,
+    this.fieldName = 'file',
+  });
+
+  final List<int> bytes;
+  final String fileName;
+  final String fieldName;
+}
+
 /// Shared request/response plumbing for tally-oauth and tally-api: attaches
 /// the right bearer token, parses their shared `{success, data, meta}` /
 /// `{success:false, error:{code,message}}` envelope, and on a 401 attempts
@@ -156,15 +173,41 @@ abstract class BaseApiClient {
   Future<ApiResult> delete(String path, {TokenScope scope = TokenScope.companyUser}) =>
       _send('DELETE', path, scope: scope);
 
-  /// Multipart POST (currently only `AssistantRepository.analyzeDocument`'s
-  /// file upload) - kept separate from [_send] since it needs a
-  /// `MultipartRequest` instead of a plain body, but shares the same
-  /// auth-header/401-refresh-retry/envelope-decode behavior.
+  /// Multipart POST with a single file (`AssistantRepository.
+  /// analyzeDocument`'s file upload) - a thin wrapper over
+  /// [postMultipartFiles] for the common one-file case.
   Future<ApiResult> postMultipart(
     String path, {
     required List<int> fileBytes,
     required String fileFieldName,
     required String fileName,
+    Map<String, String> fields = const {},
+    TokenScope scope = TokenScope.companyUser,
+    bool isRetry = false,
+    Duration? timeout,
+  }) => postMultipartFiles(
+    path,
+    files: [
+      MultipartFileInput(
+        bytes: fileBytes,
+        fileName: fileName,
+        fieldName: fileFieldName,
+      ),
+    ],
+    fields: fields,
+    scope: scope,
+    isRetry: isRetry,
+    timeout: timeout,
+  );
+
+  /// Multipart POST with zero or more files (e.g.
+  /// `FeedbackRepository.reportBug`'s optional screenshots) - kept
+  /// separate from [_send] since it needs a `MultipartRequest` instead of
+  /// a plain body, but shares the same
+  /// auth-header/401-refresh-retry/envelope-decode behavior.
+  Future<ApiResult> postMultipartFiles(
+    String path, {
+    required List<MultipartFileInput> files,
     Map<String, String> fields = const {},
     TokenScope scope = TokenScope.companyUser,
     bool isRetry = false,
@@ -177,8 +220,14 @@ abstract class BaseApiClient {
     final request = http.MultipartRequest('POST', uri)
       ..headers.addAll(headers)
       ..fields.addAll(fields)
-      ..files.add(
-        http.MultipartFile.fromBytes(fileFieldName, fileBytes, filename: fileName),
+      ..files.addAll(
+        files.map(
+          (f) => http.MultipartFile.fromBytes(
+            f.fieldName,
+            f.bytes,
+            filename: f.fileName,
+          ),
+        ),
       );
 
     late final http.Response response;
@@ -214,11 +263,9 @@ abstract class BaseApiClient {
           'Session expired - please log in again.',
         );
       }
-      return postMultipart(
+      return postMultipartFiles(
         path,
-        fileBytes: fileBytes,
-        fileFieldName: fileFieldName,
-        fileName: fileName,
+        files: files,
         fields: fields,
         scope: scope,
         isRetry: true,
