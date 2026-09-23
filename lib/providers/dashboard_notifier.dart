@@ -335,6 +335,33 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     if (_prefsReady) await _prefs.setString('email_verified', 'True');
   }
 
+  /// This `autoDispose` provider's instance can end up reused (not
+  /// actually disposed) instead of freshly recreated when the app logs
+  /// out and back in as a different account in quick succession - the
+  /// last listener is removed and the first new listener attached within
+  /// the same frame, so Riverpod never sees the listener count hit zero
+  /// and skips disposal. That otherwise leaves the *previous* account's
+  /// `isEmailVerified`/`unverifiedEmail` on screen for the new one, since
+  /// this reused instance's own constructor-triggered `_init()` never
+  /// reruns. Dashboard.dart's `initState` calls this unconditionally on
+  /// every mount to force a fresh read - cheap and idempotent (unlike
+  /// re-running all of `_init()`, which would also refire every dashboard
+  /// data fetch), so it's safe to call even for a genuinely fresh
+  /// instance whose own `_init()` is still in flight.
+  Future<void> refreshEmailVerificationStatus() async {
+    final prefs = _prefsReady ? _prefs : await SharedPreferences.getInstance();
+    if (!_prefsReady) {
+      _prefs = prefs;
+      _prefsReady = true;
+    }
+    final isEmailVerified = (prefs.getString('email_verified') ?? 'True') == 'True';
+    state = state.copyWith(
+      isEmailVerified: isEmailVerified,
+      unverifiedEmail: isEmailVerified ? null : prefs.getString('email_nav'),
+      clearUnverifiedEmail: isEmailVerified,
+    );
+  }
+
   Future<void> _init() async {
     _prefs = await SharedPreferences.getInstance();
     _prefsReady = true;

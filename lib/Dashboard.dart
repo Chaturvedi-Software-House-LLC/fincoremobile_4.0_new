@@ -931,6 +931,15 @@ class _MyHomePageState extends ConsumerState<Dashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       checkCurrencyMismatch(context);
     });
+
+    // Deferred a microtask past initState - Riverpod forbids modifying a
+    // provider synchronously during the widget-tree-building lifecycle
+    // (build/initState/dispose/didUpdateWidget/didChangeDependencies). See
+    // DashboardNotifier.refreshEmailVerificationStatus's doc comment for
+    // why this call exists at all.
+    Future.microtask(() {
+      if (mounted) _notifier.refreshEmailVerificationStatus();
+    });
   }
 
   Widget _buildDecentCard(
