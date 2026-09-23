@@ -1341,63 +1341,81 @@ class _LoginPageState extends ConsumerState<Login>
                           builder: (context, constraints) {
                             final isWide = constraints.maxWidth >= 820;
 
-                            // Footer is the last item in the normal
-                            // scrolling flow (not a fixed/pinned sibling
-                            // below it) - it should only ever appear after
-                            // all the card's own content, reachable by
-                            // scrolling on a short screen, not sitting
-                            // permanently glued to the viewport bottom.
-                            return SingleChildScrollView(
-                              padding: EdgeInsets.only(top: isWide ? 34 : 0),
-                              child: Column(
-                                children: [
-                                  // Full-bleed hero, not inside the
-                                  // padded/constrained block below - only
-                                  // the compact/phone layout gets it; the
-                                  // wide layout keeps its existing
-                                  // side-by-side _buildBrandPanel instead.
-                                  if (!isWide) _buildAnimatedHero(),
-                                  Padding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      isWide ? 40 : 0,
-                                      isWide ? 0 : 0,
-                                      isWide ? 40 : 0,
-                                      0,
-                                    ),
-                                    child: Center(
-                                      child: ConstrainedBox(
-                                        constraints: BoxConstraints(
-                                          maxWidth: isWide ? 920 : 460,
-                                        ),
-                                        child: isWide
-                                            ? Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.center,
-                                                children: [
-                                                  Expanded(
-                                                    child: _buildBrandPanel(),
-                                                  ),
-                                                  const SizedBox(width: 36),
-                                                  SizedBox(
-                                                    width: 430,
-                                                    child:
-                                                        _buildAnimatedAuthForm(),
-                                                  ),
-                                                ],
-                                              )
-                                            : _buildAnimatedAuthForm(),
+                            if (isWide) {
+                              // Desktop/wide layout: unchanged from
+                              // before - the whole page just scrolls,
+                              // side-by-side brand panel + card, no hero/
+                              // fill-to-bottom behavior (out of scope for
+                              // this pass).
+                              return SingleChildScrollView(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 34,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 40,
+                                  ),
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 920,
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Expanded(child: _buildBrandPanel()),
+                                          const SizedBox(width: 36),
+                                          SizedBox(
+                                            width: 430,
+                                            child: _buildAnimatedAuthForm(),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(height: 20),
-                                  // Full device width (not constrained/
-                                  // padded like the content above) - only
-                                  // the top corners are rounded, so it
-                                  // reads as a page-wide footer rather
-                                  // than another card.
-                                  _buildTallySyncBadge(compact: !isWide),
-                                ],
-                              ),
+                                ),
+                              );
+                            }
+
+                            // Compact/phone layout: hero is fixed at the
+                            // top (not scrolled with the rest), and the
+                            // card below it fills all remaining viewport
+                            // height via ConstrainedBox(minHeight) - not
+                            // Expanded, which would throw here (a
+                            // SingleChildScrollView's child always gets
+                            // unbounded max-height constraints, and
+                            // Expanded/Flexible require a bounded one to
+                            // divide space). minHeight has no such
+                            // restriction: the card's own background
+                            // still stretches to fill it when content is
+                            // shorter, and the ScrollView only actually
+                            // scrolls once content exceeds it (small
+                            // screen).
+                            return Column(
+                              children: [
+                                _buildAnimatedHero(),
+                                Expanded(
+                                  child: LayoutBuilder(
+                                    builder: (context, inner) {
+                                      // + _heroCardOverlap compensates for
+                                      // _buildAuthCard's Transform.
+                                      // translate shifting the card up by
+                                      // that same amount to overlap the
+                                      // hero - without this, the shifted-
+                                      // up card would fall short of the
+                                      // true bottom by exactly that much.
+                                      return SingleChildScrollView(
+                                        child: _buildAnimatedAuthForm(
+                                          minHeight:
+                                              inner.maxHeight +
+                                              _heroCardOverlap,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
                             );
                           },
                         ),
@@ -1453,7 +1471,7 @@ class _LoginPageState extends ConsumerState<Login>
     );
   }
 
-  Widget _buildAnimatedAuthForm() {
+  Widget _buildAnimatedAuthForm({double? minHeight}) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 280),
       switchInCurve: Curves.easeOutCubic,
@@ -1470,13 +1488,22 @@ class _LoginPageState extends ConsumerState<Login>
           ),
         );
       },
+      // AnimatedSwitcher's default layoutBuilder cross-fades children
+      // inside a plain Stack, which always loosens (drops the minimum
+      // of) the constraints it gives its children - a ConstrainedBox
+      // minHeight placed *above* this widget never actually reaches
+      // the card, which just renders at its natural height instead,
+      // leaving the page's raw background visible below it. Threading
+      // minHeight down explicitly as a value (not relying on ambient
+      // BoxConstraints propagation) into _buildAuthCard's own
+      // `constraints:` sidesteps that entirely.
       child: _s.isVisibleLoginForm
-          ? _buildLoginForm(context)
+          ? _buildLoginForm(context, minHeight: minHeight)
           : _s.isVisibleResetPassForm
-          ? _buildResetForm(context)
+          ? _buildResetForm(context, minHeight: minHeight)
           : _s.isVisibleResetOtpForm
-          ? _buildResetOtpForm(context)
-          : _buildOtpForm(context),
+          ? _buildResetOtpForm(context, minHeight: minHeight)
+          : _buildOtpForm(context, minHeight: minHeight),
     );
   }
 
@@ -1681,79 +1708,107 @@ class _LoginPageState extends ConsumerState<Login>
       child: Image.asset(asset, fit: BoxFit.contain),
     );
 
-    // A full device-width footer at the bottom of the scrollable page
-    // content (scrolls along with the login form, not pinned) - only the
-    // top corners are rounded, edge-to-edge on the sides, so it reads as
-    // a page-wide footer rather than another card floating in from the
-    // sides like the login card above it.
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14101828),
-            blurRadius: 20,
-            offset: Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              logo('assets/fincorego_logo_transparent.png'),
-              const SizedBox(width: 10),
-              Icon(
-                Icons.sync_alt_rounded,
-                size: 20,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 10),
-              logo('assets/tallyprime_logo_trimmed.png'),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '© 2023-2026 CSH LLC. All Rights Reserved.',
-            style: GoogleFonts.poppins(
-              fontSize: 11,
+    // Plain content, no own background/shape - this now lives embedded
+    // inside _buildAuthCard's own card (below the form, with a gap),
+    // which already provides the background/border-radius/shadow; giving
+    // this its own decorated Container on top of that would nest one
+    // card-looking box inside another.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            logo('assets/fincorego_logo_transparent.png'),
+            const SizedBox(width: 10),
+            Icon(
+              Icons.sync_alt_rounded,
+              size: 20,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
+            const SizedBox(width: 10),
+            logo('assets/tallyprime_logo_trimmed.png'),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '© 2023-2026 CSH LLC. All Rights Reserved.',
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAuthCard({
+    required Key key,
+    required Widget child,
+    double? minHeight,
+  }) {
+    // Transform.translate (not a negative Container margin - Container
+    // asserts margin.isNonNegative and throws) shifts the card up by
+    // _heroCardOverlap so it visually rises into the hero above it, like
+    // a bottom sheet peeking over it. Transform only affects paint, not
+    // the layout box, so on its own this would leave a matching gap of
+    // page background at the true bottom - the caller compensates by
+    // passing a `minHeight` that's already _heroCardOverlap taller than
+    // the actual remaining space (see the LayoutBuilder call site), so
+    // the shifted-up card's bottom edge still lands exactly at the
+    // screen's true bottom.
+    return Transform.translate(
+      offset: const Offset(0, -_heroCardOverlap),
+      child: Container(
+        key: key,
+        width: double.infinity,
+        // Passed straight to Container's own `constraints:` (not just an
+        // ambient BoxConstraints from a ConstrainedBox further up the
+        // tree) - see _buildAnimatedAuthForm's doc comment for why that
+        // ambient approach doesn't survive AnimatedSwitcher's internal
+        // Stack. Container wraps its child in a real ConstrainedBox only
+        // when given this parameter explicitly, which is what actually
+        // forces the background to stretch to fill minHeight even when
+        // the content (child) is shorter.
+        constraints: minHeight != null
+            ? BoxConstraints(minHeight: minHeight)
+            : null,
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          // Top corners only - reads as a sheet rising from the hero
+          // above it (edge-to-edge on the compact/phone layout) rather
+          // than a bordered card floating on the page.
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(28),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 36,
+              offset: const Offset(0, 20),
+            ),
+          ],
+        ),
+        child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          child,
+          const SizedBox(height: 28),
+          // Footer now lives inside the card (per explicit ask) instead
+          // of as a separate page-level element below it - shown for
+          // every form (login/reset/OTP) that goes through this shared
+          // card, not just the login one, so none of them end up
+          // footerless.
+          _buildTallySyncBadge(compact: true),
         ],
+      ),
       ),
     );
   }
 
-  Widget _buildAuthCard({required Key key, required Widget child}) {
-    return Container(
-      key: key,
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 22),
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        // Bigger, no border, top corners only - reads as a sheet rising
-        // from the hero above it (edge-to-edge on the compact/phone
-        // layout) rather than a bordered card floating on the page.
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 36,
-            offset: const Offset(0, 20),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
+  static const double _heroCardOverlap = 56;
 
   /// The "Remember Me" switch+label and "Forgot Password?" link sit in a
   /// row when both genuinely fit on one line, and drop to a left-aligned
@@ -1991,9 +2046,10 @@ class _LoginPageState extends ConsumerState<Login>
     );
   }
 
-  Widget _buildLoginForm(BuildContext context) {
+  Widget _buildLoginForm(BuildContext context, {double? minHeight}) {
     return _buildAuthCard(
       key: const ValueKey('loginForm'),
+      minHeight: minHeight,
       child: Form(
         key: _formKey,
         child: Column(
@@ -2006,15 +2062,27 @@ class _LoginPageState extends ConsumerState<Login>
             // the same two lines of text. The other forms (reset
             // password, OTP entry) still use _buildFormHeader - their
             // icon/title/subtitle isn't already shown anywhere else.
-            Text(
-              'Sign In',
-              style: GoogleFonts.poppins(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
+            // A single active-tab-style pill (no Sign Up tab next to it -
+            // this app has no public self-registration) - echoes the
+            // reference design's segmented Sign In/Sign Up control
+            // without implying a tappable Sign Up option that doesn't
+            // exist here.
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+              decoration: BoxDecoration(
+                color: app_color,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Sign In',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
             TextFormField(
               controller: usernameController,
               focusNode: _usernameFocusNode,
@@ -2107,9 +2175,10 @@ class _LoginPageState extends ConsumerState<Login>
     );
   }
 
-  Widget _buildResetForm(BuildContext context) {
+  Widget _buildResetForm(BuildContext context, {double? minHeight}) {
     return _buildAuthCard(
       key: const ValueKey('resetForm'),
+      minHeight: minHeight,
       child: Form(
         key: _resetformKey,
         child: Column(
@@ -2193,9 +2262,10 @@ class _LoginPageState extends ConsumerState<Login>
   /// shown after [_resetpass] successfully requests the code. Mirrors
   /// ChangePassword.dart's OTP step UI-wise, adapted to this file's
   /// existing `_buildAuthCard`/`_inputDecoration`/button-style helpers.
-  Widget _buildResetOtpForm(BuildContext context) {
+  Widget _buildResetOtpForm(BuildContext context, {double? minHeight}) {
     return _buildAuthCard(
       key: const ValueKey('resetOtpForm'),
+      minHeight: minHeight,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2387,9 +2457,10 @@ class _LoginPageState extends ConsumerState<Login>
     );
   }
 
-  Widget _buildOtpForm(BuildContext context) {
+  Widget _buildOtpForm(BuildContext context, {double? minHeight}) {
     return _buildAuthCard(
       key: const ValueKey('otpForm'),
+      minHeight: minHeight,
       child: Form(
         key: _otpformKey,
         child: Column(
