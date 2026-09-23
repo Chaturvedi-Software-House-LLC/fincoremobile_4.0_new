@@ -237,7 +237,15 @@ class AuthRepository {
         (email != null && email.isNotEmpty) ? email : displayUserName,
       );
 
-      final emailVerified = user['emailVerifiedAt'] != null;
+      // An account with no email at all (e.g. a username-only account
+      // created by an admin) has nothing to verify - `emailVerifiedAt`
+      // stays null forever in that case, which used to make this always
+      // read as unverified and show the "verify your email" banner on
+      // Dashboard even though there's no real email to verify (the
+      // banner's own "verify" link would then point at the username,
+      // not an actual email address).
+      final hasEmail = email != null && email.isNotEmpty;
+      final emailVerified = !hasEmail || user['emailVerifiedAt'] != null;
       // Read by dashboard_notifier.dart to show the "verify your email"
       // banner - see Login.dart's doc comment on why this is no longer a
       // blocking pre-Dashboard redirect.
