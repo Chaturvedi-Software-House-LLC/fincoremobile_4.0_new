@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -293,15 +294,29 @@ class _ReportBugState extends State<ReportBug> {
                     ),
                     onPressed: _isSubmitting ? null : _submit,
                     icon: _isSubmitting
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator.adaptive(
-                              strokeWidth: 2.5,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
-                              ),
-                            ),
+                            // Built explicitly per-platform rather than via
+                            // CircularProgressIndicator.adaptive() - that
+                            // shortcut doesn't forward `valueColor` to the
+                            // iOS CupertinoActivityIndicator it renders,
+                            // so it fell back to CupertinoActivityIndicator's
+                            // default grey, which read as a flat dot
+                            // against this button's background instead of
+                            // a visibly spinning indicator.
+                            child: Theme.of(context).platform ==
+                                    TargetPlatform.iOS
+                                ? const CupertinoActivityIndicator(
+                                    color: Colors.white,
+                                    animating: true,
+                                  )
+                                : const CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
                           )
                         : const Icon(Icons.send_rounded),
                     label: Text(
