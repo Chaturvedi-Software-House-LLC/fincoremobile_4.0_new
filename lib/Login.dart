@@ -1341,85 +1341,63 @@ class _LoginPageState extends ConsumerState<Login>
                           builder: (context, constraints) {
                             final isWide = constraints.maxWidth >= 820;
 
-                            // Footer lives outside the scroll area, as a
-                            // fixed sibling below it, rather than as the
-                            // last item in the scrolling Column - a Column
-                            // driving its own height off unbounded scroll-
-                            // view constraints has no reliable way to push
-                            // a trailing child to the bottom (an Expanded/
-                            // Spacer there throws "incoming height
-                            // constraints are unbounded", and wrapping in
-                            // IntrinsicHeight to fix that instead throws
-                            // its own "Flex with flexible children doesn't
-                            // support returning intrinsic dimensions" -
-                            // both were tried and reverted). This way the
-                            // footer is always pinned to the true bottom
-                            // of the viewport, and only the content above
-                            // it scrolls if it overflows.
-                            return Column(
-                              children: [
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    padding: EdgeInsets.only(
-                                      top: isWide ? 34 : 0,
+                            // Footer is the last item in the normal
+                            // scrolling flow (not a fixed/pinned sibling
+                            // below it) - it should only ever appear after
+                            // all the card's own content, reachable by
+                            // scrolling on a short screen, not sitting
+                            // permanently glued to the viewport bottom.
+                            return SingleChildScrollView(
+                              padding: EdgeInsets.only(top: isWide ? 34 : 0),
+                              child: Column(
+                                children: [
+                                  // Full-bleed hero, not inside the
+                                  // padded/constrained block below - only
+                                  // the compact/phone layout gets it; the
+                                  // wide layout keeps its existing
+                                  // side-by-side _buildBrandPanel instead.
+                                  if (!isWide) _buildAnimatedHero(),
+                                  Padding(
+                                    padding: EdgeInsets.fromLTRB(
+                                      isWide ? 40 : 0,
+                                      isWide ? 0 : 0,
+                                      isWide ? 40 : 0,
+                                      0,
                                     ),
-                                    child: Column(
-                                      children: [
-                                        // Full-bleed hero, not inside the
-                                        // padded/constrained block below -
-                                        // only the compact/phone layout
-                                        // gets it; the wide layout keeps
-                                        // its existing side-by-side
-                                        // _buildBrandPanel instead.
-                                        if (!isWide) _buildAnimatedHero(),
-                                        Padding(
-                                          padding: EdgeInsets.fromLTRB(
-                                            isWide ? 40 : 20,
-                                            isWide ? 0 : 22,
-                                            isWide ? 40 : 20,
-                                            0,
-                                          ),
-                                          child: Center(
-                                            child: ConstrainedBox(
-                                              constraints: BoxConstraints(
-                                                maxWidth: isWide ? 920 : 460,
-                                              ),
-                                              child: isWide
-                                                  ? Row(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .center,
-                                                      children: [
-                                                        Expanded(
-                                                          child:
-                                                              _buildBrandPanel(),
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 36,
-                                                        ),
-                                                        SizedBox(
-                                                          width: 430,
-                                                          child:
-                                                              _buildAnimatedAuthForm(),
-                                                        ),
-                                                      ],
-                                                    )
-                                                  : _buildAnimatedAuthForm(),
-                                            ),
-                                          ),
+                                    child: Center(
+                                      child: ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          maxWidth: isWide ? 920 : 460,
                                         ),
-                                      ],
+                                        child: isWide
+                                            ? Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.center,
+                                                children: [
+                                                  Expanded(
+                                                    child: _buildBrandPanel(),
+                                                  ),
+                                                  const SizedBox(width: 36),
+                                                  SizedBox(
+                                                    width: 430,
+                                                    child:
+                                                        _buildAnimatedAuthForm(),
+                                                  ),
+                                                ],
+                                              )
+                                            : _buildAnimatedAuthForm(),
+                                      ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 20),
-                                // Full device width (not constrained/
-                                // padded like the content above) - only
-                                // the top corners are rounded, so it reads
-                                // as a page-wide footer rather than
-                                // another card.
-                                _buildTallySyncBadge(compact: !isWide),
-                              ],
+                                  const SizedBox(height: 20),
+                                  // Full device width (not constrained/
+                                  // padded like the content above) - only
+                                  // the top corners are rounded, so it
+                                  // reads as a page-wide footer rather
+                                  // than another card.
+                                  _buildTallySyncBadge(compact: !isWide),
+                                ],
+                              ),
                             );
                           },
                         ),
@@ -1761,9 +1739,10 @@ class _LoginPageState extends ConsumerState<Login>
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        // Bigger, no border - reads as a sheet rising from the hero
-        // above it rather than a bordered card floating on the page.
-        borderRadius: BorderRadius.circular(28),
+        // Bigger, no border, top corners only - reads as a sheet rising
+        // from the hero above it (edge-to-edge on the compact/phone
+        // layout) rather than a bordered card floating on the page.
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.08),
@@ -2019,13 +1998,23 @@ class _LoginPageState extends ConsumerState<Login>
         key: _formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildFormHeader(
-              icon: Icons.lock_open_rounded,
-              title: 'Welcome',
-              subtitle: 'Sign in to continue to your Fincore Go workspace.',
+            // No repeated "Welcome"/subtitle header here - the hero above
+            // this card already says "Welcome back." + the same sign-in
+            // subtitle, so a second copy right below it just duplicated
+            // the same two lines of text. The other forms (reset
+            // password, OTP entry) still use _buildFormHeader - their
+            // icon/title/subtitle isn't already shown anywhere else.
+            Text(
+              'Sign In',
+              style: GoogleFonts.poppins(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            const SizedBox(height: 26),
+            const SizedBox(height: 20),
             TextFormField(
               controller: usernameController,
               focusNode: _usernameFocusNode,
