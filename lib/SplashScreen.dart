@@ -63,8 +63,15 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _init() async {
     prefs = await SharedPreferences.getInstance();
 
-    _pendingUsername = prefs.getString('username_remember');
-    _pendingPassword = prefs.getString('password_remember');
+    // Must match the keys Login.dart's _persistRememberMeCredentialsIfEnabled/
+    // _onRememberMeChanged actually write ('remember_me_username'/
+    // 'remember_me_password') - this used to read a different pair of
+    // keys ('username_remember'/'password_remember') that nothing ever
+    // wrote, so Login was always constructed with an empty username and
+    // its whole auto-login gate (`if (usernamee.isNotEmpty) {...}`)
+    // never ran, regardless of Remember Me being on.
+    _pendingUsername = prefs.getString('remember_me_username');
+    _pendingPassword = prefs.getString('remember_me_password');
 
     // The loading loop above keeps playing while the real update-check
     // network call runs, so the loading is genuinely synced with real
