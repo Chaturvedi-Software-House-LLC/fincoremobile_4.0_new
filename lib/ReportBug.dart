@@ -58,11 +58,25 @@ class _ReportBugState extends ConsumerState<ReportBug> {
   // on this screen's plain background that grey read as dull/washed out,
   // so the field itself is white/near-card with just a crisp border to
   // define its edges instead of a fill-color difference doing the work.
-  InputDecoration _decoration(BuildContext context, String label, {String? hint}) {
+  InputDecoration _decoration(
+    BuildContext context,
+    String label, {
+    String? hint,
+    required IconData icon,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return InputDecoration(
       labelText: label,
       hintText: hint,
+      // Aligned to the field's first line rather than vertically centered
+      // (the default) - on the multi-line fields (description/steps) a
+      // centered icon drifted away from the label/text and looked
+      // oddly placed once the field grew past one line.
+      prefixIcon: Padding(
+        padding: const EdgeInsets.only(left: 2, right: 6, top: 14),
+        child: Icon(icon, size: 20, color: app_color),
+      ),
+      prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
       labelStyle: GoogleFonts.poppins(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
@@ -161,6 +175,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                     context,
                     'Title',
                     hint: 'Short title',
+                    icon: Icons.short_text_rounded,
                   ),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Please enter a short title'
@@ -176,6 +191,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                     context,
                     'What happened?',
                     hint: 'Describe the issue',
+                    icon: Icons.notes_rounded,
                   ),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Please describe the issue'
@@ -191,6 +207,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                     context,
                     'How to reproduce (optional)',
                     hint: 'What steps show the issue?',
+                    icon: Icons.format_list_numbered_rounded,
                   ),
                 ),
                 const SizedBox(height: 20),
