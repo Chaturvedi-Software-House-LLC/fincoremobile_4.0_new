@@ -64,7 +64,12 @@ class _ReportBugState extends ConsumerState<ReportBug> {
   // away from the label/text once a field spans multiple lines
   // (description/steps), landing at the box's vertical center instead of
   // by the label.
-  Widget _fieldLabel(BuildContext context, IconData icon, String label) {
+  Widget _fieldLabel(
+    BuildContext context,
+    IconData icon,
+    String label, {
+    String? trailing,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -79,11 +84,26 @@ class _ReportBugState extends ConsumerState<ReportBug> {
               color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
+          if (trailing != null) ...[
+            const Spacer(),
+            Text(
+              trailing,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
+  // Borderless with a soft drop shadow (via [_fieldShadow]) instead of an
+  // outlined box - a floating-card look reads as more modern than a flat
+  // bordered rectangle, while staying a plain single-column field (no
+  // structural change to the form itself).
   InputDecoration _decoration(BuildContext context, {String? hint}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return InputDecoration(
@@ -92,20 +112,37 @@ class _ReportBugState extends ConsumerState<ReportBug> {
       fillColor: isDark ? const Color(0xFF1B2436) : Colors.white,
       contentPadding: const EdgeInsets.symmetric(
         vertical: 14,
-        horizontal: 14,
+        horizontal: 16,
       ),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: app_color, width: 1.4),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: app_color, width: 1.6),
       ),
+    );
+  }
+
+  Widget _fieldShadow(BuildContext context, {required Widget child}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.22 : 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 
@@ -118,11 +155,14 @@ class _ReportBugState extends ConsumerState<ReportBug> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: app_color,
-        elevation: 6,
+        elevation: 4,
+        // A tinted shadow (vs. the default flat black) reads softer/more
+        // modern under the rounded bottom edge.
+        shadowColor: app_color.withOpacity(0.45),
         iconTheme: const IconThemeData(color: Colors.white),
         centerTitle: true,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
         ),
         title: Text(
           'Report an Issue',
@@ -146,6 +186,13 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: app_color.withOpacity(0.1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: app_color.withOpacity(0.18),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ],
                   ),
                   child: Icon(
                     Icons.bug_report_outlined,
@@ -173,59 +220,66 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                 ),
                 const SizedBox(height: 24),
                 _fieldLabel(context, Icons.short_text_rounded, 'Title'),
-                TextFormField(
-                  controller: _titleController,
-                  style: GoogleFonts.poppins(),
-                  decoration: _decoration(context, hint: 'Short title'),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Please enter a short title'
-                      : null,
+                _fieldShadow(
+                  context,
+                  child: TextFormField(
+                    controller: _titleController,
+                    style: GoogleFonts.poppins(),
+                    decoration: _decoration(context, hint: 'Short title'),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Please enter a short title'
+                        : null,
+                  ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
                 _fieldLabel(
                   context,
                   Icons.notes_rounded,
                   'What happened?',
                 ),
-                TextFormField(
-                  controller: _descriptionController,
-                  style: GoogleFonts.poppins(),
-                  minLines: 3,
-                  maxLines: 6,
-                  decoration: _decoration(
-                    context,
-                    hint: 'Describe the issue',
+                _fieldShadow(
+                  context,
+                  child: TextFormField(
+                    controller: _descriptionController,
+                    style: GoogleFonts.poppins(),
+                    minLines: 3,
+                    maxLines: 6,
+                    decoration: _decoration(
+                      context,
+                      hint: 'Describe the issue',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Please describe the issue'
+                        : null,
                   ),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Please describe the issue'
-                      : null,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
                 _fieldLabel(
                   context,
                   Icons.format_list_numbered_rounded,
                   'How to reproduce (optional)',
                 ),
-                TextFormField(
-                  controller: _stepsController,
-                  style: GoogleFonts.poppins(),
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: _decoration(
-                    context,
-                    hint: 'What steps show the issue?',
+                _fieldShadow(
+                  context,
+                  child: TextFormField(
+                    controller: _stepsController,
+                    style: GoogleFonts.poppins(),
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: _decoration(
+                      context,
+                      hint: 'What steps show the issue?',
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
-                Text(
+                _fieldLabel(
+                  context,
+                  Icons.photo_camera_back_outlined,
                   'Screenshots (optional)',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
+                  trailing: '${state.images.length}/$maxBugReportImages',
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 2),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
@@ -237,15 +291,20 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                       ),
                     if (state.images.length < maxBugReportImages)
                       InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(14),
                         onTap: notifier.pickImages,
                         child: Container(
                           width: 76,
                           height: 76,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
+                            color: app_color.withOpacity(
+                              Theme.of(context).brightness == Brightness.dark
+                                  ? 0.14
+                                  : 0.07,
+                            ),
                             border: Border.all(
-                              color: Theme.of(context).dividerColor,
+                              color: app_color.withOpacity(0.35),
                             ),
                           ),
                           child: Icon(
@@ -256,13 +315,16 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                       ),
                   ],
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
                 SizedBox(
                   width: double.infinity,
+                  height: 52,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: app_color,
                       foregroundColor: Colors.white,
+                      elevation: 3,
+                      shadowColor: app_color.withOpacity(0.5),
                       // Disabled (while submitting) keeps the same solid
                       // color instead of ElevatedButton's default greyed-
                       // out disabled look - that greying is what made the
@@ -270,9 +332,8 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                       // an active loading indicator.
                       disabledBackgroundColor: app_color,
                       disabledForegroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ),
                     onPressed: state.isSubmitting ? null : _submit,
