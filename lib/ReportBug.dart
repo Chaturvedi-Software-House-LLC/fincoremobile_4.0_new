@@ -154,7 +154,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                   style: GoogleFonts.poppins(),
                   decoration: _decoration(
                     'Title',
-                    hint: 'e.g. App crashes on Sales entry',
+                    hint: 'Short title',
                   ),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Please enter a short title'
@@ -168,7 +168,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                   maxLines: 6,
                   decoration: _decoration(
                     'What happened?',
-                    hint: 'Describe the issue in as much detail as you can',
+                    hint: 'Describe the issue',
                   ),
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Please describe the issue'
@@ -182,7 +182,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                   maxLines: 4,
                   decoration: _decoration(
                     'Steps to reproduce (optional)',
-                    hint: '1. Open Sales entry\n2. Tap Save\n3. ...',
+                    hint: 'Optional',
                   ),
                 ),
                 const SizedBox(height: 20),
