@@ -181,8 +181,8 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                   minLines: 2,
                   maxLines: 4,
                   decoration: _decoration(
-                    'Steps to reproduce (optional)',
-                    hint: 'Optional',
+                    'How to reproduce (optional)',
+                    hint: 'What steps show the issue?',
                   ),
                 ),
                 const SizedBox(height: 20),
