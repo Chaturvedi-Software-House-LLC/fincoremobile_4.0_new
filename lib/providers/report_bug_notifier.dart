@@ -33,25 +33,32 @@ class ReportBugNotifier extends StateNotifier<ReportBugState> {
 
   ReportBugNotifier(this._ref) : super(const ReportBugState());
 
-  Future<void> pickImages() async {
+  /// Returns a message to show the user only when their selection had to
+  /// be truncated - the native picker has no "limit to N selections"
+  /// option, so it happily lets someone tick a 6th photo, but the app
+  /// still only keeps the first [remaining] of them. Without this, a
+  /// truncated pick looked like a silent bug ("I picked 6, why are there
+  /// only 5?") rather than an enforced cap.
+  Future<String?> pickImages() async {
     final remaining = maxBugReportImages - state.images.length;
-    if (remaining <= 0) return;
+    if (remaining <= 0) return null;
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       allowMultiple: true,
       withData: true,
     );
-    if (result == null || result.files.isEmpty) return;
+    if (result == null || result.files.isEmpty) return null;
 
-    // Silently capped - the picker has no native "limit to N selections"
-    // option, and popping a message right after the user already made
-    // their picks felt like a scold. The remaining slot count is visible
-    // in the grid itself (the "add" tile disappears once
-    // maxBugReportImages is reached), so the cap is self-explanatory.
     state = state.copyWith(
       images: [...state.images, ...result.files.take(remaining)],
     );
+
+    if (result.files.length > remaining) {
+      return 'Only $remaining of ${result.files.length} photos were added '
+          '- up to $maxBugReportImages screenshots are allowed.';
+    }
+    return null;
   }
 
   void removeImage(int index) {

@@ -37,6 +37,13 @@ class _ReportBugState extends ConsumerState<ReportBug> {
     super.dispose();
   }
 
+  Future<void> _pickImages() async {
+    final message =
+        await ref.read(reportBugNotifierProvider.notifier).pickImages();
+    if (!mounted || message == null) return;
+    showAppMessage(context, message);
+  }
+
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -292,7 +299,7 @@ class _ReportBugState extends ConsumerState<ReportBug> {
                     if (state.images.length < maxBugReportImages)
                       InkWell(
                         borderRadius: BorderRadius.circular(14),
-                        onTap: notifier.pickImages,
+                        onTap: _pickImages,
                         child: Container(
                           width: 76,
                           height: 76,
