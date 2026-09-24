@@ -1,72 +1,15 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'api/assistant_repository.dart';
-import 'api/token_store.dart';
+import 'providers/assistant_chat_notifier.dart';
 
 // Matches the brand gradient used elsewhere in the app (see the "Live Chat"
 // card in Help.dart).
 const _kBrandStart = Color(0xFF6D5BFF);
 const _kBrandEnd = Color(0xFF00C2CB);
-
-/// The backend response for a query/document-analysis call: the answer
-/// text, plus an explicit flag (set only by the server's unsupported-
-/// voucher-type guardrail) for whether the "Contact Support Team" card
-/// should always be shown alongside it.
-class _AssistantAnswer {
-  const _AssistantAnswer({required this.text, required this.requiresSupport});
-  final String text;
-  final bool requiresSupport;
-}
-
-// -----------------------------------------------------------------------
-// Message model
-// -----------------------------------------------------------------------
-
-class _ChatMessage {
-  _ChatMessage({
-    required this.text,
-    required this.isUser,
-    this.isError = false,
-    this.attachedFileName,
-    this.isSupportForm = false,
-    DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
-
-  String text;
-  final bool isUser;
-  final bool isError;
-  final String? attachedFileName;
-  final bool isSupportForm;
-  final DateTime timestamp;
-
-  Map<String, dynamic> toJson() => {
-    'text': text,
-    'isUser': isUser,
-    'isError': isError,
-    'attachedFileName': attachedFileName,
-    'timestamp': timestamp.toIso8601String(),
-  };
-
-  factory _ChatMessage.fromJson(Map<String, dynamic> json) => _ChatMessage(
-    text: json['text'] as String? ?? '',
-    isUser: json['isUser'] as bool? ?? false,
-    isError: json['isError'] as bool? ?? false,
-    attachedFileName: json['attachedFileName'] as String?,
-    // Support-form entries are never persisted/restored as a live form -
-    // they collapse to a plain message so a restored session doesn't show a
-    // stale, non-functional card.
-    isSupportForm: false,
-    timestamp:
-    DateTime.tryParse(json['timestamp'] as String? ?? '') ??
-        DateTime.now(),
-  );
-}
 
 String _formatMessageTime(DateTime t) {
   final hour = t.hour % 12 == 0 ? 12 : t.hour % 12;
@@ -113,135 +56,31 @@ String _formatDateLabel(DateTime date) {
 /// backend's `/api/assistant/query` and `/api/assistant/analyze-document`
 /// endpoints - the app's own knowledge base drives every answer, there's no
 /// third-party LLM API key or usage limit involved.
-class AssistantChat extends StatefulWidget {
+class AssistantChat extends ConsumerStatefulWidget {
   const AssistantChat({super.key});
 
   @override
-  State<AssistantChat> createState() => _AssistantChatState();
+  ConsumerState<AssistantChat> createState() => _AssistantChatState();
 }
 
-class _AssistantChatState extends State<AssistantChat> {
-  final List<_ChatMessage> _messages = [];
+class _AssistantChatState extends ConsumerState<AssistantChat> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  bool _hasActiveCompany = false;
-  String _userName = '';
-  String _userEmail = '';
-
-  PlatformFile? _attachedFile;
-  bool _isSending = false;
-  bool _awaitingCloseConfirmation = false;
-
-  Timer? _sessionTimer;
-  // How long a chat session stays resumable after the user's last message -
-  // both while the screen stays open (the idle auto-end timer) and after
-  // leaving the screen entirely (re-entering within this window restores
-  // the conversation; past it, a fresh chat starts instead).
-  static const _sessionTimeout = Duration(minutes: 15);
-  static const _prefsMessagesKey = 'assistant_chat_messages';
-  static const _prefsLastInputKey = 'assistant_chat_last_input_at';
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final prefs = await SharedPreferences.getInstance();
-    final companyGuid = await TokenStore.instance.activeCompanyGuid;
-    if (!mounted) return;
-    setState(() {
-      _hasActiveCompany = companyGuid != null;
-      _userName = prefs.getString('name_nav') ?? '';
-      _userEmail = prefs.getString('email_nav') ?? '';
-    });
-    await _restoreOrStartSession(prefs);
-  }
-
-  Future<void> _restoreOrStartSession(SharedPreferences prefs) async {
-    final raw = prefs.getString(_prefsMessagesKey);
-    final lastInputIso = prefs.getString(_prefsLastInputKey);
-    if (raw == null || lastInputIso == null) return;
-
-    final lastInput = DateTime.tryParse(lastInputIso);
-    if (lastInput == null) return;
-
-    final elapsed = DateTime.now().difference(lastInput);
-    if (elapsed >= _sessionTimeout) {
-      await _clearPersistedSession(prefs);
-      return;
-    }
-
-    try {
-      final list = jsonDecode(raw) as List<dynamic>;
-      final restored = list
-          .map((e) => _ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
-      if (!mounted) return;
-      setState(() {
-        _messages
-          ..clear()
-          ..addAll(restored);
-      });
-      _scheduleSessionTimeout(_sessionTimeout - elapsed);
-      _scrollToBottom(animate: false);
-    } catch (_) {
-      // Corrupt persisted state - just start fresh.
-      await _clearPersistedSession(prefs);
-    }
-  }
-
-  void _scheduleSessionTimeout(Duration remaining) {
-    _sessionTimer?.cancel();
-    final delay = remaining.isNegative ? Duration.zero : remaining;
-    _sessionTimer = Timer(delay, _endChatSession);
-  }
-
-  Future<void> _persistSession({required bool isUserInput}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final persistable = _messages.where((m) => !m.isSupportForm).toList();
-    await prefs.setString(
-      _prefsMessagesKey,
-      jsonEncode(persistable.map((m) => m.toJson()).toList()),
-    );
-    if (isUserInput) {
-      await prefs.setString(
-        _prefsLastInputKey,
-        DateTime.now().toIso8601String(),
-      );
-    }
-  }
-
-  Future<void> _clearPersistedSession(SharedPreferences prefs) async {
-    await prefs.remove(_prefsMessagesKey);
-    await prefs.remove(_prefsLastInputKey);
-  }
-
-  void _endChatSession() {
-    _isSending = false; // stop any stuck typing indicator
-    _sessionTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _messages.clear();
-      _awaitingCloseConfirmation = false;
-    });
-    SharedPreferences.getInstance().then(_clearPersistedSession);
-  }
+  // Identity (not length) comparison - a placeholder-to-answer swap keeps
+  // the same message count but is still a new `messages` list instance
+  // (see AssistantChatNotifier.send), and should still auto-scroll since
+  // the taller answer text can push the bubble further down. Fields that
+  // don't touch `messages` (isSending, attachedFile, ...) reuse the same
+  // list instance via copyWith's default, so they correctly don't
+  // re-trigger a scroll.
+  List<ChatMessage>? _lastMessages;
+  bool _hasScrolledOnce = false;
 
   @override
   void dispose() {
     _inputController.dispose();
     _scrollController.dispose();
-    // Deliberately does NOT clear the persisted session - leaving the
-    // screen alone doesn't end the chat. Re-entering within
-    // _sessionTimeout of the last reply (checked in
-    // _restoreOrStartSession, against the persisted timestamp - not this
-    // timer, which dies with the widget) resumes the same conversation;
-    // past that window it starts fresh. Only cancel the in-screen idle
-    // timer itself, since it can't fire on a disposed widget anyway.
-    _sessionTimer?.cancel();
     super.dispose();
   }
 
@@ -261,107 +100,6 @@ class _AssistantChatState extends State<AssistantChat> {
     });
   }
 
-  // -----------------------------------------------------------------------
-  // Intent detection helpers - word-based, not exact-phrase matching, so
-  // natural variations in phrasing ("end this", "end this conversation",
-  // "please end chat") are all recognized.
-  // -----------------------------------------------------------------------
-
-  static const _humanSupportMarkers = [
-    'agent',
-    'human',
-    'contact support',
-    'talk to someone',
-    'real person',
-    'customer support',
-    'support team',
-  ];
-
-  bool _wantsHumanSupport(String text) {
-    final lower = text.toLowerCase();
-    return _humanSupportMarkers.any(lower.contains);
-  }
-
-  static const _deadEndMarkers = [
-    'cannot provide',
-    "can't help with that",
-    "i'm not sure",
-    'not sure about that',
-    "don't have that information",
-    'coming soon',
-    // Deliberately NOT "contact support" - the backend's own correct,
-    // complete answers for unsupported voucher types/features legitimately
-    // end with "...please contact support (More -> Help) to request it."
-    // Treating that phrase as a failure signal caused the escalation card
-    // to double-trigger right after a perfectly good answer.
-  ];
-
-  bool _looksLikeDeadEnd(String answerText) {
-    final lower = answerText.toLowerCase();
-    return _deadEndMarkers.any(lower.contains);
-  }
-
-  static const _stuckMarkers = [
-    "don't want",
-    "doesn't work",
-    'not helping',
-    'not working',
-    'still not',
-    "that's not",
-    'useless',
-    "isn't helping",
-  ];
-
-  bool _userSeemsStuck(String text) {
-    final lower = text.toLowerCase();
-    return _stuckMarkers.any(lower.contains);
-  }
-
-  static const _endWords = ['end', 'stop', 'close', 'quit', 'exit', 'bye'];
-  static const _targetWords = ['chat', 'conversation', 'session', 'this'];
-
-  bool _isEndIntent(String text) {
-    final words = text.toLowerCase().split(RegExp(r'\s+'));
-    final hasEndWord = words.any(_endWords.contains);
-    final hasTargetWord = words.any(_targetWords.contains);
-    return hasEndWord && hasTargetWord;
-  }
-
-  bool _isBareEndWord(String text) {
-    final trimmed = text.trim().toLowerCase();
-    return _endWords.contains(trimmed);
-  }
-
-  static const _closingSmallTalkMarkers = [
-    'thanks',
-    'thank you',
-    'that helped',
-    'appreciate it',
-    'ok bye',
-    'goodbye',
-  ];
-
-  bool _isClosingSmallTalk(String text) {
-    final lower = text.toLowerCase();
-    return _closingSmallTalkMarkers.any(lower.contains);
-  }
-
-  static const _negativeWords = ['no', 'nope', 'nah'];
-  bool _isNegativeReply(String text) {
-    final trimmed = text.trim().toLowerCase();
-    return _negativeWords.contains(trimmed);
-  }
-
-  static const _affirmativeWords = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay'];
-  bool _isBareAffirmative(String text) {
-    final trimmed = text.trim().toLowerCase();
-    return _affirmativeWords.contains(trimmed);
-  }
-
-  // -----------------------------------------------------------------------
-  // Sending
-  // -----------------------------------------------------------------------
-
   Future<void> _pickAttachment() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -369,194 +107,15 @@ class _AssistantChatState extends State<AssistantChat> {
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
-    setState(() => _attachedFile = result.files.single);
+    ref.read(assistantChatNotifierProvider.notifier).pickAttachment(
+          result.files.single,
+        );
   }
 
   Future<void> _send() async {
-    final question = _inputController.text.trim();
-    final file = _attachedFile;
-    if (question.isEmpty && file == null) return;
-
+    final question = _inputController.text;
     _inputController.clear();
-    _scheduleSessionTimeout(_sessionTimeout);
-
-    setState(() {
-      _messages.add(
-        _ChatMessage(
-          text: question,
-          isUser: true,
-          attachedFileName: file?.name,
-        ),
-      );
-      _attachedFile = null;
-    });
-    _scrollToBottom();
-    await _persistSession(isUserInput: true);
-
-    final wasAwaitingClose = _awaitingCloseConfirmation;
-    _awaitingCloseConfirmation = false;
-
-    if (wasAwaitingClose) {
-      if (_isNegativeReply(question) ||
-          _isEndIntent(question) ||
-          _isBareEndWord(question)) {
-        _endChatSession();
-        return;
-      }
-      if (_isBareAffirmative(question)) {
-        setState(
-              () => _messages.add(
-            _ChatMessage(
-              text: 'Sure - what would you like help with?',
-              isUser: false,
-            ),
-          ),
-        );
-        _scrollToBottom();
-        await _persistSession(isUserInput: false);
-        return;
-      }
-      // Otherwise fall through and treat it as a normal new question.
-    }
-
-    if (_wantsHumanSupport(question)) {
-      setState(
-            () => _messages.add(
-          _ChatMessage(text: '', isUser: false, isSupportForm: true),
-        ),
-      );
-      _scrollToBottom();
-      await _persistSession(isUserInput: false);
-      return;
-    }
-
-    if (question.isNotEmpty && _isEndIntent(question)) {
-      _endChatSession();
-      return;
-    }
-
-    if (question.isNotEmpty && _isClosingSmallTalk(question)) {
-      setState(
-            () => _messages.add(
-          _ChatMessage(
-            text: 'Happy to help! Want to ask something else, or should I '
-                'end this chat?',
-            isUser: false,
-          ),
-        ),
-      );
-      _awaitingCloseConfirmation = true;
-      _scrollToBottom();
-      await _persistSession(isUserInput: false);
-      return;
-    }
-
-    // The assistant is scoped to the active company (tally-api's
-    // `/tally-data/companies/:companyId/assistant/*`) - without one
-    // selected there's no companyId to call it with.
-    if (!_hasActiveCompany) {
-      setState(() {
-        _messages.add(
-          _ChatMessage(
-            text: "The AI Assistant isn't available for your account yet.",
-            isUser: false,
-          ),
-        );
-        _messages.add(
-          _ChatMessage(text: '', isUser: false, isSupportForm: true),
-        );
-      });
-      _scrollToBottom();
-      await _persistSession(isUserInput: false);
-      return;
-    }
-
-    setState(() => _isSending = true);
-    final placeholder = _ChatMessage(text: '', isUser: false);
-    setState(() => _messages.add(placeholder));
-    _scrollToBottom();
-
-    try {
-      final result = file != null
-          ? await _analyzeDocument(file, question)
-          : await _askQuestion(question);
-
-      setState(() {
-        _messages.remove(placeholder);
-        _messages.add(_ChatMessage(text: result.text, isUser: false));
-      });
-
-      // requiresSupport is an explicit server-side flag (set only by the
-      // unsupported-voucher-type guardrail) - more reliable than trying to
-      // text-match "contact support" in the answer, which previously either
-      // double-triggered on the guardrail's own answer or, after that was
-      // fixed, never triggered at all for it.
-      if (result.requiresSupport ||
-          _looksLikeDeadEnd(result.text) ||
-          _userSeemsStuck(question)) {
-        setState(
-              () => _messages.add(
-            _ChatMessage(text: '', isUser: false, isSupportForm: true),
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _messages.remove(placeholder);
-        // Couldn't reach the backend/model at all - don't just show a dead
-        // error message, go straight to the "contact support" escalation
-        // so the user has somewhere to go instead of a dead end.
-        _messages.add(
-          _ChatMessage(text: '', isUser: false, isSupportForm: true),
-        );
-      });
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-      _scrollToBottom();
-      await _persistSession(isUserInput: false);
-    }
-  }
-
-  Future<_AssistantAnswer> _askQuestion(String question) async {
-    final result = await AssistantRepository.instance.askQuestion(question);
-    return _toAnswer(result);
-  }
-
-  Future<_AssistantAnswer> _analyzeDocument(
-      PlatformFile file, String question) async {
-    final result = await AssistantRepository.instance.analyzeDocument(
-      file,
-      question,
-    );
-    return _toAnswer(result);
-  }
-
-  _AssistantAnswer _toAnswer(AssistantAnswer result) {
-    if (result.answer.trim().isEmpty) {
-      throw Exception('Empty response from assistant');
-    }
-    return _AssistantAnswer(
-      text: result.answer.trim(),
-      requiresSupport: result.requiresSupport,
-    );
-  }
-
-  /// Sent server-side now (see tally-api's `AssistantController.
-  /// sendSupportRequest`) - this used to build and send the email
-  /// directly from the app with the SMTP password hardcoded into the
-  /// shipped client.
-  Future<void> _sendSupportEmail({
-    required String name,
-    required String email,
-    required String phone,
-    required String details,
-  }) async {
-    await AssistantRepository.instance.sendSupportRequest(
-      name: name,
-      email: email,
-      phone: phone,
-      details: details,
-    );
+    await ref.read(assistantChatNotifierProvider.notifier).send(question);
   }
 
   // -----------------------------------------------------------------------
@@ -566,6 +125,22 @@ class _AssistantChatState extends State<AssistantChat> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final state = ref.watch(assistantChatNotifierProvider);
+
+    // Same auto-scroll-to-bottom behavior the old setState-driven version
+    // got for free on every message-list mutation - triggered here since
+    // this build already runs on every state change.
+    if (!identical(state.messages, _lastMessages)) {
+      _lastMessages = state.messages;
+      if (state.messages.isNotEmpty) {
+        // The very first time the list has content - whether that's a
+        // restored session or a brand-new chat's first message - jumps
+        // instantly rather than animating, same as the old
+        // `_restoreOrStartSession`'s explicit `animate: false` call.
+        _scrollToBottom(animate: _hasScrolledOnce);
+        _hasScrolledOnce = true;
+      }
+    }
 
     final scaffoldBg = isDark
         ? const Color(0xFF0B1220)
@@ -584,18 +159,18 @@ class _AssistantChatState extends State<AssistantChat> {
       body: Column(
         children: [
           Expanded(
-            child: _messages.isEmpty
+            child: state.messages.isEmpty
                 ? _buildWelcome(subTextColor, textColor)
                 : ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-              itemCount: _messages.length,
+              itemCount: state.messages.length,
               itemBuilder: (context, index) {
-                final entry = _messages[index];
+                final entry = state.messages[index];
                 final showDateDivider =
                     index == 0 ||
                         !_isSameDay(
-                          _messages[index - 1].timestamp,
+                          state.messages[index - 1].timestamp,
                           entry.timestamp,
                         );
                 return Column(
@@ -609,13 +184,14 @@ class _AssistantChatState extends State<AssistantChat> {
                       textColor,
                       subTextColor,
                       isDark,
+                      state,
                     ),
                   ],
                 );
               },
             ),
           ),
-          _buildInputBar(inputBg, inputBorder, textColor, isDark),
+          _buildInputBar(inputBg, inputBorder, textColor, isDark, state),
         ],
       ),
     );
@@ -683,7 +259,9 @@ class _AssistantChatState extends State<AssistantChat> {
                 IconButton(
                   tooltip: 'New chat',
                   icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                  onPressed: _endChatSession,
+                  onPressed: () => ref
+                      .read(assistantChatNotifierProvider.notifier)
+                      .endChatSession(),
                 ),
                 const SizedBox(width: 4),
               ],
@@ -790,11 +368,12 @@ class _AssistantChatState extends State<AssistantChat> {
   }
 
   Widget _buildMessageBubble(
-      _ChatMessage entry,
+      ChatMessage entry,
       Color llmBubbleColor,
       Color textColor,
       Color subTextColor,
       bool isDark,
+      AssistantChatState state,
       ) {
     final isUser = entry.isUser;
     return Padding(
@@ -832,10 +411,23 @@ class _AssistantChatState extends State<AssistantChat> {
                       maxWidth: MediaQuery.of(context).size.width * 0.82,
                     ),
                     child: _InlineSupportForm(
-                      name: _userName,
-                      email: _userEmail,
+                      name: state.userName,
+                      email: state.userEmail,
                       isDark: isDark,
-                      onSend: _sendSupportEmail,
+                      onSend: ({
+                        required name,
+                        required email,
+                        required phone,
+                        required details,
+                      }) =>
+                          ref
+                              .read(assistantChatNotifierProvider.notifier)
+                              .sendSupportEmail(
+                                name: name,
+                                email: email,
+                                phone: phone,
+                                details: details,
+                              ),
                     ),
                   )
                 else
@@ -947,6 +539,7 @@ class _AssistantChatState extends State<AssistantChat> {
       Color inputBorder,
       Color textColor,
       bool isDark,
+      AssistantChatState state,
       ) {
     return SafeArea(
       top: false,
@@ -955,7 +548,8 @@ class _AssistantChatState extends State<AssistantChat> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (_attachedFile != null) _buildAttachmentPreview(textColor),
+            if (state.attachedFile != null)
+              _buildAttachmentPreview(textColor, state.attachedFile!),
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -963,7 +557,7 @@ class _AssistantChatState extends State<AssistantChat> {
                   tooltip: 'Attach PDF',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  onPressed: _isSending ? null : _pickAttachment,
+                  onPressed: state.isSending ? null : _pickAttachment,
                   icon: Container(
                     width: 34,
                     height: 34,
@@ -1033,7 +627,7 @@ class _AssistantChatState extends State<AssistantChat> {
                 ),
                 const SizedBox(width: 8),
                 GestureDetector(
-                  onTap: _isSending ? null : _send,
+                  onTap: state.isSending ? null : _send,
                   child: Container(
                     width: 42,
                     height: 42,
@@ -1065,7 +659,7 @@ class _AssistantChatState extends State<AssistantChat> {
     );
   }
 
-  Widget _buildAttachmentPreview(Color textColor) {
+  Widget _buildAttachmentPreview(Color textColor, PlatformFile attachedFile) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6, left: 4),
       child: Row(
@@ -1074,7 +668,7 @@ class _AssistantChatState extends State<AssistantChat> {
           const SizedBox(width: 4),
           Flexible(
             child: Text(
-              _attachedFile!.name,
+              attachedFile.name,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: textColor, fontSize: 12),
             ),
@@ -1084,7 +678,9 @@ class _AssistantChatState extends State<AssistantChat> {
             color: textColor,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            onPressed: () => setState(() => _attachedFile = null),
+            onPressed: () => ref
+                .read(assistantChatNotifierProvider.notifier)
+                .clearAttachment(),
           ),
         ],
       ),

@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/assistant_repository.dart';
 import '../api/auth_repository.dart';
 import '../api/batch_repository.dart';
 import '../api/currency_repository.dart';
 import '../api/dashboard_repository.dart';
+import '../api/feedback_repository.dart';
 import '../api/godown_repository.dart';
 import '../api/group_repository.dart';
 import '../api/identity_repository.dart';
@@ -23,6 +25,10 @@ import '../api/voucher_type_repository.dart';
 /// singletons in `lib/api/`, so screen notifiers depend on `ref.read(...)`
 /// rather than reaching for the singletons directly. The repositories
 /// themselves are untouched.
+final assistantRepositoryProvider = Provider<AssistantRepository>(
+  (ref) => AssistantRepository.instance,
+);
+
 final authRepositoryProvider = Provider<AuthRepository>(
   (ref) => AuthRepository.instance,
 );
@@ -37,6 +43,10 @@ final currencyRepositoryProvider = Provider<CurrencyRepository>(
 
 final dashboardRepositoryProvider = Provider<DashboardRepository>(
   (ref) => DashboardRepository.instance,
+);
+
+final feedbackRepositoryProvider = Provider<FeedbackRepository>(
+  (ref) => FeedbackRepository.instance,
 );
 
 final godownRepositoryProvider = Provider<GodownRepository>(

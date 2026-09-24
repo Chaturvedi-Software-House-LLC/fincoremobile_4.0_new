@@ -1,13 +1,13 @@
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'api/api_exception.dart';
-import 'api/feedback_repository.dart';
+import 'api/feedback_repository.dart' show maxBugReportImages;
 import 'constants.dart';
+import 'providers/report_bug_notifier.dart';
 import 'widgets/entry_widgets.dart';
 
 /// `POST /bug-reports` (tally-api) - a lightweight way for testers/
@@ -16,54 +16,18 @@ import 'widgets/entry_widgets.dart';
 /// app_bottom_nav.dart's quick-actions sheet) since it uses the `user`-
 /// scope token rather than a company-scoped one - see
 /// FeedbackRepository's doc comment.
-class ReportBug extends StatefulWidget {
+class ReportBug extends ConsumerStatefulWidget {
   const ReportBug({super.key});
 
   @override
-  State<ReportBug> createState() => _ReportBugState();
+  ConsumerState<ReportBug> createState() => _ReportBugState();
 }
 
-class _ReportBugState extends State<ReportBug> {
+class _ReportBugState extends ConsumerState<ReportBug> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _stepsController = TextEditingController();
-
-  final List<PlatformFile> _images = [];
-
-  bool _isSubmitting = false;
-
-  Future<void> _pickImages() async {
-    final remaining = maxBugReportImages - _images.length;
-    if (remaining <= 0) {
-      showAppMessage(
-        context,
-        'You can attach up to $maxBugReportImages images.',
-      );
-      return;
-    }
-
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: true,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-
-    // Silently capped rather than warned after the fact - the picker has
-    // no native "limit to N selections" option, and popping a message
-    // right after the user already made their picks felt like a scold.
-    // The remaining slot count is visible in the grid itself (the "add"
-    // tile disappears once maxBugReportImages is reached), so the cap is
-    // self-explanatory without an extra dialog.
-    setState(() {
-      _images.addAll(result.files.take(remaining));
-    });
-  }
-
-  void _removeImage(int index) {
-    setState(() => _images.removeAt(index));
-  }
 
   @override
   void dispose() {
@@ -76,32 +40,17 @@ class _ReportBugState extends State<ReportBug> {
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    setState(() => _isSubmitting = true);
-    try {
-      await FeedbackRepository.instance.reportBug(
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        stepsToReproduce: _stepsController.text.trim().isEmpty
-            ? null
-            : _stepsController.text.trim(),
-        images: _images,
-      );
-      if (!mounted) return;
-      showAppMessage(
-        context,
-        'Thanks! Your bug report has been sent.',
-        isError: false,
-      );
-      Navigator.of(context).pop();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      showAppMessage(context, e.message);
-    } catch (e) {
-      if (!mounted) return;
-      showAppMessage(context, 'Could not reach the server. Please try again.');
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
+    final result = await ref.read(reportBugNotifierProvider.notifier).submit(
+          title: _titleController.text.trim(),
+          description: _descriptionController.text.trim(),
+          stepsToReproduce: _stepsController.text.trim().isEmpty
+              ? null
+              : _stepsController.text.trim(),
+        );
+    if (!mounted) return;
+
+    showAppMessage(context, result.message, isError: !result.success);
+    if (result.success) Navigator.of(context).pop();
   }
 
   InputDecoration _decoration(String label, {String? hint}) {
@@ -139,6 +88,9 @@ class _ReportBugState extends State<ReportBug> {
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(reportBugNotifierProvider);
+    final notifier = ref.read(reportBugNotifierProvider.notifier);
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -247,15 +199,15 @@ class _ReportBugState extends State<ReportBug> {
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    for (int i = 0; i < _images.length; i++)
+                    for (int i = 0; i < state.images.length; i++)
                       _ImageThumbnail(
-                        bytes: _images[i].bytes!,
-                        onRemove: () => _removeImage(i),
+                        bytes: state.images[i].bytes!,
+                        onRemove: () => notifier.removeImage(i),
                       ),
-                    if (_images.length < maxBugReportImages)
+                    if (state.images.length < maxBugReportImages)
                       InkWell(
                         borderRadius: BorderRadius.circular(12),
-                        onTap: _pickImages,
+                        onTap: notifier.pickImages,
                         child: Container(
                           width: 76,
                           height: 76,
@@ -292,8 +244,8 @@ class _ReportBugState extends State<ReportBug> {
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
-                    onPressed: _isSubmitting ? null : _submit,
-                    icon: _isSubmitting
+                    onPressed: state.isSubmitting ? null : _submit,
+                    icon: state.isSubmitting
                         ? SizedBox(
                             width: 20,
                             height: 20,
@@ -320,7 +272,7 @@ class _ReportBugState extends State<ReportBug> {
                           )
                         : const Icon(Icons.send_rounded),
                     label: Text(
-                      _isSubmitting ? 'Sending...' : 'Send Report',
+                      state.isSubmitting ? 'Sending...' : 'Send Report',
                       style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
                     ),
                   ),
