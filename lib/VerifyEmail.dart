@@ -93,9 +93,22 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        elevation: 0,
+        backgroundColor: app_color,
+        elevation: 6,
+        iconTheme: const IconThemeData(color: Colors.white),
+        centerTitle: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+        ),
         leading: BackButton(onPressed: () => Navigator.of(context).pop(false)),
+        title: Text(
+          'Verify Email',
+          style: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
       ),
       body: SafeArea(
         child: Center(
@@ -104,13 +117,24 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.mark_email_read_rounded, size: 56, color: app_color),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: app_color.withOpacity(0.1),
+                  ),
+                  child: Icon(
+                    Icons.mark_email_read_rounded,
+                    size: 32,
+                    color: app_color,
+                  ),
+                ),
                 const SizedBox(height: 20),
                 Text(
                   'Verify your email',
                   style: GoogleFonts.poppins(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
