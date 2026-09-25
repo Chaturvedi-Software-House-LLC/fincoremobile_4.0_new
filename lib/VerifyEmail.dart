@@ -231,6 +231,21 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                // Verifying is a deferrable prompt, not a gate (see this
+                // screen's class doc-comment) - the back arrow already
+                // allows leaving, but it's easy to miss up in the AppBar
+                // next to a big "Verify" button and code-entry field, so
+                // "Skip for now" makes that explicit instead of relying on
+                // the user to notice the back arrow is tappable.
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: Text(
+                    'Skip for now',
+                    style: GoogleFonts.poppins(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
                 TextButton(
                   onPressed: _logout,
                   child: Text(
