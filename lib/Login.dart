@@ -10,6 +10,7 @@ import 'package:open_file/open_file.dart';
 import 'package:flutter/services.dart';
 import 'Help.dart';
 import 'CompanySelectTallyOauth.dart';
+import 'VerifyEmail.dart';
 import 'constants.dart';
 import 'package:flutter/material.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
@@ -149,7 +150,7 @@ class _LoginPageState extends ConsumerState<Login>
     FocusManager.instance.primaryFocus?.unfocus();
 
     try {
-      await AuthRepository.instance.verifyLoginOtp(
+      final session = await AuthRepository.instance.verifyLoginOtp(
         otpToken: _s.otpToken,
         otp: enteredOTP,
         fallbackUserName: usernamee,
@@ -162,7 +163,7 @@ class _LoginPageState extends ConsumerState<Login>
       _login_.update((s) => s.copyWith(isOtpVerifyingProgress: false));
 
       if (!await _isLicenseUsable()) return;
-      _proceedToCompanySelection();
+      _proceedOrRequireEmailVerification(session);
     } on ApiException catch (e) {
       isOTPVerified = false;
       isAnotherDevice = false;
@@ -984,7 +985,7 @@ class _LoginPageState extends ConsumerState<Login>
   /// half-authed session is worse than a clear error up front.
   Future<bool> _loginToTallyOauth() async {
     try {
-      await AuthRepository.instance.loginToTallyOauth(
+      _lastLoginSession = await AuthRepository.instance.loginToTallyOauth(
         userName: usernamee,
         password: passwordd,
       );
@@ -996,6 +997,33 @@ class _LoginPageState extends ConsumerState<Login>
       showAppMessage(context, 'Could not reach the server. Please try again.');
       return false;
     }
+  }
+
+  /// Set by [_loginToTallyOauth] on success (direct-login path) so
+  /// [_directlogin] can decide whether to route through [VerifyEmail]
+  /// before company selection; the OTP-login path gets its own result
+  /// straight from [AuthRepository.verifyLoginOtp]/`sendResult.session`
+  /// instead, since it never calls this method.
+  LoginSessionResult? _lastLoginSession;
+
+  /// An email-shaped login whose account has not verified its email is
+  /// sent to [VerifyEmail] instead of company selection - on every such
+  /// login, not just the first, until the account's email is actually
+  /// verified. A username-style login always skips this regardless of
+  /// `emailVerified`. Restores the login-blocking gate (see this app's
+  /// history: it was briefly moved to a dismissible Dashboard banner,
+  /// then reverted back to blocking per updated product direction).
+  void _proceedOrRequireEmailVerification(LoginSessionResult? session) {
+    if (isEmail(usernamee) && session != null && !session.emailVerified) {
+      if (mounted) _login_.update((s) => s.copyWith(isLoading: false));
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => VerifyEmail(email: session.email ?? usernamee),
+        ),
+      );
+      return;
+    }
+    _proceedToCompanySelection();
   }
 
   /// tally-oauth is now the sole driver of login (Phase 6) - no legacy
@@ -1120,7 +1148,7 @@ class _LoginPageState extends ConsumerState<Login>
     // and resets loading state itself when it returns false.
     if (!await _isLicenseUsable()) return;
 
-    _proceedToCompanySelection();
+    _proceedOrRequireEmailVerification(_lastLoginSession);
   }
 
   /// Step 1 of the real, backend-verified login-OTP flow: verifies the
@@ -1165,7 +1193,7 @@ class _LoginPageState extends ConsumerState<Login>
     if (!sendResult.otpRequired) {
       _login_.update((s) => s.copyWith(isLoading: false));
       if (!await _isLicenseUsable()) return;
-      _proceedToCompanySelection();
+      _proceedOrRequireEmailVerification(sendResult.session);
       return;
     }
 

@@ -32,15 +32,6 @@ class DashboardState {
   final bool isExpired;
   final bool initialized;
 
-  // The account's `emailVerifiedAt` at last login (or last time
-  // [DashboardNotifier.markEmailVerified] ran) - drives the "verify your
-  // email" banner Dashboard.dart shows instead of the old blocking
-  // Login.dart -> VerifyEmail redirect. `unverifiedEmail` is null once
-  // verified (or for a username-login account that never had this pref
-  // set at all - see `isEmailVerified`'s default below).
-  final bool isEmailVerified;
-  final String? unverifiedEmail;
-
   final String startdateText;
   final String enddateText;
   final String startDateString;
@@ -95,8 +86,6 @@ class DashboardState {
     this.licenseExpiry,
     this.isExpired = false,
     this.initialized = false,
-    this.isEmailVerified = true,
-    this.unverifiedEmail,
     this.startdateText = '',
     this.enddateText = '',
     this.startDateString = '',
@@ -153,9 +142,6 @@ class DashboardState {
     String? licenseExpiry,
     bool? isExpired,
     bool? initialized,
-    bool? isEmailVerified,
-    String? unverifiedEmail,
-    bool clearUnverifiedEmail = false,
     String? startdateText,
     String? enddateText,
     String? startDateString,
@@ -205,10 +191,6 @@ class DashboardState {
       licenseExpiry: licenseExpiry ?? this.licenseExpiry,
       isExpired: isExpired ?? this.isExpired,
       initialized: initialized ?? this.initialized,
-      isEmailVerified: isEmailVerified ?? this.isEmailVerified,
-      unverifiedEmail: clearUnverifiedEmail
-          ? null
-          : (unverifiedEmail ?? this.unverifiedEmail),
       startdateText: startdateText ?? this.startdateText,
       enddateText: enddateText ?? this.enddateText,
       startDateString: startDateString ?? this.startDateString,
@@ -324,44 +306,6 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     await _prefs.setString('number_scale', _numberScaleToString(scale));
   }
 
-  /// Called after the "verify your email" banner's VerifyEmail.dart screen
-  /// pops back having actually succeeded - dismisses the banner immediately
-  /// without needing a fresh login, and persists it so the banner stays
-  /// gone across app restarts (VerifyEmail.dart's own success path also
-  /// sets this same pref, this just keeps this already-open Dashboard
-  /// instance's state in sync with it).
-  Future<void> markEmailVerified() async {
-    state = state.copyWith(isEmailVerified: true, clearUnverifiedEmail: true);
-    if (_prefsReady) await _prefs.setString('email_verified', 'True');
-  }
-
-  /// This `autoDispose` provider's instance can end up reused (not
-  /// actually disposed) instead of freshly recreated when the app logs
-  /// out and back in as a different account in quick succession - the
-  /// last listener is removed and the first new listener attached within
-  /// the same frame, so Riverpod never sees the listener count hit zero
-  /// and skips disposal. That otherwise leaves the *previous* account's
-  /// `isEmailVerified`/`unverifiedEmail` on screen for the new one, since
-  /// this reused instance's own constructor-triggered `_init()` never
-  /// reruns. Dashboard.dart's `initState` calls this unconditionally on
-  /// every mount to force a fresh read - cheap and idempotent (unlike
-  /// re-running all of `_init()`, which would also refire every dashboard
-  /// data fetch), so it's safe to call even for a genuinely fresh
-  /// instance whose own `_init()` is still in flight.
-  Future<void> refreshEmailVerificationStatus() async {
-    final prefs = _prefsReady ? _prefs : await SharedPreferences.getInstance();
-    if (!_prefsReady) {
-      _prefs = prefs;
-      _prefsReady = true;
-    }
-    final isEmailVerified = (prefs.getString('email_verified') ?? 'True') == 'True';
-    state = state.copyWith(
-      isEmailVerified: isEmailVerified,
-      unverifiedEmail: isEmailVerified ? null : prefs.getString('email_nav'),
-      clearUnverifiedEmail: isEmailVerified,
-    );
-  }
-
   Future<void> _init() async {
     _prefs = await SharedPreferences.getInstance();
     _prefsReady = true;
@@ -369,12 +313,6 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     final company = _prefs.getString('company_name') ?? '';
     final serialNo = _prefs.getString('serial_no');
     final licenseExpiry = _prefs.getString('license_expiry');
-    // Defaults to 'True' (verified/no banner) rather than 'False' - an
-    // existing session from before this pref existed, or a username-login
-    // account (auth_repository.dart never sets it to 'False' for those),
-    // must not suddenly show the banner.
-    final isEmailVerified = (_prefs.getString('email_verified') ?? 'True') == 'True';
-    final unverifiedEmail = isEmailVerified ? null : _prefs.getString('email_nav');
     final baseCurrency = _prefs.getString('base_currency') ?? '';
     debugPrint('base_currency -> $baseCurrency');
 
@@ -477,9 +415,6 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
       serialNo: serialNo,
       licenseExpiry: licenseExpiry,
       isExpired: isExpired,
-      isEmailVerified: isEmailVerified,
-      unverifiedEmail: unverifiedEmail,
-      clearUnverifiedEmail: isEmailVerified,
       decimal: decimal,
       selectedScale: selectedScale,
       currencySymbol: currencySymbol,

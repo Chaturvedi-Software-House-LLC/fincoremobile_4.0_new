@@ -3,18 +3,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 
+import 'CompanySelectTallyOauth.dart';
+import 'Login.dart';
+import 'api/auth_repository.dart';
 import 'constants.dart';
 import 'providers/verify_email_notifier.dart';
 import 'widgets/entry_widgets.dart';
 
-/// Opened from Dashboard.dart's "verify your email" banner (shown whenever
-/// the signed-in account has an email on file that isn't verified yet -
-/// see `DashboardState.isEmailVerified`). Login itself no longer blocks on
-/// this (it used to redirect here instead of reaching the dashboard at
-/// all - see Login.dart's `_proceedToCompanySelection`, which now always
-/// runs unconditionally); verifying is a soft prompt the account can defer
-/// indefinitely, not a gate. Pops back to the dashboard with `true` on
-/// success so it can dismiss the banner immediately without a fresh login.
+/// Shown right after an email-style login when the account's email isn't
+/// verified yet (see Login.dart's `_proceedOrRequireEmailVerification`,
+/// which checks `LoginSessionResult.emailVerified` before ever reaching
+/// [CompanySelectTallyOauth]). A username-style login never lands here.
+/// Reappears on every subsequent login until the email is actually
+/// verified - there is deliberately no "skip" action, only "log out" for
+/// someone who logged in with the wrong account. (This app briefly moved
+/// this to a dismissible Dashboard banner instead of blocking - reverted
+/// back to blocking per updated product direction.)
 class VerifyEmail extends ConsumerStatefulWidget {
   const VerifyEmail({super.key, required this.email});
 
@@ -70,7 +74,20 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
       return;
     }
     if (!mounted) return;
-    Navigator.of(context).pop(true);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const CompanySelectTallyOauth()),
+    );
+  }
+
+  Future<void> _logout() async {
+    await AuthRepository.instance.logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => const Login(username: '', password: ''),
+      ),
+      (route) => false,
+    );
   }
 
   @override
@@ -82,12 +99,14 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
       appBar: AppBar(
         backgroundColor: app_color,
         elevation: 6,
-        iconTheme: const IconThemeData(color: Colors.white),
+        // No back button - this is a forced gate, not a dismissible
+        // screen (see the class doc-comment). "Not you? Log out" below
+        // is the only way out besides actually verifying.
+        automaticallyImplyLeading: false,
         centerTitle: true,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
         ),
-        leading: BackButton(onPressed: () => Navigator.of(context).pop(false)),
         title: Text(
           'Verify Email',
           style: GoogleFonts.poppins(
@@ -218,16 +237,10 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Verifying is a deferrable prompt, not a gate (see this
-                // screen's class doc-comment) - the back arrow already
-                // allows leaving, but it's easy to miss up in the AppBar
-                // next to a big "Verify" button and code-entry field, so
-                // "Skip for now" makes that explicit instead of relying on
-                // the user to notice the back arrow is tappable.
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
+                  onPressed: _logout,
                   child: Text(
-                    'Skip for now',
+                    'Not you? Log out',
                     style: GoogleFonts.poppins(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
