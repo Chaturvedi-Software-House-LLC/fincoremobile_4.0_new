@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -130,6 +131,17 @@ abstract class BaseApiClient {
       // per-device tracking) - sent on every request, not just those two,
       // since it's harmless elsewhere and one place to maintain.
       'x-device-id': await TokenStore.instance.deviceId,
+      // tally-oauth's per-class (mobile/desktop) single-active-session
+      // rule reads this at login/login-otp send/verify to decide which of
+      // at most two session slots a login competes for - unset or unknown
+      // was already treated as "mobile" server-side for backward
+      // compatibility, but this app sends it explicitly now rather than
+      // relying on that default forever (e.g. once a desktop client
+      // exists, an app that never asserted its own platform would keep
+      // silently claiming the mobile slot). Harmless on every other
+      // endpoint, so sent unconditionally like x-device-id above rather
+      // than only on the auth calls that actually read it.
+      'x-client-platform': Platform.isIOS ? 'ios' : 'android',
     };
     // An ephemeral, one-off bearer (e.g. a login-OTP token) that isn't a
     // stored session at all - TokenStore/refresh has nothing to do with
