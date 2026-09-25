@@ -1006,15 +1006,24 @@ class _LoginPageState extends ConsumerState<Login>
   /// instead, since it never calls this method.
   LoginSessionResult? _lastLoginSession;
 
-  /// An email-shaped login whose account has not verified its email is
-  /// sent to [VerifyEmail] instead of company selection - on every such
-  /// login, not just the first, until the account's email is actually
-  /// verified. A username-style login always skips this regardless of
-  /// `emailVerified`. Restores the login-blocking gate (see this app's
-  /// history: it was briefly moved to a dismissible Dashboard banner,
-  /// then reverted back to blocking per updated product direction).
+  /// An account with a real, unverified email on file is sent to
+  /// [VerifyEmail] instead of company selection - on every such login,
+  /// not just the first, until the account's email is actually verified.
+  /// Gated purely on `session.emailVerified` (computed server-side by
+  /// AuthRepository as `!hasEmail || emailVerifiedAt != null`) rather
+  /// than on whatever the user *typed* into the login field - a
+  /// username-style login for an account that DOES have a real email on
+  /// file must still be gated (the account has something to verify
+  /// regardless of which field they logged in with), while an account
+  /// with no real email at all is never gated (nothing to verify),
+  /// however they logged in. `session.emailVerified == false` can only
+  /// occur when the account genuinely has a non-empty email, so
+  /// `session.email` is never null/empty in that branch. Restores the
+  /// login-blocking gate (see this app's history: it was briefly moved to
+  /// a dismissible Dashboard banner, then reverted back to blocking per
+  /// updated product direction).
   void _proceedOrRequireEmailVerification(LoginSessionResult? session) {
-    if (isEmail(usernamee) && session != null && !session.emailVerified) {
+    if (session != null && !session.emailVerified) {
       if (mounted) _login_.update((s) => s.copyWith(isLoading: false));
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
