@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 
-import 'Login.dart';
-import 'api/auth_repository.dart';
 import 'constants.dart';
 import 'providers/verify_email_notifier.dart';
 import 'widgets/entry_widgets.dart';
@@ -73,17 +71,6 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
     }
     if (!mounted) return;
     Navigator.of(context).pop(true);
-  }
-
-  Future<void> _logout() async {
-    await AuthRepository.instance.logout();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => const Login(username: '', password: ''),
-      ),
-      (route) => false,
-    );
   }
 
   @override
@@ -241,15 +228,6 @@ class _VerifyEmailState extends ConsumerState<VerifyEmail> {
                   onPressed: () => Navigator.of(context).pop(false),
                   child: Text(
                     'Skip for now',
-                    style: GoogleFonts.poppins(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: _logout,
-                  child: Text(
-                    'Not you? Log out',
                     style: GoogleFonts.poppins(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
